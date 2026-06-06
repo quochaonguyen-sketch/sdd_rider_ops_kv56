@@ -1,0 +1,14 @@
+[
+  {
+    "rider_code": "R001",
+    "name": "Nguyen Van A",
+    "phone": "0900000001",
+    "zone": "Binh Thanh",
+    "status": "ON",
+    "shift": "morning",
+    "raw_data": {
+      "source": "python_import",
+      "original_row": 1
+    }
+  }
+]

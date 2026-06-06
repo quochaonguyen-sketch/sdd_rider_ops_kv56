@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Profile {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email     String?
+  fullName  String?  @map("full_name")
+  role      String   @default("viewer")
+  zoneId    String?  @map("zone_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  zone      Zone?    @relation(fields: [zoneId], references: [id])
+
+  @@map("profiles")
+}
+
+model Zone {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String    @unique
+  area      String?
+  hub       String?
+  rawData   Json?     @map("raw_data")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  profiles  Profile[]
+  riders    Rider[]
+
+  @@map("zones")
+}
+
+model Rider {
+  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  riderCode    String          @unique @map("rider_code")
+  name         String?
+  phone        String?
+  zoneId       String?         @map("zone_id") @db.Uuid
+  status       String?
+  currentShift String?         @map("current_shift")
+  rawData      Json?           @map("raw_data")
+  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  zone         Zone?           @relation(fields: [zoneId], references: [id])
+  attendance   AttendanceLog[]
+
+  @@map("riders")
+}
+
+model AttendanceLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  riderId   String?  @map("rider_id") @db.Uuid
+  riderCode String   @map("rider_code")
+  workDate  DateTime @map("work_date") @db.Date
+  shift     String?
+  status    String
+  note      String?
+  rawData   Json?    @map("raw_data")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  rider     Rider?   @relation(fields: [riderId], references: [id])
+
+  @@index([workDate])
+  @@index([status])
+  @@index([riderCode])
+  @@map("attendance_logs")
+}
+
+model ImportBatch {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  source       String?
+  totalRecords Int      @default(0) @map("total_records")
+  successCount Int      @default(0) @map("success_count")
+  errorCount   Int      @default(0) @map("error_count")
+  rawData      Json?    @map("raw_data")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("import_batches")
+}
+
+model ActivityLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id") @db.Uuid
+  action     String
+  message    String
+  rawData    Json?    @map("raw_data")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([entityType])
+  @@index([createdAt])
+  @@map("activity_logs")
+}

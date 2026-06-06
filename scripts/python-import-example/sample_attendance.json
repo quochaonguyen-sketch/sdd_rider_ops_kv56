@@ -1,0 +1,13 @@
+[
+  {
+    "rider_code": "R001",
+    "work_date": "2026-06-06",
+    "shift": "morning",
+    "status": "ON",
+    "note": "Scheduled shift",
+    "raw_data": {
+      "source": "python_import",
+      "original_row": 1
+    }
+  }
+]
