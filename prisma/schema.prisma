@@ -36,18 +36,28 @@ model Zone {
 }
 
 model Rider {
-  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  riderCode    String          @unique @map("rider_code")
-  name         String?
-  phone        String?
-  zoneId       String?         @map("zone_id") @db.Uuid
-  status       String?
-  currentShift String?         @map("current_shift")
-  rawData      Json?           @map("raw_data")
-  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
-  zone         Zone?           @relation(fields: [zoneId], references: [id])
-  attendance   AttendanceLog[]
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kv               String?
+  homeDistrict     String?         @map("home_district")
+  cot              String?
+  riderCode        String          @unique @map("rider_code")
+  fullName         String?         @map("full_name")
+  pickupDistrict   String?         @map("pickup_district")
+  pickupWard       String?         @map("pickup_ward")
+  pointName        String?         @map("point_name")
+  deliveryDistrict String?         @map("delivery_district")
+  deliveryWard     String?         @map("delivery_ward")
+  avatarUrl        String?         @map("avatar_url")
+  name             String?
+  phone            String?
+  zoneId           String?         @map("zone_id") @db.Uuid
+  status           String          @default("active")
+  currentShift     String?         @map("current_shift")
+  rawData          Json?           @map("raw_data")
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  zone             Zone?           @relation(fields: [zoneId], references: [id])
+  attendance       AttendanceLog[]
 
   @@map("riders")
 }
@@ -68,6 +78,7 @@ model AttendanceLog {
   @@index([workDate])
   @@index([status])
   @@index([riderCode])
+  @@unique([riderCode, workDate])
   @@map("attendance_logs")
 }
 

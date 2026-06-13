@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma/client";
 import {
   attendanceImportItemSchema,
@@ -8,8 +7,8 @@ import {
   type AttendanceImportItem,
 } from "@/lib/validators/import";
 
-function toJson(value: unknown): Prisma.InputJsonValue {
-  return value as Prisma.InputJsonValue;
+function toJson(value: unknown) {
+  return value as never;
 }
 
 export async function POST(request: Request) {
@@ -47,7 +46,6 @@ export async function POST(request: Request) {
         where: {
           riderCode: record.rider_code,
           workDate: record.work_date,
-          shift: record.shift ?? null,
         },
         select: { id: true },
       });
@@ -57,6 +55,7 @@ export async function POST(request: Request) {
             where: { id: existing.id },
             data: {
               riderId: rider?.id,
+              shift: record.shift,
               status: record.status,
               note: record.note,
               rawData: toJson(record.raw_data ?? record),

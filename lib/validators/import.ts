@@ -1,13 +1,22 @@
 import { z } from "zod";
 
 export const riderImportItemSchema = z.object({
+  kv: z.string().optional().nullable(),
+  home_district: z.string().optional().nullable(),
+  cot: z.string().optional().nullable(),
   rider_code: z.string().min(1),
+  full_name: z.string().optional().nullable(),
+  pickup_district: z.string().optional().nullable(),
+  pickup_ward: z.string().optional().nullable(),
+  point_name: z.string().optional().nullable(),
+  delivery_district: z.string().optional().nullable(),
+  delivery_ward: z.string().optional().nullable(),
   name: z.string().optional().nullable(),
   phone: z.string().optional().nullable(),
   zone: z.string().optional().nullable(),
   area: z.string().optional().nullable(),
   hub: z.string().optional().nullable(),
-  status: z.string().optional().nullable(),
+  status: z.enum(["active", "inactive"]).default("active"),
   shift: z.string().optional().nullable(),
   raw_data: z.record(z.string(), z.unknown()).optional().nullable(),
 });

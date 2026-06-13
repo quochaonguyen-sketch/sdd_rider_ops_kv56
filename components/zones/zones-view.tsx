@@ -9,6 +9,7 @@ import type { AttendanceLog, Rider, Zone } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { HcmZoneMap } from "@/components/zones/hcm-zone-map";
 
 export function ZonesView() {
   const [zones, setZones] = useState<Zone[]>([]);
@@ -23,8 +24,8 @@ export function ZonesView() {
     const today = format(new Date(), "yyyy-MM-dd");
     const [zoneResult, riderResult, attendanceResult] = await Promise.all([
       supabase.from("zones").select("*").order("name"),
-      supabase.from("riders").select("*, zones(id,name,area,hub)").order("name"),
-      supabase.from("attendance_logs").select("*, riders(id,name,rider_code,zone_id,zones(id,name))").eq("work_date", today),
+      supabase.from("riders").select("*, zones(id,name,area,hub)").order("full_name"),
+      supabase.from("attendance_logs").select("*, riders(id,full_name,rider_code,zone_id,zones(id,name))").eq("work_date", today),
     ]);
 
     const firstError = zoneResult.error ?? riderResult.error ?? attendanceResult.error;
@@ -65,19 +66,21 @@ export function ZonesView() {
   }, [attendance, riders, zones]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-950">Zones</h1>
-          <p className="text-sm text-slate-500">Zone roster and ON/OFF counts for today.</p>
+          <h1 className="text-xl font-bold text-slate-950 sm:text-2xl">Zones</h1>
+          <p className="mt-0.5 text-sm text-slate-500">Quân số và trạng thái theo khu vực.</p>
         </div>
-        <Button type="button" variant="secondary" onClick={refresh} disabled={loading}>
+        <Button type="button" variant="secondary" className="shrink-0 px-3" onClick={refresh} disabled={loading}>
           <RefreshCcw size={16} />
-          Refresh
+          <span className="hidden sm:inline">Refresh</span>
         </Button>
       </div>
 
       {error ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
+
+      <HcmZoneMap riders={riders} />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {summaries.map(({ zone, total, on, off }) => (

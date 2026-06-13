@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma/client";
 import { importBodySchema, riderImportItemSchema, type RiderImportItem } from "@/lib/validators/import";
 
-function toJson(value: unknown): Prisma.InputJsonValue {
-  return value as Prisma.InputJsonValue;
+function toJson(value: unknown) {
+  return value as never;
 }
 
 export async function POST(request: Request) {
@@ -59,8 +58,17 @@ export async function POST(request: Request) {
       const rider = await prisma.rider.upsert({
         where: { riderCode: record.rider_code },
         create: {
+          kv: record.kv,
+          homeDistrict: record.home_district,
+          cot: record.cot,
           riderCode: record.rider_code,
-          name: record.name,
+          fullName: record.full_name ?? record.name,
+          pickupDistrict: record.pickup_district,
+          pickupWard: record.pickup_ward,
+          pointName: record.point_name,
+          deliveryDistrict: record.delivery_district,
+          deliveryWard: record.delivery_ward,
+          name: record.full_name ?? record.name,
           phone: record.phone,
           zoneId: zone?.id,
           status: record.status,
@@ -68,7 +76,16 @@ export async function POST(request: Request) {
           rawData: toJson(record.raw_data ?? record),
         },
         update: {
-          name: record.name,
+          kv: record.kv,
+          homeDistrict: record.home_district,
+          cot: record.cot,
+          fullName: record.full_name ?? record.name,
+          pickupDistrict: record.pickup_district,
+          pickupWard: record.pickup_ward,
+          pointName: record.point_name,
+          deliveryDistrict: record.delivery_district,
+          deliveryWard: record.delivery_ward,
+          name: record.full_name ?? record.name,
           phone: record.phone,
           zoneId: zone?.id,
           status: record.status,

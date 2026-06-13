@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bike } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -19,15 +18,17 @@ export function LoginForm() {
     setLoading(true);
     setError(null);
 
-    const { error: authError } = await createClient().auth.signInWithPassword({
-      email,
-      password,
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
     });
+    const result = (await response.json().catch(() => null)) as { error?: string } | null;
 
     setLoading(false);
 
-    if (authError) {
-      setError(authError.message);
+    if (!response.ok) {
+      setError(result?.error ?? "Unable to sign in");
       return;
     }
 

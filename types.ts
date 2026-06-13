@@ -13,8 +13,16 @@ export type Zone = {
 export type Rider = {
   id: string;
   rider_code: string;
-  name: string | null;
-  phone: string | null;
+  kv: string | null;
+  home_district: string | null;
+  cot: string | null;
+  full_name: string | null;
+  pickup_district: string | null;
+  pickup_ward: string | null;
+  point_name: string | null;
+  delivery_district: string | null;
+  delivery_ward: string | null;
+  avatar_url: string | null;
   zone_id: string | null;
   status: string | null;
   current_shift: string | null;
@@ -35,7 +43,7 @@ export type AttendanceLog = {
   raw_data: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
-  riders?: Pick<Rider, "id" | "name" | "rider_code" | "zone_id"> & {
+  riders?: Pick<Rider, "id" | "full_name" | "rider_code" | "zone_id"> & {
     zones?: Pick<Zone, "id" | "name"> | null;
   };
 };

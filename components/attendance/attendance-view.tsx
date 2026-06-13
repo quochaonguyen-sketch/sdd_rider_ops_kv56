@@ -1,155 +1,1008 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { format } from "date-fns";
-import { RefreshCcw } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import {
+  addMonths,
+  eachDayOfInterval,
+  endOfMonth,
+  format,
+  parseISO,
+  startOfMonth,
+  subMonths,
+} from "date-fns";
+import { vi } from "date-fns/locale";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Pencil,
+  RefreshCcw,
+  Search,
+  Upload,
+  UsersRound,
+  X,
+} from "lucide-react";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
-import type { AttendanceLog, Rider, Zone } from "@/types";
+import type { AttendanceLog, Rider } from "@/types";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 
-export function AttendanceView() {
-  const [logs, setLogs] = useState<AttendanceLog[]>([]);
+type ScheduleStatus = "" | "ON" | "OFF_WEEKLY" | "OFF_APPROVED" | "OFF_UNEXPECTED";
+
+type ScheduleResponse = {
+  success: boolean;
+  can_edit?: boolean;
+  riders?: Rider[];
+  logs?: AttendanceLog[];
+  error?: string;
+};
+
+type ScheduleUpdate = {
+  rider_id: string;
+  work_date: string;
+  status: ScheduleStatus;
+  shift?: string | null;
+  note?: string | null;
+};
+
+type CellEditor = {
+  rider: Rider;
+  date: string;
+  status: ScheduleStatus;
+  shift: string;
+  note: string;
+};
+
+type ImportIssue = {
+  row: number;
+  rider_code?: string;
+  date?: string;
+  error: string;
+};
+
+const statusOptions: Array<{ value: ScheduleStatus; label: string }> = [
+  { value: "ON", label: "ON" },
+  { value: "OFF_WEEKLY", label: "OFF tuần" },
+  { value: "OFF_APPROVED", label: "OFF phép" },
+  { value: "OFF_UNEXPECTED", label: "OFF đột xuất" },
+];
+
+export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }: { initialMonth?: string }) {
   const [riders, setRiders] = useState<Rider[]>([]);
-  const [zones, setZones] = useState<Zone[]>([]);
-  const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [zoneId, setZoneId] = useState("all");
-  const [riderCode, setRiderCode] = useState("all");
-  const [status, setStatus] = useState("all");
+  const [logs, setLogs] = useState<AttendanceLog[]>([]);
+  const [month, setMonth] = useState(initialMonth);
+  const [selectedDate, setSelectedDate] = useState(
+    initialMonth === format(new Date(), "yyyy-MM") ? format(new Date(), "yyyy-MM-dd") : `${initialMonth}-01`,
+  );
+  const [query, setQuery] = useState("");
+  const [kv, setKv] = useState("all");
+  const [cot, setCot] = useState("all");
+  const [deliveryDistrict, setDeliveryDistrict] = useState("all");
+  const [rosterStatus, setRosterStatus] = useState("active");
+  const [bulkStatus, setBulkStatus] = useState<ScheduleStatus>("ON");
+  const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
+  const [importIssues, setImportIssues] = useState<ImportIssue[]>([]);
+  const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
+  const [editor, setEditor] = useState<CellEditor | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const desktopScrollRef = useRef<HTMLDivElement>(null);
+  const realtimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const busyRef = useRef(false);
+  const [desktopStartIndex, setDesktopStartIndex] = useState(0);
+  const deferredQuery = useDeferredValue(query);
 
   const load = useCallback(async () => {
-    const supabase = createClient();
+    setLoading(true);
     setError(null);
-    const [logResult, riderResult, zoneResult] = await Promise.all([
-      supabase
-        .from("attendance_logs")
-        .select("*, riders(id,name,rider_code,zone_id,zones(id,name))")
-        .order("work_date", { ascending: false })
-        .order("created_at", { ascending: false })
-        .limit(500),
-      supabase.from("riders").select("*, zones(id,name,area,hub)").order("name"),
-      supabase.from("zones").select("*").order("name"),
-    ]);
+    const response = await fetch(`/api/attendance/schedule?month=${month}`, { cache: "no-store" });
+    const result = (await response.json().catch(() => null)) as ScheduleResponse | null;
 
-    const firstError = logResult.error ?? riderResult.error ?? zoneResult.error;
-    if (firstError) {
-      setError(firstError.message);
+    if (!response.ok || !result?.success) {
+      setError(result?.error ?? "Không thể tải lịch rider");
     } else {
-      setLogs((logResult.data ?? []) as AttendanceLog[]);
-      setRiders((riderResult.data ?? []) as Rider[]);
-      setZones((zoneResult.data ?? []) as Zone[]);
+      setRiders(result.riders ?? []);
+      setLogs(result.logs ?? []);
+      setCanEdit(Boolean(result.can_edit));
     }
     setLoading(false);
-  }, []);
+  }, [month]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 
-  const refresh = useCallback(() => {
-    void load();
+  useEffect(() => {
+    busyRef.current = importing || savingCells.size > 0;
+  }, [importing, savingCells]);
+
+  const requestRealtimeRefresh = useCallback(() => {
+    if (busyRef.current) return;
+    if (realtimeTimerRef.current) clearTimeout(realtimeTimerRef.current);
+    realtimeTimerRef.current = setTimeout(() => {
+      void load();
+    }, 900);
   }, [load]);
 
-  useSupabaseRealtime({ table: "attendance_logs", onChange: refresh });
-  useSupabaseRealtime({ table: "riders", onChange: refresh });
+  useEffect(() => {
+    return () => {
+      if (realtimeTimerRef.current) clearTimeout(realtimeTimerRef.current);
+    };
+  }, []);
 
-  const filtered = useMemo(() => {
-    return logs.filter((log) => {
-      const matchesDate = !date || log.work_date === date;
-      const matchesRider = riderCode === "all" || log.rider_code === riderCode;
-      const matchesStatus = status === "all" || log.status?.toUpperCase() === status;
-      const matchesZone = zoneId === "all" || log.riders?.zone_id === zoneId;
-      return matchesDate && matchesRider && matchesStatus && matchesZone;
+  useSupabaseRealtime({ table: "attendance_logs", onChange: requestRealtimeRefresh });
+  useSupabaseRealtime({ table: "riders", onChange: requestRealtimeRefresh });
+
+  const monthDate = useMemo(() => parseISO(`${month}-01`), [month]);
+  const days = useMemo(
+    () => eachDayOfInterval({ start: startOfMonth(monthDate), end: endOfMonth(monthDate) }),
+    [monthDate],
+  );
+
+  const kvOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.kv)), [riders]);
+  const cotOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.cot)), [riders]);
+  const deliveryDistrictOptions = useMemo(
+    () => uniqueOptions(riders.map((rider) => rider.delivery_district)),
+    [riders],
+  );
+
+  const filteredRiders = useMemo(() => {
+    const normalized = deferredQuery.trim().toLocaleLowerCase("vi");
+    return riders.filter((rider) => {
+      const matchesQuery =
+        !normalized ||
+        [rider.rider_code, rider.full_name, rider.delivery_district, rider.delivery_ward].some((value) =>
+          value?.toLocaleLowerCase("vi").includes(normalized),
+        );
+      return (
+        matchesQuery &&
+        (kv === "all" || rider.kv === kv) &&
+        (cot === "all" || rider.cot === cot) &&
+        (deliveryDistrict === "all" || rider.delivery_district === deliveryDistrict) &&
+        (rosterStatus === "all" || rider.status === rosterStatus)
+      );
     });
-  }, [date, logs, riderCode, status, zoneId]);
+  }, [cot, deferredQuery, deliveryDistrict, kv, riders, rosterStatus]);
+
+  const logMap = useMemo(() => {
+    const riderIdByCode = new Map(riders.map((rider) => [rider.rider_code, rider.id]));
+    const map = new Map<string, AttendanceLog>();
+    for (const log of logs) {
+      const riderId = log.rider_id ?? riderIdByCode.get(log.rider_code);
+      if (!riderId) continue;
+      const key = cellKey(riderId, log.work_date);
+      if (!map.has(key)) map.set(key, log);
+    }
+    return map;
+  }, [logs, riders]);
+
+  const selectedSummary = useMemo(
+    () => summarizeDate(selectedDate, filteredRiders, logMap),
+    [filteredRiders, logMap, selectedDate],
+  );
+
+  const desktopWindow = useMemo(() => {
+    const rowHeight = 74;
+    const overscan = 6;
+    const visibleRows = 18;
+    const maxStart = Math.max(0, filteredRiders.length - visibleRows);
+    const startIndex = Math.min(maxStart, desktopStartIndex);
+    const endIndex = Math.min(filteredRiders.length, startIndex + visibleRows + overscan * 2);
+    return {
+      endIndex,
+      rowHeight,
+      startIndex,
+      topPadding: startIndex * rowHeight,
+      bottomPadding: Math.max(0, (filteredRiders.length - endIndex) * rowHeight),
+      rows: filteredRiders.slice(startIndex, endIndex),
+    };
+  }, [desktopStartIndex, filteredRiders]);
+
+  async function saveUpdates(updates: ScheduleUpdate[], message?: string) {
+    const keys = updates.map((item) => cellKey(item.rider_id, item.work_date));
+    busyRef.current = true;
+    setSavingCells((current) => new Set([...current, ...keys]));
+    setError(null);
+    setSuccess(null);
+
+    const response = await fetch("/api/attendance/schedule", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ updates }),
+    });
+    const result = (await response.json().catch(() => null)) as ScheduleResponse & {
+      cleared?: Array<{ rider_id: string; work_date: string }>;
+    };
+
+    setSavingCells((current) => {
+      const next = new Set(current);
+      keys.forEach((key) => next.delete(key));
+      return next;
+    });
+    busyRef.current = importing;
+
+    if (!response.ok || !result?.success) {
+      setError(result?.error ?? "Không thể cập nhật lịch");
+      await load();
+      return false;
+    }
+
+    const changedKeys = new Set(keys);
+    const riderIdByCode = new Map(riders.map((rider) => [rider.rider_code, rider.id]));
+    setLogs((current) => [
+      ...current.filter((log) => {
+        const riderId = log.rider_id ?? riderIdByCode.get(log.rider_code);
+        return !riderId || !changedKeys.has(cellKey(riderId, log.work_date));
+      }),
+      ...(result.logs ?? []),
+    ]);
+    setSuccess(message ?? "Đã cập nhật lịch rider.");
+    return true;
+  }
+
+  async function updateCell(rider: Rider, date: string, status: ScheduleStatus) {
+    const current = logMap.get(cellKey(rider.id, date));
+    await saveUpdates([
+      {
+        rider_id: rider.id,
+        work_date: date,
+        status: status === "ON" ? "" : status,
+        shift: current?.shift,
+        note: current?.note,
+      },
+    ]);
+  }
+
+  async function applyBulkStatus() {
+    if (!canEdit || filteredRiders.length === 0) return;
+    const label = statusLabel(bulkStatus);
+    if (!window.confirm(`Áp dụng "${label}" cho ${filteredRiders.length} rider ngày ${selectedDate}?`)) return;
+
+    const updates = filteredRiders.map((rider) => {
+      const current = logMap.get(cellKey(rider.id, selectedDate));
+      return {
+        rider_id: rider.id,
+        work_date: selectedDate,
+        status: bulkStatus === "ON" ? "" : bulkStatus,
+        shift: bulkStatus === "ON" ? null : current?.shift,
+        note: bulkStatus === "ON" ? null : current?.note,
+      };
+    });
+    await saveUpdates(updates, `Đã xếp ${label} cho ${filteredRiders.length} rider.`);
+  }
+
+  function openEditor(rider: Rider, date: string) {
+    const current = logMap.get(cellKey(rider.id, date));
+    setEditor({
+      rider,
+      date,
+      status: displayStatus(current?.status),
+      shift: current?.shift ?? "",
+      note: current?.note ?? "",
+    });
+  }
+
+  async function saveEditor(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editor) return;
+    const saved = await saveUpdates([
+      {
+        rider_id: editor.rider.id,
+        work_date: editor.date,
+        status: editor.status === "ON" ? "" : editor.status,
+        shift: editor.status === "ON" ? null : editor.shift,
+        note: editor.status === "ON" ? null : editor.note,
+      },
+    ]);
+    if (saved) setEditor(null);
+  }
+
+  function changeMonth(nextMonth: string) {
+    setMonth(nextMonth);
+    setSelectedDate(`${nextMonth}-01`);
+    setImportIssues([]);
+  }
+
+  async function downloadTemplate() {
+    setDownloadingTemplate(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/attendance/schedule/import?month=${month}`);
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(result?.error ?? "Không thể tải file mẫu");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `lich-rider-${month}.xlsx`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Không thể tải file mẫu");
+    } finally {
+      setDownloadingTemplate(false);
+    }
+  }
+
+  async function importExcel(file: File) {
+    busyRef.current = true;
+    setImporting(true);
+    setError(null);
+    setSuccess(null);
+    setImportIssues([]);
+
+    const body = new FormData();
+    body.set("file", file);
+    body.set("month", month);
+    const response = await fetch("/api/attendance/schedule/import", { method: "POST", body });
+    const result = (await response.json().catch(() => null)) as
+      | {
+          success?: boolean;
+          error?: string;
+          errors?: ImportIssue[];
+          imported?: number;
+          cleared?: number;
+          riders?: number;
+        }
+      | null;
+
+    setImporting(false);
+    busyRef.current = savingCells.size > 0;
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    if (!response.ok || !result?.success) {
+      setError(result?.error ?? "Không thể import lịch rider");
+      setImportIssues(result?.errors ?? []);
+      return;
+    }
+
+    setSuccess(
+      `Đã import ${result.imported ?? 0} ô lịch cho ${result.riders ?? 0} rider${
+        result.cleared ? `, xóa ${result.cleared} ô` : ""
+      }.`,
+    );
+    await load();
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-950">Attendance</h1>
-          <p className="text-sm text-slate-500">Status history with date, zone, rider, and status filters.</p>
+          <h1 className="text-xl font-bold text-slate-950 sm:text-2xl">Lịch rider</h1>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Xếp lịch làm, nghỉ và theo dõi quân số theo từng ngày.
+          </p>
         </div>
-        <Button type="button" variant="secondary" onClick={refresh} disabled={loading}>
-          <RefreshCcw size={16} />
-          Refresh
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void importExcel(file);
+            }}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!canEdit || downloadingTemplate}
+            onClick={() => void downloadTemplate()}
+          >
+            <Download size={16} />
+            <span className="hidden sm:inline">
+              {downloadingTemplate ? "Đang tạo..." : "Tải file mẫu"}
+            </span>
+            <span className="sm:hidden">File mẫu</span>
+          </Button>
+          <Button
+            type="button"
+            disabled={!canEdit || importing}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload size={16} />
+            {importing ? "Đang import..." : "Import Excel"}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            className="size-11 p-0"
+            onClick={() => changeMonth(format(subMonths(monthDate, 1), "yyyy-MM"))}
+          >
+            <ChevronLeft size={18} />
+          </Button>
+          <Input
+            type="month"
+            className="min-w-40 font-semibold"
+            value={month}
+            onChange={(event) => changeMonth(event.target.value)}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            className="size-11 p-0"
+            onClick={() => changeMonth(format(addMonths(monthDate, 1), "yyyy-MM"))}
+          >
+            <ChevronRight size={18} />
+          </Button>
+          <Button type="button" variant="secondary" className="size-11 p-0" onClick={() => void load()}>
+            <RefreshCcw className={loading ? "animate-spin" : ""} size={17} />
+          </Button>
+        </div>
       </div>
 
-      <Card className="grid gap-3 md:grid-cols-4">
-        <Input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-        <Select value={zoneId} onChange={(event) => setZoneId(event.target.value)}>
-          <option value="all">All zones</option>
-          {zones.map((zone) => (
-            <option key={zone.id} value={zone.id}>
-              {zone.name}
-            </option>
+      <div className="grid grid-cols-3 gap-3">
+        <SummaryCard label="Đi làm" value={selectedSummary.on} total={selectedSummary.total} tone="green" />
+        <SummaryCard label="Nghỉ" value={selectedSummary.off} total={selectedSummary.total} tone="red" />
+        <SummaryCard label="ON" value={selectedSummary.defaultOn} total={selectedSummary.total} tone="slate" />
+      </div>
+
+      <Card className="grid gap-3 p-3 sm:p-4 md:grid-cols-2 xl:grid-cols-[1fr_130px_140px_180px_140px]">
+        <label className="relative">
+          <Search className="pointer-events-none absolute left-3 top-2.5 text-slate-400" size={18} />
+          <Input
+            className="pl-10"
+            placeholder="Tìm ID, tên, quận giao, phường giao"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+        <Select value={kv} onChange={(event) => setKv(event.target.value)}>
+          <option value="all">Tất cả KV</option>
+          {kvOptions.map((option) => (
+            <option key={option}>{option}</option>
           ))}
         </Select>
-        <Select value={riderCode} onChange={(event) => setRiderCode(event.target.value)}>
-          <option value="all">All riders</option>
-          {riders.map((rider) => (
-            <option key={rider.id} value={rider.rider_code}>
-              {rider.name ?? rider.rider_code}
-            </option>
+        <Select value={cot} onChange={(event) => setCot(event.target.value)}>
+          <option value="all">Tất cả COT</option>
+          {cotOptions.map((option) => (
+            <option key={option}>{option}</option>
           ))}
         </Select>
-        <Select value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="all">All statuses</option>
-          <option value="ON">ON</option>
-          <option value="OFF">OFF</option>
+        <Select value={deliveryDistrict} onChange={(event) => setDeliveryDistrict(event.target.value)}>
+          <option value="all">Tất cả quận giao</option>
+          {deliveryDistrictOptions.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </Select>
+        <Select value={rosterStatus} onChange={(event) => setRosterStatus(event.target.value)}>
+          <option value="active">Rider active</option>
+          <option value="inactive">Rider inactive</option>
+          <option value="all">Tất cả rider</option>
         </Select>
       </Card>
 
-      {error ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
+      <Card className="grid gap-3 border-blue-100 bg-blue-50 p-3 sm:grid-cols-[180px_1fr_auto] sm:items-end sm:p-4">
+        <label>
+          <span className="mb-1 block text-xs font-bold uppercase text-blue-700">Ngày xếp nhanh</span>
+          <Input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+        </label>
+        <label>
+          <span className="mb-1 block text-xs font-bold uppercase text-blue-700">Trạng thái</span>
+          <Select value={bulkStatus} onChange={(event) => setBulkStatus(event.target.value as ScheduleStatus)}>
+            {statusOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <Button type="button" disabled={!canEdit || loading} onClick={() => void applyBulkStatus()}>
+          <UsersRound size={17} />
+          Áp dụng cho {filteredRiders.length} rider
+        </Button>
+      </Card>
 
-      <Card className="overflow-hidden p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+      {success ? <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{success}</p> : null}
+      {error ? <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
+      {importIssues.length > 0 ? (
+        <Card className="border-red-200 bg-red-50">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-bold text-red-900">File có {importIssues.length} lỗi</h2>
+              <p className="mt-1 text-sm text-red-700">Chưa có dữ liệu nào được import.</p>
+            </div>
+            <Button type="button" variant="ghost" className="size-10 p-0" onClick={() => setImportIssues([])}>
+              <X size={18} />
+            </Button>
+          </div>
+          <div className="mt-3 max-h-72 overflow-auto rounded-lg border border-red-200 bg-white">
+            <table className="w-full min-w-[620px] text-left text-sm">
+              <thead className="sticky top-0 bg-red-100 text-xs uppercase text-red-800">
+                <tr>
+                  <th className="px-3 py-2">Dòng</th>
+                  <th className="px-3 py-2">ID</th>
+                  <th className="px-3 py-2">Ngày</th>
+                  <th className="px-3 py-2">Lỗi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importIssues.map((issue, index) => (
+                  <tr
+                    key={`${issue.row}-${issue.rider_code ?? ""}-${issue.date ?? ""}-${index}`}
+                    className="border-t border-red-100 text-red-800"
+                  >
+                    <td className="px-3 py-2">{issue.row}</td>
+                    <td className="px-3 py-2 font-mono">{issue.rider_code ?? "-"}</td>
+                    <td className="px-3 py-2">{issue.date ?? "-"}</td>
+                    <td className="px-3 py-2">{issue.error}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : null}
+      {!canEdit && !loading ? (
+        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+          Tài khoản viewer chỉ được xem lịch. Admin hoặc leader mới có thể chỉnh sửa.
+        </p>
+      ) : null}
+
+      <div className="md:hidden">
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-3">
+          {days.map((day) => {
+            const date = format(day, "yyyy-MM-dd");
+            const active = date === selectedDate;
+            const summary = summarizeDate(date, filteredRiders, logMap);
+            return (
+              <button
+                key={date}
+                type="button"
+                className={`min-w-16 rounded-xl border px-2 py-2 text-center ${
+                  active
+                    ? "border-slate-950 bg-slate-950 text-white"
+                    : "border-slate-200 bg-white text-slate-700"
+                }`}
+                onClick={() => setSelectedDate(date)}
+              >
+                <span className="block text-[10px] font-semibold uppercase">
+                  {format(day, "EEE", { locale: vi })}
+                </span>
+                <span className="mt-0.5 block text-lg font-bold">{format(day, "dd")}</span>
+                <span className={`mt-1 block text-[10px] ${active ? "text-slate-300" : "text-slate-400"}`}>
+                  {summary.on}/{summary.total}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="space-y-3">
+          {filteredRiders.map((rider) => {
+            const log = logMap.get(cellKey(rider.id, selectedDate));
+            const status = displayStatus(log?.status);
+            const saving = savingCells.has(cellKey(rider.id, selectedDate));
+            return (
+              <Card key={rider.id}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <Link
+                      href={`/attendance/riders/${rider.id}?month=${month}`}
+                      className="block truncate font-bold text-slate-950 underline-offset-4 hover:text-blue-700 hover:underline"
+                    >
+                      {rider.full_name ?? rider.rider_code}
+                    </Link>
+                    <p className="mt-0.5 font-mono text-xs text-slate-500">ID {rider.rider_code}</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <Badge tone="blue">{rider.kv ?? "-"}</Badge>
+                      <Badge tone="amber">{rider.cot ?? "-"}</Badge>
+                      <Badge>Quận {rider.delivery_district ?? "-"}</Badge>
+                      <Badge>Phường {rider.delivery_ward ?? "-"}</Badge>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="size-10 shrink-0 p-0"
+                    disabled={!canEdit}
+                    onClick={() => openEditor(rider, selectedDate)}
+                  >
+                    <Pencil size={16} />
+                  </Button>
+                </div>
+                <StatusSelect
+                  className="mt-4"
+                  value={status}
+                  saving={saving}
+                  disabled={!canEdit}
+                  onChange={(value) => void updateCell(rider, selectedDate, value)}
+                />
+                {log?.note ? <p className="mt-2 text-xs text-slate-500">Ghi chú: {log.note}</p> : null}
+              </Card>
+            );
+          })}
+        </div>
+      </div>
+
+      <Card className="hidden overflow-hidden p-0 md:block">
+        <div
+          ref={desktopScrollRef}
+          className="max-h-[70vh] overflow-auto"
+          onScroll={(event) => {
+            const nextStartIndex = Math.max(0, Math.floor(event.currentTarget.scrollTop / 74) - 6);
+            setDesktopStartIndex((current) => (current === nextStartIndex ? current : nextStartIndex));
+          }}
+        >
+          <table className="min-w-max border-separate border-spacing-0 text-left text-xs">
+            <thead className="sticky top-0 z-30">
               <tr>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Rider</th>
-                <th className="px-4 py-3">Zone</th>
-                <th className="px-4 py-3">Shift</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Note</th>
+                <th className="sticky left-0 z-40 min-w-64 border-b border-r border-slate-200 bg-slate-900 px-4 py-3 text-white">
+                  <p className="text-sm font-bold">Rider</p>
+                  <p className="mt-1 font-normal text-slate-300">{filteredRiders.length} người trong danh sách</p>
+                </th>
+                {days.map((day) => {
+                  const date = format(day, "yyyy-MM-dd");
+                  const summary = summarizeDate(date, filteredRiders, logMap);
+                  const percentage = summary.total ? Math.round((summary.on / summary.total) * 100) : 0;
+                  return (
+                    <th
+                      key={date}
+                      className={`min-w-24 border-b border-r border-slate-200 px-2 py-2 text-center ${
+                        date === selectedDate ? "bg-blue-100" : "bg-slate-50"
+                      }`}
+                    >
+                      <button type="button" className="w-full" onClick={() => setSelectedDate(date)}>
+                        <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                          {format(day, "EEE", { locale: vi })}
+                        </span>
+                        <span className="mt-0.5 block text-base font-black text-slate-950">{format(day, "dd")}</span>
+                        <span
+                          className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                            percentage >= 95
+                              ? "bg-emerald-100 text-emerald-700"
+                              : percentage >= 85
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-red-100 text-red-700"
+                          }`}
+                        >
+                          {summary.on}/{summary.total}
+                        </span>
+                      </button>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
-              {filtered.map((log) => (
-                <tr key={log.id} className="border-b border-slate-100">
-                  <td className="px-4 py-3 text-slate-700">{log.work_date}</td>
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-slate-950">{log.riders?.name ?? log.rider_code}</p>
-                    <p className="text-xs text-slate-500">{log.rider_code}</p>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{log.riders?.zones?.name ?? "-"}</td>
-                  <td className="px-4 py-3 text-slate-600">{log.shift ?? "-"}</td>
-                  <td className="px-4 py-3">
-                    <Badge tone={log.status?.toUpperCase() === "ON" ? "green" : "red"}>{log.status}</Badge>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{log.note ?? "-"}</td>
+              {desktopWindow.topPadding > 0 ? (
+                <tr aria-hidden="true">
+                  <td colSpan={days.length + 1} style={{ height: desktopWindow.topPadding }} />
                 </tr>
+              ) : null}
+              {desktopWindow.rows.map((rider, index) => (
+                <DesktopScheduleRow
+                  key={rider.id}
+                  rider={rider}
+                  index={desktopWindow.startIndex + index}
+                  days={days}
+                  logMap={logMap}
+                  savingCells={savingCells}
+                  selectedDate={selectedDate}
+                  canEdit={canEdit}
+                  onEdit={openEditor}
+                />
               ))}
-              {filtered.length === 0 && !loading ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
-                    No attendance logs match the current filters.
-                  </td>
+              {desktopWindow.bottomPadding > 0 ? (
+                <tr aria-hidden="true">
+                  <td colSpan={days.length + 1} style={{ height: desktopWindow.bottomPadding }} />
                 </tr>
               ) : null}
             </tbody>
           </table>
         </div>
       </Card>
+
+      {editor ? (
+        <div className="fixed inset-0 z-50 grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
+          <button
+            type="button"
+            aria-label="Đóng chi tiết lịch"
+            className="absolute inset-0"
+            onClick={() => setEditor(null)}
+          />
+          <Card className="relative z-10 w-full max-w-lg rounded-b-none shadow-2xl sm:rounded-xl">
+            <form className="space-y-4" onSubmit={saveEditor}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-bold text-slate-950">{editor.rider.full_name ?? editor.rider.rider_code}</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {editor.rider.rider_code} · {format(parseISO(editor.date), "EEEE, dd/MM/yyyy", { locale: vi })}
+                  </p>
+                </div>
+                <Button type="button" variant="ghost" className="size-10 p-0" onClick={() => setEditor(null)}>
+                  <X size={19} />
+                </Button>
+              </div>
+              <label className="block">
+                <span className="mb-1 block text-xs font-bold uppercase text-slate-500">Trạng thái</span>
+                <Select
+                  value={editor.status}
+                  onChange={(event) =>
+                    setEditor((current) =>
+                      current ? { ...current, status: event.target.value as ScheduleStatus } : current,
+                    )
+                  }
+                >
+                  {statusOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-bold uppercase text-slate-500">Ca làm</span>
+                <Input
+                  placeholder="Ví dụ: AM, PM, Full day"
+                  value={editor.shift}
+                  onChange={(event) =>
+                    setEditor((current) => (current ? { ...current, shift: event.target.value } : current))
+                  }
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-bold uppercase text-slate-500">Ghi chú</span>
+                <textarea
+                  className="min-h-24 w-full rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+                  placeholder="Lý do nghỉ hoặc ghi chú vận hành"
+                  value={editor.note}
+                  onChange={(event) =>
+                    setEditor((current) => (current ? { ...current, note: event.target.value } : current))
+                  }
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <Button type="button" variant="secondary" onClick={() => setEditor(null)}>
+                  Hủy
+                </Button>
+                <Button type="submit" disabled={savingCells.has(cellKey(editor.rider.id, editor.date))}>
+                  Lưu lịch
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+const DesktopScheduleRow = memo(function DesktopScheduleRow({
+  rider,
+  index,
+  days,
+  logMap,
+  savingCells,
+  selectedDate,
+  canEdit,
+  onEdit,
+}: {
+  rider: Rider;
+  index: number;
+  days: Date[];
+  logMap: Map<string, AttendanceLog>;
+  savingCells: Set<string>;
+  selectedDate: string;
+  canEdit: boolean;
+  onEdit: (rider: Rider, date: string) => void;
+}) {
+  const rowClass = index % 2 === 0 ? "bg-white" : "bg-slate-50";
+
+  return (
+    <tr>
+      <td className={`sticky left-0 z-20 h-[74px] border-b border-r border-slate-200 px-4 py-3 ${rowClass}`}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="max-w-44 truncate text-sm font-bold text-slate-950">
+              <Link
+                href={`/attendance/riders/${rider.id}?month=${format(days[0], "yyyy-MM")}`}
+                className="underline-offset-4 hover:text-blue-700 hover:underline"
+              >
+                {rider.full_name ?? rider.rider_code}
+              </Link>
+            </p>
+            <p className="mt-0.5 font-mono text-[11px] text-slate-500">{rider.rider_code}</p>
+            <p className="mt-1 truncate text-[11px] text-slate-500">
+              {rider.kv ?? "-"} · {rider.cot ?? "-"}
+            </p>
+            <p className="mt-0.5 truncate text-[11px] text-slate-500">
+              Giao {rider.delivery_district ?? "-"} · Phường {rider.delivery_ward ?? "-"}
+            </p>
+          </div>
+        </div>
+      </td>
+      {days.map((day) => {
+        const date = format(day, "yyyy-MM-dd");
+        const key = cellKey(rider.id, date);
+        const log = logMap.get(key);
+        return (
+          <DesktopScheduleCell
+            key={date}
+            rider={rider}
+            date={date}
+            value={displayStatus(log?.status)}
+            saving={savingCells.has(key)}
+            selected={date === selectedDate}
+            rowClass={rowClass}
+            canEdit={canEdit}
+            onEdit={onEdit}
+          />
+        );
+      })}
+    </tr>
+  );
+});
+
+const DesktopScheduleCell = memo(function DesktopScheduleCell({
+  rider,
+  date,
+  value,
+  saving,
+  selected,
+  rowClass,
+  canEdit,
+  onEdit,
+}: {
+  rider: Rider;
+  date: string;
+  value: ScheduleStatus;
+  saving: boolean;
+  selected: boolean;
+  rowClass: string;
+  canEdit: boolean;
+  onEdit: (rider: Rider, date: string) => void;
+}) {
+  return (
+    <td className={`h-[74px] border-b border-r border-slate-200 p-2 ${selected ? "bg-blue-50/60" : rowClass}`}>
+      <button
+        type="button"
+        disabled={!canEdit || saving}
+        className={`${statusChipClasses(value)} flex h-full min-h-12 w-full flex-col items-center justify-center rounded-xl border px-2 text-center text-xs font-black transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-70`}
+        onClick={() => onEdit(rider, date)}
+      >
+        <span>{saving ? "..." : statusShortLabel(value)}</span>
+        {value ? <span className="mt-0.5 text-[9px] font-semibold opacity-70">click sửa</span> : null}
+      </button>
+    </td>
+  );
+});
+
+function StatusSelect({
+  value,
+  onChange,
+  disabled,
+  saving,
+  compact,
+  className = "",
+}: {
+  value: ScheduleStatus;
+  onChange: (value: ScheduleStatus) => void;
+  disabled: boolean;
+  saving: boolean;
+  compact?: boolean;
+  className?: string;
+}) {
+  return (
+    <select
+      aria-label="Trạng thái lịch"
+      className={`${statusClasses(value)} ${compact ? "h-12 w-28 px-2 text-xs" : "h-11 w-full px-3 text-sm"} ${className} rounded-lg border font-bold outline-none transition focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60`}
+      value={value}
+      disabled={disabled || saving}
+      onChange={(event) => onChange(event.target.value as ScheduleStatus)}
+    >
+      {statusOptions.map((option) => (
+        <option key={option.value} value={option.value}>
+          {saving ? "Đang lưu..." : option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  total,
+  tone,
+}: {
+  label: string;
+  value: number;
+  total: number;
+  tone: "green" | "red" | "slate";
+}) {
+  const classes = {
+    green: "border-emerald-100 bg-emerald-50 text-emerald-800",
+    red: "border-red-100 bg-red-50 text-red-800",
+    slate: "border-slate-200 bg-white text-slate-800",
+  };
+  return (
+    <div className={`rounded-xl border p-3 sm:p-4 ${classes[tone]}`}>
+      <p className="text-[10px] font-bold uppercase tracking-wide opacity-70 sm:text-xs">{label}</p>
+      <p className="mt-1 text-2xl font-bold sm:text-3xl">{value}</p>
+      <p className="text-[10px] opacity-60 sm:text-xs">trên {total} rider</p>
+    </div>
+  );
+}
+
+function summarizeDate(date: string, riders: Rider[], logMap: Map<string, AttendanceLog>) {
+  let on = 0;
+  let off = 0;
+  let defaultOn = 0;
+  for (const rider of riders) {
+    const log = logMap.get(cellKey(rider.id, date));
+    const status = displayStatus(log?.status);
+    if (status === "ON") on += 1;
+    else if (status.startsWith("OFF_")) off += 1;
+    if (!log) defaultOn += 1;
+  }
+  return { on, off, defaultOn, total: riders.length };
+}
+
+function normalizeStatus(status: string | null | undefined): ScheduleStatus {
+  const normalized = status?.trim().toUpperCase() ?? "";
+  if (!normalized) return "";
+  if (normalized === "ON") return "ON";
+  if (normalized.includes("UNEXPECTED") || normalized.includes("ĐỘT") || normalized.includes("DOT")) {
+    return "OFF_UNEXPECTED";
+  }
+  if (normalized.includes("APPROVED") || normalized.includes("PHÉP") || normalized.includes("PHEP")) {
+    return "OFF_APPROVED";
+  }
+  if (normalized.includes("OFF")) return "OFF_WEEKLY";
+  return "";
+}
+
+function displayStatus(status: string | null | undefined): ScheduleStatus {
+  return normalizeStatus(status) || "ON";
+}
+
+function statusLabel(status: ScheduleStatus) {
+  return statusOptions.find((option) => option.value === status)?.label ?? "ON";
+}
+
+function statusShortLabel(status: ScheduleStatus) {
+  if (status === "ON") return "ON";
+  if (status === "OFF_WEEKLY") return "Tuần";
+  if (status === "OFF_APPROVED") return "Phép";
+  if (status === "OFF_UNEXPECTED") return "Đột xuất";
+  return "-";
+}
+
+function statusChipClasses(status: ScheduleStatus) {
+  if (status === "ON") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "OFF_WEEKLY") return "border-amber-200 bg-amber-50 text-amber-700";
+  if (status === "OFF_APPROVED") return "border-blue-200 bg-blue-50 text-blue-700";
+  if (status === "OFF_UNEXPECTED") return "border-red-200 bg-red-50 text-red-700";
+  return "border-slate-200 bg-white text-slate-300";
+}
+
+function statusClasses(status: ScheduleStatus) {
+  if (status === "ON") return "border-emerald-200 bg-emerald-100 text-emerald-800";
+  if (status === "OFF_WEEKLY") return "border-amber-200 bg-amber-100 text-amber-800";
+  if (status === "OFF_APPROVED") return "border-blue-200 bg-blue-100 text-blue-800";
+  if (status === "OFF_UNEXPECTED") return "border-red-200 bg-red-100 text-red-800";
+  return "border-slate-200 bg-slate-100 text-slate-500";
+}
+
+function cellKey(riderId: string, date: string) {
+  return `${riderId}:${date}`;
+}
+
+function uniqueOptions(values: Array<string | null>) {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value)))).sort((a, b) =>
+    a.localeCompare(b, "vi"),
   );
 }
