@@ -48,6 +48,24 @@ export type AttendanceLog = {
   };
 };
 
+export type DeliveryVolume = {
+  id: string;
+  shipment_id: string;
+  create_time: string;
+  received_time: string;
+  zone_id_raw: string | null;
+  zone_id_matched: string | null;
+  old_ward: string | null;
+  ward: string | null;
+  district: string | null;
+  area: string | null;
+  order_type: string | null;
+  cot_group: string | null;
+  raw_data: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ActivityLog = {
   id: string;
   entity_type: string;

@@ -5,6 +5,10 @@ grant select on table
   public.profiles,
   public.zones,
   public.riders,
+  public.delivery_order,
+  public.delivery_volume,
+  public.pickup_volume,
+  public.pickup_assignments,
   public.attendance_logs,
   public.activity_logs
 to authenticated, service_role;

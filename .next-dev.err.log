@@ -1,0 +1,210 @@
+⚠ Slow filesystem detected. The benchmark took 245ms. If C:\sdd_rider_ops_kv56\.next/dev is a network drive, consider moving it to a local folder.
+See more: https://nextjs.org/docs/app/guides/local-development
+[browser] Uncaught Error: ./components/riders/riders-view.tsx:926:10
+the name `canonicalDistrictName` is defined multiple times
+  924 | }
+  925 |
+> 926 | function canonicalDistrictName(value: string | null | undefined) {
+      |          ^^^^^^^^^^^^^^^^^^^^^
+  927 |   return districtDefinitionFor(value)?.name ?? "";
+  928 | }
+  929 |
+
+Ecmascript file had an error
+
+Import trace:
+  Server Component:
+    ./components/riders/riders-view.tsx
+    ./app/riders/page.tsx
+
+
+    at <unknown> (Error: ./components/riders/riders-view.tsx:926:10)
+    at <unknown> (Error: (./components/riders/riders-view.tsx:926:10)
+[browser] Uncaught Error: ./components/riders/riders-view.tsx:944:10
+the name `canonicalDistrictName` is defined multiple times
+  942 | }
+  943 |
+> 944 | function canonicalDistrictName(value: string | null | undefined) {
+      |          ^^^^^^^^^^^^^^^^^^^^^
+  945 |   return districtDefinitionFor(value)?.name ?? "";
+  946 | }
+  947 |
+
+Ecmascript file had an error
+
+Import trace:
+  Server Component:
+    ./components/riders/riders-view.tsx
+    ./app/riders/page.tsx
+
+
+    at <unknown> (Error: ./components/riders/riders-view.tsx:944:10)
+    at <unknown> (Error: (./components/riders/riders-view.tsx:944:10)
+[browser] Uncaught Error: ./components/riders/riders-view.tsx:947:10
+the name `canonicalDistrictName` is defined multiple times
+  945 | }
+  946 |
+> 947 | function canonicalDistrictName(value: string | null | undefined) {
+      |          ^^^^^^^^^^^^^^^^^^^^^
+  948 |   return districtDefinitionFor(value)?.name ?? "";
+  949 | }
+  950 |
+
+Ecmascript file had an error
+
+Import trace:
+  Server Component:
+    ./components/riders/riders-view.tsx
+    ./app/riders/page.tsx
+
+
+    at <unknown> (Error: ./components/riders/riders-view.tsx:947:10)
+    at <unknown> (Error: (./components/riders/riders-view.tsx:947:10)
+[browser] Uncaught Error: ./components/riders/riders-view.tsx:950:10
+the name `canonicalDistrictName` is defined multiple times
+  948 | }
+  949 |
+> 950 | function canonicalDistrictName(value: string | null | undefined) {
+      |          ^^^^^^^^^^^^^^^^^^^^^
+  951 |   return districtDefinitionFor(value)?.name ?? "";
+  952 | }
+  953 |
+
+Ecmascript file had an error
+
+Import trace:
+  Server Component:
+    ./components/riders/riders-view.tsx
+    ./app/riders/page.tsx
+
+
+    at <unknown> (Error: ./components/riders/riders-view.tsx:950:10)
+    at <unknown> (Error: (./components/riders/riders-view.tsx:950:10)
+[browser] Uncaught Error: ./components/riders/riders-view.tsx:962:10
+the name `canonicalDistrictName` is defined multiple times
+  960 | }
+  961 |
+> 962 | function canonicalDistrictName(value: string | null | undefined) {
+      |          ^^^^^^^^^^^^^^^^^^^^^
+  963 |   return districtDefinitionFor(value)?.name ?? "";
+  964 | }
+  965 |
+
+Ecmascript file had an error
+
+Import trace:
+  Server Component:
+    ./components/riders/riders-view.tsx
+    ./app/riders/page.tsx
+
+
+    at <unknown> (Error: ./components/riders/riders-view.tsx:962:10)
+    at <unknown> (Error: (./components/riders/riders-view.tsx:962:10)
+[browser] Uncaught Error: ./components/riders/riders-view.tsx:993:10
+the name `canonicalDistrictName` is defined multiple times
+  991 | }
+  992 |
+> 993 | function canonicalDistrictName(value: string | null | undefined) {
+      |          ^^^^^^^^^^^^^^^^^^^^^
+  994 |   return districtDefinitionFor(value)?.name ?? "";
+  995 | }
+  996 |
+
+Ecmascript file had an error
+
+Import trace:
+  Server Component:
+    ./components/riders/riders-view.tsx
+    ./app/riders/page.tsx
+
+
+    at <unknown> (Error: ./components/riders/riders-view.tsx:993:10)
+    at <unknown> (Error: (./components/riders/riders-view.tsx:993:10)
+[browser] Uncaught Error: ./components/riders/riders-view.tsx:992:10
+the name `canonicalDistrictName` is defined multiple times
+  990 | }
+  991 |
+> 992 | function canonicalDistrictName(value: string | null | undefined) {
+      |          ^^^^^^^^^^^^^^^^^^^^^
+  993 |   return districtDefinitionFor(value)?.name ?? "";
+  994 | }
+  995 |
+
+Ecmascript file had an error
+
+Import trace:
+  Server Component:
+    ./components/riders/riders-view.tsx
+    ./app/riders/page.tsx
+
+
+    at <unknown> (Error: ./components/riders/riders-view.tsx:992:10)
+    at <unknown> (Error: (./components/riders/riders-view.tsx:992:10)
+[browser] Uncaught Error: ./components/riders/riders-view.tsx:992:10
+the name `canonicalDistrictName` is defined multiple times
+  990 | }
+  991 |
+> 992 | function canonicalDistrictName(value: string | null | undefined) {
+      |          ^^^^^^^^^^^^^^^^^^^^^
+  993 |   return districtDefinitionFor(value)?.name ?? "";
+  994 | }
+  995 |
+
+Ecmascript file had an error
+
+Import trace:
+  Server Component:
+    ./components/riders/riders-view.tsx
+    ./app/riders/page.tsx
+
+
+    at <unknown> (Error: ./components/riders/riders-view.tsx:992:10)
+    at <unknown> (Error: (./components/riders/riders-view.tsx:992:10)
+[browser] ./components/riders/riders-view.tsx:992:10
+the name `canonicalDistrictName` is defined multiple times
+  990 | }
+  991 |
+> 992 | function canonicalDistrictName(value: string | null | undefined) {
+      |          ^^^^^^^^^^^^^^^^^^^^^
+  993 |   return districtDefinitionFor(value)?.name ?? "";
+  994 | }
+  995 |
+
+Ecmascript file had an error
+
+Import trace:
+  Server Component:
+    ./components/riders/riders-view.tsx
+    ./app/riders/page.tsx 
+[browser] ./components/riders/riders-view.tsx:992:10
+the name `canonicalDistrictName` is defined multiple times
+  990 | }
+  991 |
+> 992 | function canonicalDistrictName(value: string | null | undefined) {
+      |          ^^^^^^^^^^^^^^^^^^^^^
+  993 |   return districtDefinitionFor(value)?.name ?? "";
+  994 | }
+  995 |
+
+Ecmascript file had an error
+
+Import trace:
+  Server Component:
+    ./components/riders/riders-view.tsx
+    ./app/riders/page.tsx 
+[browser] ./components/riders/riders-view.tsx:992:10
+the name `canonicalDistrictName` is defined multiple times
+  990 | }
+  991 |
+> 992 | function canonicalDistrictName(value: string | null | undefined) {
+      |          ^^^^^^^^^^^^^^^^^^^^^
+  993 |   return districtDefinitionFor(value)?.name ?? "";
+  994 | }
+  995 |
+
+Ecmascript file had an error
+
+Import trace:
+  Server Component:
+    ./components/riders/riders-view.tsx
+    ./app/riders/page.tsx 

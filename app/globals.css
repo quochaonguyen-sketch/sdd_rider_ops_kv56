@@ -60,7 +60,8 @@ pre {
 }
 
 .zone-map-label,
-.ward-map-label {
+.ward-map-label,
+.hamlet-map-label {
   border: 0 !important;
   border-radius: 8px !important;
   box-shadow: 0 2px 8px rgb(15 23 42 / 18%) !important;
@@ -70,7 +71,8 @@ pre {
 }
 
 .zone-map-label::before,
-.ward-map-label::before {
+.ward-map-label::before,
+.hamlet-map-label::before {
   display: none !important;
 }
 
@@ -93,6 +95,15 @@ pre {
   justify-content: center;
   min-width: 19px;
   padding: 0 5px;
+}
+
+.hamlet-map-label {
+  background: rgb(255 255 255 / 78%) !important;
+  color: #7f1d1d !important;
+  font-size: 8px !important;
+  font-weight: 700 !important;
+  padding: 2px 4px !important;
+  white-space: nowrap;
 }
 
 button,

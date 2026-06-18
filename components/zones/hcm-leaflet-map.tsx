@@ -37,6 +37,14 @@ type WardProperties = {
   source: string;
 };
 
+type HamletProperties = {
+  districtId: "hoc-mon";
+  wardKey: string;
+  hamletKey: string;
+  name: string;
+  source: string;
+};
+
 type WardFeature = Feature<Geometry, WardProperties>;
 
 const mapDistricts: MapDistrict[] = [
@@ -46,6 +54,7 @@ const mapDistricts: MapDistrict[] = [
   { id: "binh-thanh", name: "Quận Bình Thạnh", color: "#0891b2", center: [10.812, 106.71] },
   { id: "quan-3", name: "Quận 3", color: "#f59e0b", center: [10.784, 106.686] },
   { id: "quan-2", name: "Quận 2", color: "#10b981", center: [10.793, 106.758] },
+  { id: "quan-9", name: "Quận 9", color: "#e11d48", center: [10.842, 106.82] },
 ];
 
 export function HcmLeafletMap({
@@ -65,6 +74,9 @@ export function HcmLeafletMap({
 }) {
   const selected = mapDistricts.find((district) => district.id === selectedId) ?? mapDistricts[0];
   const [boundaries, setBoundaries] = useState<FeatureCollection<Geometry, WardProperties> | null>(null);
+  const [hamletBoundaries, setHamletBoundaries] = useState<FeatureCollection<Geometry, HamletProperties> | null>(
+    null,
+  );
   const [selectedWardKey, setSelectedWardKey] = useState<SelectedWard | null>(null);
 
   useEffect(() => {
@@ -79,6 +91,25 @@ export function HcmLeafletMap({
       })
       .catch(() => {
         if (active) setBoundaries({ type: "FeatureCollection", features: [] });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/data/hoc-mon-hamlets-reference.geojson?v=3")
+      .then((response) => {
+        if (!response.ok) throw new Error("Không thể tải phân khu ấp Hóc Môn");
+        return response.json() as Promise<FeatureCollection<Geometry, HamletProperties>>;
+      })
+      .then((data) => {
+        if (active) setHamletBoundaries(data);
+      })
+      .catch(() => {
+        if (active) setHamletBoundaries({ type: "FeatureCollection", features: [] });
       });
 
     return () => {
@@ -155,6 +186,28 @@ export function HcmLeafletMap({
           );
         })}
 
+        {zoomed && showWards && selectedId === "hoc-mon"
+          ? hamletBoundaries?.features.map((feature) => (
+              <GeoJSON
+                key={feature.properties.hamletKey}
+                data={feature}
+                interactive={false}
+                style={{
+                  color: "#7f1d1d",
+                  dashArray: "5 5",
+                  fillColor: "#fff",
+                  fillOpacity: 0.04,
+                  opacity: 0.78,
+                  weight: 1.2,
+                }}
+              >
+                <Tooltip permanent direction="center" className="hamlet-map-label">
+                  {hamletLabel(feature.properties, wardByKey)}
+                </Tooltip>
+              </GeoJSON>
+            ))
+          : null}
+
         {!zoomed
           ? mapDistricts.map((district) => (
               <CircleMarker
@@ -219,7 +272,11 @@ export function HcmLeafletMap({
           {zoomed ? selected.name : "Khu vực vận hành"}
         </p>
         <p className="mt-0.5 text-sm font-semibold text-slate-700">
-          {zoomed ? "Ranh giới phường/xã theo địa chính cũ" : "Bấm vào khu vực để xem chi tiết"}
+          {zoomed && selectedId === "hoc-mon"
+            ? "Ranh ấp tham chiếu (ước lượng), không phải ranh pháp lý"
+            : zoomed
+              ? "Ranh giới phường/xã theo địa chính cũ"
+              : "Bấm vào khu vực để xem chi tiết"}
         </p>
       </div>
 
@@ -281,6 +338,12 @@ function wardColor(index: number) {
 
 function wardLabel(ward: string) {
   return /^\d+$/.test(ward) ? `P.${ward}` : ward;
+}
+
+function hamletLabel(properties: HamletProperties, wardByKey: Map<string, WardCount>) {
+  const wardName = wardByKey.get(properties.wardKey)?.ward ?? properties.wardKey;
+  const hamletNumber = properties.hamletKey.split("-").at(-1) ?? "";
+  return `${wardLabel(wardName)} - Ấp ${hamletNumber}`;
 }
 
 function compactName(value: string) {

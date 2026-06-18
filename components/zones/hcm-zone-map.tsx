@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { Bike, MapPin, Users } from "lucide-react";
 import type { Rider } from "@/types";
 import { cn } from "@/utils/cn";
+import { canonicalWardNames, splitLocationParts } from "@/lib/locations/hcm";
 
 type LocationMode = "pickup" | "delivery" | "home";
 
@@ -71,6 +72,28 @@ const districts: DistrictDefinition[] = [
     color: "#10b981",
     wards: ["An Khánh", "An Lợi Đông", "An Phú", "Bình An", "Bình Khánh", "Bình Trưng Đông", "Bình Trưng Tây", "Cát Lái", "Thạnh Mỹ Lợi", "Thảo Điền", "Thủ Thiêm"],
   },
+  {
+    id: "quan-9",
+    name: "Quận 9",
+    shortName: "Quận 9",
+    aliases: ["9", "quan 9", "q9", "district 9", "thu duc quan 9"],
+    color: "#e11d48",
+    wards: [
+      "Hiệp Phú",
+      "Long Bình",
+      "Long Phước",
+      "Long Thạnh Mỹ",
+      "Long Trường",
+      "Phú Hữu",
+      "Phước Bình",
+      "Phước Long A",
+      "Phước Long B",
+      "Tân Phú",
+      "Tăng Nhơn Phú A",
+      "Tăng Nhơn Phú B",
+      "Trường Thạnh",
+    ],
+  },
 ];
 
 const modeOptions: Array<{ value: LocationMode; label: string }> = [
@@ -94,7 +117,7 @@ export function HcmZoneMap({ riders }: { riders: Rider[] }) {
     () =>
       selectedDistrict.wards.map((ward) => {
         const wardRiders = selectedRiders
-          .filter((rider) => normalize(wardValue(rider, mode)) === normalize(ward))
+          .filter((rider) => matchesWard(rider, mode, ward))
           .sort((a, b) => {
             const codeCompare = a.rider_code.localeCompare(b.rider_code, "vi");
             return codeCompare || (a.full_name ?? "").localeCompare(b.full_name ?? "", "vi");
@@ -279,6 +302,15 @@ function wardValue(rider: Rider, mode: LocationMode) {
   if (mode === "pickup") return rider.pickup_ward;
   if (mode === "delivery") return rider.delivery_ward;
   return null;
+}
+
+function matchesWard(rider: Rider, mode: LocationMode, ward: string) {
+  const district = districtValue(rider, mode);
+  const rawWard = wardValue(rider, mode);
+  const normalizedWard = normalize(ward);
+  const canonicalNames = canonicalWardNames(district, rawWard);
+  const parts = canonicalNames.length > 0 ? canonicalNames : splitLocationParts(rawWard);
+  return parts.some((part) => normalize(part) === normalizedWard);
 }
 
 function matchesDistrict(value: string | null, district: DistrictDefinition) {

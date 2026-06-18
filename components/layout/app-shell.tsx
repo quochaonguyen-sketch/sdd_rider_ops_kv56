@@ -8,10 +8,14 @@ import {
   Bike,
   CalendarDays,
   Database,
+  ListChecks,
   LogOut,
   MapPinned,
   Menu,
+  PackageOpen,
+  PackagePlus,
   Settings,
+  Truck,
   Upload,
   X,
 } from "lucide-react";
@@ -24,11 +28,17 @@ const navItems = [
   { href: "/riders", label: "Riders", icon: Bike },
   { href: "/attendance", label: "Attendance", icon: CalendarDays },
   { href: "/zones", label: "Zones", icon: MapPinned },
+  { href: "/pickup-management", label: "Pickup Management", icon: ListChecks },
   { href: "/imports", label: "Imports", icon: Upload },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 const mobileNavItems = navItems.slice(0, 4);
+const volumeItems = [
+  { href: "/volume/delivery", label: "Delivery", icon: Truck },
+  { href: "/volume/pickup", label: "Pickup", icon: PackagePlus },
+];
+const moreNavItems = [...volumeItems, ...navItems.slice(4)];
 
 export function AppShell({
   children,
@@ -59,7 +69,54 @@ export function AppShell({
           </div>
         </div>
         <nav className="space-y-1 p-3">
-          {navItems.map((item) => {
+          {navItems.slice(0, 5).map((item) => {
+            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950",
+                  active && "bg-slate-950 text-white hover:bg-slate-950 hover:text-white",
+                )}
+              >
+                <Icon size={18} />
+                {item.label}
+              </Link>
+            );
+          })}
+          <div className="pt-1">
+            <div
+              className={cn(
+                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold",
+                pathname.startsWith("/volume") ? "text-slate-950" : "text-slate-500",
+              )}
+            >
+              <PackageOpen size={18} />
+              Volume
+            </div>
+            <div className="ml-6 space-y-1 border-l border-slate-200 pl-3">
+              {volumeItems.map((item) => {
+                const active = pathname === item.href;
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-950",
+                      active && "bg-slate-950 text-white hover:bg-slate-950 hover:text-white",
+                    )}
+                  >
+                    <Icon size={16} />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+          {navItems.slice(5).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return (
@@ -116,7 +173,7 @@ export function AppShell({
         )}
       >
         <div className="grid grid-cols-2 gap-2">
-          {navItems.slice(4).map((item) => {
+          {moreNavItems.map((item) => {
             const Icon = item.icon;
             return (
               <Link
@@ -165,9 +222,9 @@ export function AppShell({
           <button
             type="button"
             onClick={() => setMoreOpen((current) => !current)}
-            className={cn(
-              "flex flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-medium",
-              moreOpen || ["/imports", "/settings"].some((path) => pathname.startsWith(path))
+              className={cn(
+                "flex flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-medium",
+              moreOpen || ["/pickup-management", "/volume", "/imports", "/settings"].some((path) => pathname.startsWith(path))
                 ? "text-slate-950"
                 : "text-slate-400",
             )}
@@ -175,7 +232,7 @@ export function AppShell({
             <span
               className={cn(
                 "grid size-9 place-items-center rounded-xl",
-                (moreOpen || ["/imports", "/settings"].some((path) => pathname.startsWith(path))) &&
+                (moreOpen || ["/pickup-management", "/volume", "/imports", "/settings"].some((path) => pathname.startsWith(path))) &&
                   "bg-slate-950 text-white",
               )}
             >
