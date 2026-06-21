@@ -14,6 +14,7 @@ import {
   Menu,
   PackageOpen,
   PackagePlus,
+  PencilRuler,
   Settings,
   Truck,
   Upload,
@@ -28,6 +29,7 @@ const navItems = [
   { href: "/riders", label: "Riders", icon: Bike },
   { href: "/attendance", label: "Attendance", icon: CalendarDays },
   { href: "/zones", label: "Zones", icon: MapPinned },
+  { href: "/zone-builder", label: "Zone Builder", icon: PencilRuler },
   { href: "/pickup-management", label: "Pickup Management", icon: ListChecks },
   { href: "/imports", label: "Imports", icon: Upload },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -69,7 +71,7 @@ export function AppShell({
           </div>
         </div>
         <nav className="space-y-1 p-3">
-          {navItems.slice(0, 5).map((item) => {
+          {navItems.slice(0, 6).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return (
@@ -116,7 +118,7 @@ export function AppShell({
               })}
             </div>
           </div>
-          {navItems.slice(5).map((item) => {
+          {navItems.slice(6).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return (
@@ -224,7 +226,7 @@ export function AppShell({
             onClick={() => setMoreOpen((current) => !current)}
               className={cn(
                 "flex flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-medium",
-              moreOpen || ["/pickup-management", "/volume", "/imports", "/settings"].some((path) => pathname.startsWith(path))
+              moreOpen || ["/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"].some((path) => pathname.startsWith(path))
                 ? "text-slate-950"
                 : "text-slate-400",
             )}
@@ -232,7 +234,7 @@ export function AppShell({
             <span
               className={cn(
                 "grid size-9 place-items-center rounded-xl",
-                (moreOpen || ["/pickup-management", "/volume", "/imports", "/settings"].some((path) => pathname.startsWith(path))) &&
+                (moreOpen || ["/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"].some((path) => pathname.startsWith(path))) &&
                   "bg-slate-950 text-white",
               )}
             >

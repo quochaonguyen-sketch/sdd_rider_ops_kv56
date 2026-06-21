@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CircleMarker, GeoJSON, MapContainer, TileLayer, Tooltip, useMap } from "react-leaflet";
+import { CircleMarker, GeoJSON, MapContainer, Polygon, TileLayer, Tooltip, useMap } from "react-leaflet";
 import { geoJSON } from "leaflet";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import type { LatLngTuple } from "leaflet";
+import type { CustomZone } from "@/lib/zone-builder/custom-zones";
 
 type WardCount = {
   ward: string;
@@ -59,6 +60,7 @@ const mapDistricts: MapDistrict[] = [
 
 export function HcmLeafletMap({
   selectedId,
+  customZones,
   zoomed,
   wardCounts,
   showWards,
@@ -66,6 +68,7 @@ export function HcmLeafletMap({
   onZoomOut,
 }: {
   selectedId: string;
+  customZones: CustomZone[];
   zoomed: boolean;
   wardCounts: WardCount[];
   showWards: boolean;
@@ -73,6 +76,7 @@ export function HcmLeafletMap({
   onZoomOut: () => void;
 }) {
   const selected = mapDistricts.find((district) => district.id === selectedId) ?? mapDistricts[0];
+  const showHocMonHamlets = false;
   const [boundaries, setBoundaries] = useState<FeatureCollection<Geometry, WardProperties> | null>(null);
   const [hamletBoundaries, setHamletBoundaries] = useState<FeatureCollection<Geometry, HamletProperties> | null>(
     null,
@@ -124,6 +128,10 @@ export function HcmLeafletMap({
   const selectedFeatures = useMemo(
     () => boundaries?.features.filter((feature) => feature.properties.districtId === selectedId) ?? [],
     [boundaries, selectedId],
+  );
+  const visibleCustomZones = useMemo(
+    () => customZones.filter((zone) => selectedFeatures.some((feature) => geometryContainsPoint(feature.geometry, polygonCenter(zone.points)))),
+    [customZones, selectedFeatures],
   );
   const selectedWard =
     zoomed && showWards && selectedWardKey?.districtId === selectedId
@@ -186,7 +194,7 @@ export function HcmLeafletMap({
           );
         })}
 
-        {zoomed && showWards && selectedId === "hoc-mon"
+        {showHocMonHamlets && zoomed && showWards && selectedId === "hoc-mon"
           ? hamletBoundaries?.features.map((feature) => (
               <GeoJSON
                 key={feature.properties.hamletKey}
@@ -205,6 +213,28 @@ export function HcmLeafletMap({
                   {hamletLabel(feature.properties, wardByKey)}
                 </Tooltip>
               </GeoJSON>
+            ))
+          : null}
+
+        {zoomed && showWards
+          ? visibleCustomZones.map((zone) => (
+              <Polygon
+                key={zone.id}
+                positions={zone.points}
+                interactive={false}
+                pathOptions={{
+                  color: zone.color,
+                  dashArray: "5 5",
+                  fillColor: "#fff",
+                  fillOpacity: 0.05,
+                  opacity: 0.86,
+                  weight: 1.5,
+                }}
+              >
+                <Tooltip permanent direction="center" className="hamlet-map-label">
+                  {zone.name}
+                </Tooltip>
+              </Polygon>
             ))
           : null}
 
@@ -296,7 +326,13 @@ export function HcmLeafletMap({
   );
 }
 
-function MapFocus({ selectedFeatures, zoomed }: { selectedFeatures: WardFeature[]; zoomed: boolean }) {
+function MapFocus({
+  selectedFeatures,
+  zoomed,
+}: {
+  selectedFeatures: WardFeature[];
+  zoomed: boolean;
+}) {
   const map = useMap();
 
   useEffect(() => {
@@ -344,6 +380,45 @@ function hamletLabel(properties: HamletProperties, wardByKey: Map<string, WardCo
   const wardName = wardByKey.get(properties.wardKey)?.ward ?? properties.wardKey;
   const hamletNumber = properties.hamletKey.split("-").at(-1) ?? "";
   return `${wardLabel(wardName)} - Ấp ${hamletNumber}`;
+}
+
+function polygonCenter(points: LatLngTuple[]): LatLngTuple {
+  const totals = points.reduce(
+    (sum, [lat, lng]) => ({ lat: sum.lat + lat, lng: sum.lng + lng }),
+    { lat: 0, lng: 0 },
+  );
+  return [totals.lat / points.length, totals.lng / points.length];
+}
+
+function geometryContainsPoint(geometry: Geometry, [lat, lng]: LatLngTuple) {
+  if (geometry.type === "Polygon") return polygonContainsPoint(geometry.coordinates, lng, lat);
+  if (geometry.type === "MultiPolygon") {
+    return geometry.coordinates.some((polygon) => polygonContainsPoint(polygon, lng, lat));
+  }
+  return false;
+}
+
+function polygonContainsPoint(rings: number[][][], lng: number, lat: number) {
+  const [outerRing, ...holes] = rings;
+  if (!outerRing || !ringContainsPoint(outerRing, lng, lat)) return false;
+  return !holes.some((ring) => ringContainsPoint(ring, lng, lat));
+}
+
+function ringContainsPoint(ring: number[][], lng: number, lat: number) {
+  let inside = false;
+  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index++) {
+    const currentPoint = ring[index];
+    const previousPoint = ring[previous];
+    if (!currentPoint || !previousPoint) continue;
+    const [currentLng, currentLat] = currentPoint;
+    const [previousLng, previousLat] = previousPoint;
+    const crosses = currentLat > lat !== previousLat > lat;
+    if (crosses) {
+      const intersectLng = ((previousLng - currentLng) * (lat - currentLat)) / (previousLat - currentLat) + currentLng;
+      if (lng < intersectLng) inside = !inside;
+    }
+  }
+  return inside;
 }
 
 function compactName(value: string) {

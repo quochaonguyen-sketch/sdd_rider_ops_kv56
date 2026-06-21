@@ -6,6 +6,7 @@ import { Bike, MapPin, Users } from "lucide-react";
 import type { Rider } from "@/types";
 import { cn } from "@/utils/cn";
 import { canonicalWardNames, splitLocationParts } from "@/lib/locations/hcm";
+import { PUBLISHED_ZONES_STORAGE_KEY, readCustomZones, type CustomZone } from "@/lib/zone-builder/custom-zones";
 
 type LocationMode = "pickup" | "delivery" | "home";
 
@@ -106,7 +107,12 @@ export function HcmZoneMap({ riders }: { riders: Rider[] }) {
   const [mode, setMode] = useState<LocationMode>("pickup");
   const [selectedId, setSelectedId] = useState(districts[0].id);
   const [zoomed, setZoomed] = useState(false);
+  const [customZones] = useState<CustomZone[]>(() => readCustomZones(PUBLISHED_ZONES_STORAGE_KEY));
   const selectedDistrict = districts.find((district) => district.id === selectedId) ?? districts[0];
+  const selectedCustomZones = useMemo(
+    () => customZones.filter((zone) => customZoneBelongsToDistrict(zone, selectedDistrict)),
+    [customZones, selectedDistrict],
+  );
 
   const selectedRiders = useMemo(
     () => riders.filter((rider) => matchesDistrict(districtValue(rider, mode), selectedDistrict)),
@@ -176,6 +182,7 @@ export function HcmZoneMap({ riders }: { riders: Rider[] }) {
 
       <LeafletMap
         selectedId={selectedId}
+        customZones={customZones}
         zoomed={zoomed}
         wardCounts={wardCounts}
         showWards={mode !== "home"}
@@ -240,6 +247,23 @@ export function HcmZoneMap({ riders }: { riders: Rider[] }) {
             ))}
             {cotCounts.length === 0 ? <p className="text-sm text-slate-500">Chưa có rider trong khu vực.</p> : null}
           </div>
+
+          {selectedCustomZones.length > 0 ? (
+            <>
+              <h4 className="mt-5 text-sm font-bold text-slate-900">Phan khu tu Zone Builder</h4>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {selectedCustomZones.map((zone) => (
+                  <span
+                    key={zone.id}
+                    className="rounded-full border px-2.5 py-1 text-xs font-bold"
+                    style={{ borderColor: zone.color, color: zone.color }}
+                  >
+                    {zone.name}
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : null}
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
@@ -278,6 +302,12 @@ export function HcmZoneMap({ riders }: { riders: Rider[] }) {
       </div>
     </section>
   );
+}
+
+function customZoneBelongsToDistrict(zone: CustomZone, district: DistrictDefinition) {
+  if (zone.district.trim()) return matchesDistrict(zone.district, district);
+  if (!zone.ward.trim()) return false;
+  return district.wards.some((ward) => normalize(ward) === normalize(zone.ward));
 }
 
 function normalize(value: string | null | undefined) {
