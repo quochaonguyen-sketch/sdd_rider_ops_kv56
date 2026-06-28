@@ -1,14 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Building2, CalendarDays, MapPin, PackageCheck, RefreshCcw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { cn } from "@/utils/cn";
+import { PickupVolumeDashboard, type PickupDistrict } from "@/components/volume/pickup-volume-dashboard";
+import {
+  DeliveryVolumeDashboard,
+  type DeliveryTrendPoint,
+  type DeliveryViewMode,
+} from "@/components/volume/delivery-volume-dashboard";
 
 type VolumeKind = "delivery" | "pickup";
 
@@ -17,7 +17,8 @@ type VolumeRow = {
   report_date?: string;
   district: string | null;
   ward?: string | null;
-  old_ward: string | null;
+  old_ward?: string | null;
+  new_ward?: string | null;
   area: string | null;
   order_type?: string | null;
   cot_group?: string | null;
@@ -48,12 +49,11 @@ const PAGE_SIZE = 1000;
 
 export function VolumeView({ kind }: { kind: VolumeKind }) {
   const table = kind === "delivery" ? "delivery_order" : "pickup_volume";
-  const title = kind === "delivery" ? "Delivery Volume" : "Pickup Volume";
-  const accent = kind === "delivery" ? "#2563eb" : "#f97316";
   const [date, setDate] = useState(todayInVietnam());
   const [rows, setRows] = useState<VolumeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deliveryViewMode, setDeliveryViewMode] = useState<DeliveryViewMode>("day");
 
   const loadVolume = useCallback(async () => {
     const supabase = createClient();
@@ -62,6 +62,7 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
 
     setLoading(true);
     setError(null);
+    const deliveryRange = deliveryDateRange(date, deliveryViewMode);
 
     while (true) {
       const query =
@@ -69,12 +70,13 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
           ? supabase
               .from(table)
               .select("summary_id,report_date,old_ward,district,area,cot,total_orders")
-              .eq("report_date", date)
+              .gte("report_date", deliveryRange.start)
+              .lte("report_date", deliveryRange.end)
               .order("district")
               .range(offset, offset + PAGE_SIZE - 1)
           : supabase
               .from(table)
-              .select("summary_id,report_date,old_ward,district,area,cot,ma_tuyen,total_orders")
+              .select("summary_id,report_date,new_ward,district,area,cot,ma_tuyen,total_orders")
               .eq("report_date", date)
               .order("district")
               .range(offset, offset + PAGE_SIZE - 1);
@@ -96,7 +98,7 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
 
     setRows(loaded);
     setLoading(false);
-  }, [date, kind, table]);
+  }, [date, deliveryViewMode, kind, table]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -110,207 +112,48 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
   useSupabaseRealtime({ table, onChange: refresh });
 
   const summary = useMemo(() => summarizeVolume(rows), [rows]);
-  const maxDistrict = Math.max(1, ...summary.districts.map((district) => district.count));
-
-  return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: accent }}>
-            Volume theo khu vực
-          </p>
-          <h1 className="mt-1 text-2xl font-black text-slate-950">{title}</h1>
-          <p className="mt-1 text-sm text-slate-500">Tổng lượng đơn theo ngày, quận/huyện và phường/xã.</p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <label className="relative block min-w-[190px]">
-            <CalendarDays
-              size={16}
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-            />
-            <Input
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-              className="pl-9"
-            />
-          </label>
-          <Button type="button" variant="secondary" onClick={refresh} disabled={loading}>
-            <RefreshCcw size={16} className={loading ? "animate-spin" : undefined} />
-            Làm mới
-          </Button>
-        </div>
-      </div>
-
-      <div className="inline-flex rounded-xl bg-slate-100 p-1">
-        <VolumeTab href="/volume/delivery" active={kind === "delivery"}>
-          Delivery
-        </VolumeTab>
-        <VolumeTab href="/volume/pickup" active={kind === "pickup"}>
-          Pickup
-        </VolumeTab>
-      </div>
-
-      {error ? (
-        <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
-          Không tải được dữ liệu: {error}
-        </p>
-      ) : null}
-
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <MetricCard icon={<PackageCheck size={19} />} label="Tổng đơn" value={summary.total} loading={loading} />
-        <MetricCard icon={<Building2 size={19} />} label="Quận/huyện" value={summary.districts.length} loading={loading} />
-        <MetricCard icon={<MapPin size={19} />} label="Phường/xã" value={summary.wardCount} loading={loading} />
-        <MetricCard
-          icon={<PackageCheck size={19} />}
-          label="Số COT"
-          value={summary.groupCount}
-          loading={loading}
-        />
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        {summary.cots.map((cot) => (
-          <Card key={cot.cot}>
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Volume theo COT</p>
-                <h2 className="mt-1 text-lg font-black text-slate-950">{cot.cot}</h2>
-              </div>
-              <strong className="text-2xl font-black" style={{ color: accent }}>
-                {loading ? "-" : formatNumber(cot.count)}
-              </strong>
-            </div>
-          </Card>
-        ))}
-      </div>
-
-      <Card>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="font-bold text-slate-950">Volume ngày {formatVietnameseDate(date)}</h2>
-            <p className="mt-0.5 text-sm text-slate-500">Sắp xếp từ khu vực có nhiều đơn nhất.</p>
-          </div>
-          <span className="rounded-full px-3 py-1 text-xs font-bold text-white" style={{ backgroundColor: accent }}>
-            {formatNumber(summary.total)} đơn
-          </span>
-        </div>
-
-        <div className="mt-5 space-y-4">
-          {!loading && summary.districts.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
-              Chưa có dữ liệu {kind} trong ngày này.
-            </p>
-          ) : null}
-
-          {summary.districts.map((district) => {
-            const maxWard = Math.max(1, ...district.wards.map((ward) => ward.count));
-            return (
-              <section key={district.district} className="overflow-hidden rounded-2xl border border-slate-200">
-                <div className="bg-slate-50 px-4 py-3 sm:px-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <h3 className="truncate font-black text-slate-950">{district.district}</h3>
-                      <p className="text-xs font-semibold text-slate-500">{district.wards.length} phường/xã</p>
-                      <CotBadges cots={district.cots} accent={accent} />
-                    </div>
-                    <strong className="shrink-0 text-lg text-slate-950">{formatNumber(district.count)} đơn</strong>
-                  </div>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
-                    <div
-                      className="h-full rounded-full"
-                      style={{ backgroundColor: accent, width: `${(district.count / maxDistrict) * 100}%` }}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-px bg-slate-100 sm:grid-cols-2 xl:grid-cols-3">
-                  {district.wards.map((ward) => (
-                    <div key={ward.ward} className="bg-white px-4 py-3">
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <span className="truncate font-semibold text-slate-700">{ward.ward}</span>
-                        <strong className="shrink-0 text-slate-950">{formatNumber(ward.count)}</strong>
-                      </div>
-                      <CotBadges cots={ward.cots} accent={accent} compact />
-                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full rounded-full opacity-80"
-                          style={{ backgroundColor: accent, width: `${(ward.count / maxWard) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      </Card>
-    </div>
+  const deliveryDayCount = useMemo(() => countReportDays(rows), [rows]);
+  const deliverySummary = useMemo(
+    () => (kind === "delivery" && deliveryViewMode !== "day" ? averageVolumeSummary(summary, deliveryDayCount) : summary),
+    [deliveryDayCount, deliveryViewMode, kind, summary],
   );
-}
+  const pickupDistricts = useMemo(() => summarizePickupDistrictRoutes(rows), [rows]);
+  const pickupRouteCount = useMemo(() => countPickupRoutes(pickupDistricts), [pickupDistricts]);
+  const deliveryTrend = useMemo(() => summarizeDeliveryTrend(rows), [rows]);
 
-function VolumeTab({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className={cn(
-        "rounded-lg px-5 py-2 text-sm font-bold transition",
-        active ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-900",
-      )}
-    >
-      {children}
-    </Link>
-  );
-}
-
-function CotBadges({
-  cots,
-  accent,
-  compact = false,
-}: {
-  cots: CotSummary[];
-  accent: string;
-  compact?: boolean;
-}) {
-  if (cots.length === 0) return null;
+  if (kind === "pickup") {
+    return (
+      <PickupVolumeDashboard
+        date={date}
+        onDateChange={setDate}
+        onRefresh={refresh}
+        loading={loading}
+        error={error}
+        totalOrders={summary.total}
+        totalRoutes={pickupRouteCount}
+        wardCount={summary.wardCount}
+        cotVolumes={summary.cots}
+        districts={pickupDistricts}
+      />
+    );
+  }
 
   return (
-    <div className={cn("flex flex-wrap gap-1.5", compact ? "mt-2" : "mt-1.5")}>
-      {cots.map((cot) => (
-        <span
-          key={cot.cot}
-          className="rounded-full border px-2 py-0.5 text-[11px] font-bold"
-          style={{ borderColor: `${accent}40`, color: accent, backgroundColor: `${accent}0d` }}
-        >
-          {cot.cot}: {formatNumber(cot.count)}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function MetricCard({
-  icon,
-  label,
-  value,
-  loading,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  loading: boolean;
-}) {
-  return (
-    <Card>
-      <div className="flex items-center gap-2 text-slate-500">
-        {icon}
-        <span className="text-xs font-bold uppercase tracking-wide">{label}</span>
-      </div>
-      <p className="mt-3 text-2xl font-black text-slate-950 sm:text-3xl">
-        {loading ? "-" : formatNumber(value)}
-      </p>
-    </Card>
+    <DeliveryVolumeDashboard
+      date={date}
+      onDateChange={setDate}
+      viewMode={deliveryViewMode}
+      onViewModeChange={setDeliveryViewMode}
+      onRefresh={refresh}
+      loading={loading}
+      error={error}
+      totalOrders={deliverySummary.total}
+      wardCount={deliverySummary.wardCount}
+      cotVolumes={deliverySummary.cots}
+      districts={deliverySummary.districts}
+      trend={deliveryTrend}
+      averageDays={deliveryViewMode === "day" ? 1 : deliveryDayCount}
+    />
   );
 }
 
@@ -327,7 +170,7 @@ function summarizeVolume(rows: VolumeRow[]) {
 
   for (const row of rows) {
     const district = row.district?.trim() || "Chưa xác định quận/huyện";
-    const ward = row.ward?.trim() || row.old_ward?.trim() || "Chưa xác định phường/xã";
+    const ward = row.ward?.trim() || row.new_ward?.trim() || row.old_ward?.trim() || "Chưa xác định phường/xã";
     const count = row.total_orders ?? 1;
     const cot = normalizeCot(row.cot || row.cot_group);
     const districtData = districts.get(district) ?? {
@@ -375,6 +218,91 @@ function summarizeVolume(rows: VolumeRow[]) {
   };
 }
 
+function summarizePickupDistrictRoutes(rows: VolumeRow[]): PickupDistrict[] {
+  const districts = new Map<
+    string,
+    {
+      count: number;
+      cots: Map<string, number>;
+      wards: Map<
+        string,
+        {
+          count: number;
+          cots: Map<string, number>;
+          routes: Map<string, { count: number; cots: Map<string, number> }>;
+        }
+      >;
+    }
+  >();
+
+  for (const row of rows) {
+    const districtName = row.district?.trim() || "Chưa xác định quận/huyện";
+    const wardName = row.new_ward?.trim() || row.ward?.trim() || "Chưa xác định phường/xã";
+    const cot = normalizeCot(row.cot);
+    const district = districts.get(districtName) ?? { count: 0, cots: new Map(), wards: new Map() };
+    const ward = district.wards.get(wardName) ?? { count: 0, cots: new Map(), routes: new Map() };
+
+    for (const entry of parseRouteBreakdown(row.ma_tuyen, row.total_orders ?? 0)) {
+      const route = ward.routes.get(entry.route) ?? { count: 0, cots: new Map() };
+      route.count += entry.count;
+      if (cot) {
+        route.cots.set(cot, (route.cots.get(cot) ?? 0) + entry.count);
+        ward.cots.set(cot, (ward.cots.get(cot) ?? 0) + entry.count);
+        district.cots.set(cot, (district.cots.get(cot) ?? 0) + entry.count);
+      }
+      ward.routes.set(entry.route, route);
+      ward.count += entry.count;
+      district.count += entry.count;
+    }
+
+    district.wards.set(wardName, ward);
+    districts.set(districtName, district);
+  }
+
+  return Array.from(districts, ([district, districtData]) => ({
+    district,
+    count: districtData.count,
+    cots: sortCotSummaries(districtData.cots),
+    wards: Array.from(districtData.wards, ([ward, wardData]) => ({
+      ward,
+      count: wardData.count,
+      cots: sortCotSummaries(wardData.cots),
+      routes: Array.from(wardData.routes, ([route, routeData]) => ({
+        route,
+        count: routeData.count,
+        cots: sortCotSummaries(routeData.cots),
+      })).sort((a, b) => b.count - a.count || a.route.localeCompare(b.route, "vi", { numeric: true })),
+    })).sort((a, b) => b.count - a.count || a.ward.localeCompare(b.ward, "vi")),
+  })).sort((a, b) => b.count - a.count || a.district.localeCompare(b.district, "vi"));
+}
+
+function countPickupRoutes(districts: PickupDistrict[]) {
+  return new Set(
+    districts.flatMap((district) => district.wards.flatMap((ward) => ward.routes.map((route) => route.route))),
+  ).size;
+}
+
+function parseRouteBreakdown(value: string | null | undefined, fallbackCount: number) {
+  const raw = value?.trim();
+  if (!raw) return [{ route: "Chưa có mã tuyến", count: fallbackCount }];
+
+  const entries = raw
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const separator = part.lastIndexOf(":");
+      if (separator < 1) return null;
+      const route = part.slice(0, separator).trim();
+      const count = Number(part.slice(separator + 1).trim().replace(/[.,\s]/g, ""));
+      return route && Number.isFinite(count) ? { route, count } : null;
+    })
+    .filter((entry): entry is { route: string; count: number } => entry !== null);
+
+  if (entries.length > 0) return entries;
+  return [{ route: raw, count: fallbackCount }];
+}
+
 function normalizeCot(value: string | null | undefined) {
   const match = value?.match(/\bCOT\s*([12])\b/i);
   return match ? `COT ${match[1]}` : value?.trim() || null;
@@ -386,6 +314,64 @@ function sortCotSummaries(cots: Map<string, number>): CotSummary[] {
   );
 }
 
+function summarizeDeliveryTrend(rows: VolumeRow[]): DeliveryTrendPoint[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const reportDate = row.report_date?.slice(0, 10);
+    if (!reportDate) continue;
+    counts.set(reportDate, (counts.get(reportDate) ?? 0) + (row.total_orders ?? 1));
+  }
+  return Array.from(counts, ([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function countReportDays(rows: VolumeRow[]) {
+  const dates = new Set(rows.map((row) => row.report_date?.slice(0, 10)).filter(Boolean));
+  return Math.max(1, dates.size);
+}
+
+function averageVolumeSummary(summary: ReturnType<typeof summarizeVolume>, dayCount: number) {
+  const average = (value: number) => Math.round(value / dayCount);
+  const averageCots = (cots: CotSummary[]) => cots.map((cot) => ({ ...cot, count: average(cot.count) }));
+
+  return {
+    ...summary,
+    total: average(summary.total),
+    cots: averageCots(summary.cots),
+    districts: summary.districts.map((district) => ({
+      ...district,
+      count: average(district.count),
+      cots: averageCots(district.cots),
+      wards: district.wards.map((ward) => ({
+        ...ward,
+        count: average(ward.count),
+        cots: averageCots(ward.cots),
+      })),
+    })),
+  };
+}
+
+function deliveryDateRange(date: string, viewMode: DeliveryViewMode) {
+  const value = new Date(`${date}T00:00:00Z`);
+  if (viewMode === "month") {
+    const start = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1));
+    const end = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + 1, 0));
+    return { start: isoDate(start), end: isoDate(end) };
+  }
+  if (viewMode === "week") {
+    const mondayOffset = (value.getUTCDay() + 6) % 7;
+    const start = new Date(value);
+    start.setUTCDate(start.getUTCDate() - mondayOffset);
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + 6);
+    return { start: isoDate(start), end: isoDate(end) };
+  }
+  return { start: date, end: date };
+}
+
+function isoDate(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
 function todayInVietnam() {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Ho_Chi_Minh",
@@ -393,17 +379,4 @@ function todayInVietnam() {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
-}
-
-function formatVietnameseDate(date: string) {
-  return new Intl.DateTimeFormat("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${date}T00:00:00Z`));
-}
-
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("vi-VN").format(value);
 }

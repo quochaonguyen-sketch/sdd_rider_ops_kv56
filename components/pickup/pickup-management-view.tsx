@@ -169,15 +169,15 @@ export function PickupManagementView() {
           <p className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: ACCENT }}>
             Pickup operations
           </p>
-          <h1 className="mt-1 text-2xl font-black text-slate-950">Pickup Management</h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <h1 className="mt-1 text-4xl font-black text-slate-950 my-2">Pickup Management</h1>
+          <p className="mt-1 text-md text-slate-500 ">
             Quan ly PUP/shop trong tung tuyen, dieu chinh tuyen roi xuat file cho Python gan.
           </p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center bg-slate-50 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700">
           <Button type="button" variant="secondary" onClick={exportForPython} disabled={loading || rows.length === 0}>
             <Download size={16} />
-            Xuat file Python
+            Xuat file Excel
           </Button>
           <Button type="button" variant="secondary" onClick={refresh} disabled={loading}>
             <RefreshCcw size={16} className={loading ? "animate-spin" : undefined} />

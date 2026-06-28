@@ -10,13 +10,12 @@ import {
 type PickupVolumeRow = {
   summary_id: string;
   report_date: string;
-  old_ward: string | null;
+  new_ward: string | null;
   district: string | null;
   area: string | null;
   cot: string | null;
   ma_tuyen: string | null;
   total_orders: number;
-  raw_data: Record<string, unknown>;
 };
 
 const IMPORT_CHUNK_SIZE = 1000;
@@ -108,16 +107,12 @@ function toPickupVolumeRow(record: PickupVolumeImportItem): PickupVolumeRow {
   return {
     summary_id: record.summary_id,
     report_date: reportDate,
-    old_ward: cleanText(record.old_ward),
+    new_ward: cleanText(record.new_ward),
     district: cleanText(record.district),
     area: cleanText(record.area),
     cot: cleanText(record.cot),
     ma_tuyen: cleanText(record.ma_tuyen),
     total_orders: record.total_orders,
-    raw_data: record.raw_data ?? {
-      ...record,
-      report_date: reportDate,
-    },
   };
 }
 

@@ -377,7 +377,7 @@ export function ZoneBuilderView() {
                 ))}
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <Button type="button" variant={drawing ? "primary" : "secondary"} onClick={startDrawing}>
+                <Button type="button" variant={drawing ? "default" : "secondary"} onClick={startDrawing}>
                   <MapPinned size={16} />
                   Ve moi
                 </Button>
@@ -482,7 +482,7 @@ export function ZoneBuilderView() {
               <Button
                 type="button"
                 className="mt-4 w-full"
-                variant={publishedZones.some((zone) => zone.id === selectedZone.id) ? "secondary" : "primary"}
+                variant={publishedZones.some((zone) => zone.id === selectedZone.id) ? "secondary" : "default"}
                 onClick={() => publishZone(selectedZone)}
               >
                 <Save size={16} />

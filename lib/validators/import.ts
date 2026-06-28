@@ -49,7 +49,7 @@ export const deliveryVolumeImportItemSchema = z.object({
 export const pickupVolumeImportItemSchema = z.object({
   summary_id: z.string().min(1),
   report_date: z.coerce.date(),
-  old_ward: z.string().optional().nullable(),
+  new_ward: z.string().optional().nullable(),
   district: z.string().optional().nullable(),
   area: z.string().optional().nullable(),
   cot: z.string().optional().nullable(),
