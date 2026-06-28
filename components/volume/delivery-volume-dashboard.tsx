@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { CalendarDays, Grid2X2, Layers3, MapPin, RefreshCcw, Search, Truck } from "lucide-react";
+import { CalendarDays, Grid2X2, Layers3, MapPin, Minus, RefreshCcw, Search, TrendingDown, TrendingUp, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/utils/cn";
@@ -46,6 +46,9 @@ type DeliveryVolumeDashboardProps = {
   districts: DeliveryDistrict[];
   trend: DeliveryTrendPoint[];
   averageDays: number;
+  comparisonTotalOrders: number;
+  comparisonDistricts: DeliveryDistrict[];
+  comparisonLabel: string;
 };
 
 export function DeliveryVolumeDashboard({
@@ -62,6 +65,9 @@ export function DeliveryVolumeDashboard({
   districts,
   trend,
   averageDays,
+  comparisonTotalOrders,
+  comparisonDistricts,
+  comparisonLabel,
 }: DeliveryVolumeDashboardProps) {
   const isAverage = viewMode !== "day";
   return (
@@ -97,6 +103,8 @@ export function DeliveryVolumeDashboard({
         wardCount={wardCount}
         cotCount={cotVolumes.length}
         isAverage={isAverage}
+        comparisonTotalOrders={comparisonTotalOrders}
+        comparisonLabel={comparisonLabel}
       />
 
       <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
@@ -111,6 +119,8 @@ export function DeliveryVolumeDashboard({
         districts={districts}
         loading={loading}
         averageDays={averageDays}
+        comparisonDistricts={comparisonDistricts}
+        comparisonLabel={comparisonLabel}
       />
     </div>
   );
@@ -198,6 +208,8 @@ function KpiCards({
   wardCount,
   cotCount,
   isAverage,
+  comparisonTotalOrders,
+  comparisonLabel,
 }: {
   loading: boolean;
   totalOrders: number;
@@ -205,12 +217,14 @@ function KpiCards({
   wardCount: number;
   cotCount: number;
   isAverage: boolean;
+  comparisonTotalOrders: number;
+  comparisonLabel: string;
 }) {
   const items = [
-    { label: isAverage ? "TB đơn/ngày" : "Tổng đơn", value: totalOrders, icon: Truck, tone: "bg-blue-50 text-blue-700" },
-    { label: "Quận/huyện", value: districtCount, icon: MapPin, tone: "bg-emerald-50 text-emerald-700" },
-    { label: "Phường/xã", value: wardCount, icon: Grid2X2, tone: "bg-amber-50 text-amber-700" },
-    { label: "Số COT", value: cotCount, icon: Layers3, tone: "bg-slate-100 text-slate-700" },
+    { label: isAverage ? "TB đơn/ngày" : "Tổng đơn", value: totalOrders, icon: Truck, tone: "bg-blue-50 text-blue-700", previous: comparisonTotalOrders },
+    { label: "Quận/huyện", value: districtCount, icon: MapPin, tone: "bg-emerald-50 text-emerald-700", previous: null },
+    { label: "Phường/xã", value: wardCount, icon: Grid2X2, tone: "bg-amber-50 text-amber-700", previous: null },
+    { label: "Số COT", value: cotCount, icon: Layers3, tone: "bg-slate-100 text-slate-700", previous: null },
   ];
 
   return (
@@ -224,6 +238,12 @@ function KpiCards({
               <span className={cn("grid size-8 place-items-center rounded-md", item.tone)}><Icon size={17} /></span>
             </div>
             <p className="mt-3 text-2xl font-black text-slate-950 sm:text-3xl">{loading ? "-" : formatNumber(item.value)}</p>
+            {item.previous !== null && !loading ? (
+              <div className="mt-2 flex items-center gap-2">
+                <GrowthBadge current={item.value} previous={item.previous} />
+                <span className="truncate text-[11px] text-slate-400">{comparisonLabel}</span>
+              </div>
+            ) : null}
           </div>
         );
       })}
@@ -318,6 +338,8 @@ function DeliveryAreaExplorer({
   districts,
   loading,
   averageDays,
+  comparisonDistricts,
+  comparisonLabel,
 }: {
   date: string;
   viewMode: DeliveryViewMode;
@@ -325,6 +347,8 @@ function DeliveryAreaExplorer({
   districts: DeliveryDistrict[];
   loading: boolean;
   averageDays: number;
+  comparisonDistricts: DeliveryDistrict[];
+  comparisonLabel: string;
 }) {
   const isAverage = viewMode !== "day";
   const [selectedDistrict, setSelectedDistrict] = useState<string | null>(null);
@@ -359,6 +383,8 @@ function DeliveryAreaExplorer({
           selectedDistrict={activeDistrict?.district ?? null}
           loading={loading}
           isAverage={isAverage}
+          comparisonDistricts={comparisonDistricts}
+          comparisonLabel={comparisonLabel}
           onSelect={(district) => {
             setSelectedDistrict(district);
             setWardQuery("");
@@ -372,6 +398,12 @@ function DeliveryAreaExplorer({
           sortMode={sortMode}
           onSortModeChange={setSortMode}
           isAverage={isAverage}
+          comparisonDistrict={
+            activeDistrict
+              ? comparisonDistricts.find((district) => district.district === activeDistrict.district) ?? null
+              : null
+          }
+          comparisonLabel={comparisonLabel}
         />
       </div>
     </section>
@@ -383,12 +415,16 @@ function DistrictSummaryList({
   selectedDistrict,
   loading,
   isAverage,
+  comparisonDistricts,
+  comparisonLabel,
   onSelect,
 }: {
   districts: DeliveryDistrict[];
   selectedDistrict: string | null;
   loading: boolean;
   isAverage: boolean;
+  comparisonDistricts: DeliveryDistrict[];
+  comparisonLabel: string;
   onSelect: (district: string) => void;
 }) {
   return (
@@ -405,6 +441,8 @@ function DistrictSummaryList({
             district={district}
             selected={selectedDistrict === district.district}
             isAverage={isAverage}
+            comparison={comparisonDistricts.find((item) => item.district === district.district) ?? null}
+            comparisonLabel={comparisonLabel}
             onSelect={() => onSelect(district.district)}
           />
         ))}
@@ -417,11 +455,15 @@ function DistrictSummaryItem({
   district,
   selected,
   isAverage,
+  comparison,
+  comparisonLabel,
   onSelect,
 }: {
   district: DeliveryDistrict;
   selected: boolean;
   isAverage: boolean;
+  comparison: DeliveryDistrict | null;
+  comparisonLabel: string;
   onSelect: () => void;
 }) {
   return (
@@ -440,6 +482,10 @@ function DistrictSummaryItem({
       <p className="mt-1 text-xs text-slate-500">{district.wards.length} phường/xã</p>
       {isAverage ? <p className="mt-0.5 text-[11px] font-semibold text-blue-600">Trung bình/ngày</p> : null}
       <CotMetadata cots={district.cots} />
+      <div className="mt-2 flex items-center gap-2">
+        <GrowthBadge current={district.count} previous={comparison?.count ?? 0} />
+        <span className="truncate text-[10px] text-slate-400">{comparisonLabel}</span>
+      </div>
     </button>
   );
 }
@@ -452,6 +498,8 @@ function WardDetailPanel({
   sortMode,
   onSortModeChange,
   isAverage,
+  comparisonDistrict,
+  comparisonLabel,
 }: {
   district: DeliveryDistrict | null;
   wards: DeliveryWard[];
@@ -460,6 +508,8 @@ function WardDetailPanel({
   sortMode: "volume" | "name";
   onSortModeChange: (mode: "volume" | "name") => void;
   isAverage: boolean;
+  comparisonDistrict: DeliveryDistrict | null;
+  comparisonLabel: string;
 }) {
   return (
     <div className="min-w-0">
@@ -475,6 +525,10 @@ function WardDetailPanel({
                 </span>
                 <span className="rounded-md bg-blue-50 px-2.5 py-1.5 text-blue-700">COT 1: {formatNumber(cotValue(district.cots, "COT 1"))}</span>
                 <span className="rounded-md bg-emerald-50 px-2.5 py-1.5 text-emerald-700">COT 2: {formatNumber(cotValue(district.cots, "COT 2"))}</span>
+                <span className="flex items-center gap-1.5 rounded-md bg-white px-2.5 py-1.5 text-slate-600 ring-1 ring-slate-200">
+                  <GrowthBadge current={district.count} previous={comparisonDistrict?.count ?? 0} />
+                  {comparisonLabel}
+                </span>
               </div>
             ) : null}
           </div>
@@ -496,13 +550,14 @@ function WardDetailPanel({
       </div>
 
       <div className="overflow-x-auto p-4 sm:p-5">
-        <table className="w-full min-w-[640px] border-separate border-spacing-0 text-sm">
+        <table className="w-full min-w-[760px] border-separate border-spacing-0 text-sm">
           <thead>
             <tr className="text-left text-[11px] font-bold uppercase text-slate-500">
               <th className="border-b border-slate-200 bg-slate-50 px-3 py-2.5">Phường/xã</th>
               <th className="border-b border-slate-200 bg-slate-50 px-3 py-2.5 text-right">{isAverage ? "TB đơn/ngày" : "Tổng đơn"}</th>
               <th className="border-b border-slate-200 bg-blue-50/70 px-3 py-2.5 text-right text-blue-700">COT 1{isAverage ? " TB" : ""}</th>
               <th className="border-b border-slate-200 bg-emerald-50/70 px-3 py-2.5 text-right text-emerald-700">COT 2{isAverage ? " TB" : ""}</th>
+              <th className="border-b border-slate-200 bg-slate-50 px-3 py-2.5 text-right">Tăng trưởng</th>
             </tr>
           </thead>
           <tbody>
@@ -512,6 +567,12 @@ function WardDetailPanel({
                 <td className="border-b border-slate-100 px-3 py-3 text-right font-black text-slate-950">{formatNumber(ward.count)}</td>
                 <td className="border-b border-slate-100 px-3 py-3 text-right font-semibold text-blue-700">{formatNumber(cotValue(ward.cots, "COT 1"))}</td>
                 <td className="border-b border-slate-100 px-3 py-3 text-right font-semibold text-emerald-700">{formatNumber(cotValue(ward.cots, "COT 2"))}</td>
+                <td className="border-b border-slate-100 px-3 py-3 text-right">
+                  <GrowthBadge
+                    current={ward.count}
+                    previous={comparisonDistrict?.wards.find((item) => item.ward === ward.ward)?.count ?? 0}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -519,6 +580,45 @@ function WardDetailPanel({
         {district && wards.length === 0 ? <EmptyState text="Không tìm thấy phường/xã phù hợp." /> : null}
       </div>
     </div>
+  );
+}
+
+function GrowthBadge({ current, previous }: { current: number; previous: number }) {
+  if (previous <= 0) {
+    if (current <= 0) {
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold text-slate-500">
+          <Minus size={12} /> 0%
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700">
+        <TrendingUp size={12} /> Mới
+      </span>
+    );
+  }
+
+  const growth = ((current - previous) / previous) * 100;
+  if (Math.abs(growth) < 0.05) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold text-slate-500">
+        <Minus size={12} /> 0%
+      </span>
+    );
+  }
+
+  const positive = growth > 0;
+  const Icon = positive ? TrendingUp : TrendingDown;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-bold",
+        positive ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700",
+      )}
+    >
+      <Icon size={12} /> {positive ? "+" : ""}{growth.toFixed(1)}%
+    </span>
   );
 }
 

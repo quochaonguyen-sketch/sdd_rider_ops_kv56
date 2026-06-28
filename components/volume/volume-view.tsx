@@ -51,6 +51,7 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
   const table = kind === "delivery" ? "delivery_order" : "pickup_volume";
   const [date, setDate] = useState(todayInVietnam());
   const [rows, setRows] = useState<VolumeRow[]>([]);
+  const [comparisonRows, setComparisonRows] = useState<VolumeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deliveryViewMode, setDeliveryViewMode] = useState<DeliveryViewMode>("day");
@@ -63,6 +64,7 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
     setLoading(true);
     setError(null);
     const deliveryRange = deliveryDateRange(date, deliveryViewMode);
+    const comparisonRange = deliveryComparisonRange(date, deliveryViewMode);
 
     while (true) {
       const query =
@@ -97,6 +99,35 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
     }
 
     setRows(loaded);
+
+    if (kind === "delivery") {
+      const comparisonLoaded: VolumeRow[] = [];
+      let comparisonOffset = 0;
+      while (true) {
+        const { data, error: comparisonError } = await supabase
+          .from(table)
+          .select("summary_id,report_date,old_ward,district,area,cot,total_orders")
+          .gte("report_date", comparisonRange.start)
+          .lte("report_date", comparisonRange.end)
+          .order("district")
+          .range(comparisonOffset, comparisonOffset + PAGE_SIZE - 1);
+
+        if (comparisonError) {
+          setError(comparisonError.message);
+          setComparisonRows([]);
+          setLoading(false);
+          return;
+        }
+
+        const batch = (data ?? []) as VolumeRow[];
+        comparisonLoaded.push(...batch);
+        if (batch.length < PAGE_SIZE) break;
+        comparisonOffset += PAGE_SIZE;
+      }
+      setComparisonRows(comparisonLoaded);
+    } else {
+      setComparisonRows([]);
+    }
     setLoading(false);
   }, [date, deliveryViewMode, kind, table]);
 
@@ -116,6 +147,15 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
   const deliverySummary = useMemo(
     () => (kind === "delivery" && deliveryViewMode !== "day" ? averageVolumeSummary(summary, deliveryDayCount) : summary),
     [deliveryDayCount, deliveryViewMode, kind, summary],
+  );
+  const comparisonRawSummary = useMemo(() => summarizeVolume(comparisonRows), [comparisonRows]);
+  const comparisonDayCount = useMemo(() => countReportDays(comparisonRows), [comparisonRows]);
+  const comparisonSummary = useMemo(
+    () =>
+      kind === "delivery" && deliveryViewMode !== "day"
+        ? averageVolumeSummary(comparisonRawSummary, comparisonDayCount)
+        : comparisonRawSummary,
+    [comparisonDayCount, comparisonRawSummary, deliveryViewMode, kind],
   );
   const pickupDistricts = useMemo(() => summarizePickupDistrictRoutes(rows), [rows]);
   const pickupRouteCount = useMemo(() => countPickupRoutes(pickupDistricts), [pickupDistricts]);
@@ -153,6 +193,9 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
       districts={deliverySummary.districts}
       trend={deliveryTrend}
       averageDays={deliveryViewMode === "day" ? 1 : deliveryDayCount}
+      comparisonTotalOrders={comparisonSummary.total}
+      comparisonDistricts={comparisonSummary.districts}
+      comparisonLabel={deliveryComparisonLabel(deliveryViewMode)}
     />
   );
 }
@@ -366,6 +409,29 @@ function deliveryDateRange(date: string, viewMode: DeliveryViewMode) {
     return { start: isoDate(start), end: isoDate(end) };
   }
   return { start: date, end: date };
+}
+
+function deliveryComparisonRange(date: string, viewMode: DeliveryViewMode) {
+  const current = deliveryDateRange(date, viewMode);
+  const currentStart = new Date(`${current.start}T00:00:00Z`);
+
+  if (viewMode === "month") {
+    const start = new Date(Date.UTC(currentStart.getUTCFullYear(), currentStart.getUTCMonth() - 1, 1));
+    const end = new Date(Date.UTC(currentStart.getUTCFullYear(), currentStart.getUTCMonth(), 0));
+    return { start: isoDate(start), end: isoDate(end) };
+  }
+
+  const start = new Date(currentStart);
+  start.setUTCDate(start.getUTCDate() - 7);
+  const end = new Date(`${current.end}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() - 7);
+  return { start: isoDate(start), end: isoDate(end) };
+}
+
+function deliveryComparisonLabel(viewMode: DeliveryViewMode) {
+  if (viewMode === "month") return "so với tháng trước";
+  if (viewMode === "week") return "so với tuần trước";
+  return "so với cùng thứ tuần trước";
 }
 
 function isoDate(value: Date) {
