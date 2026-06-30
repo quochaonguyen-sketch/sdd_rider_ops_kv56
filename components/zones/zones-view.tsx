@@ -59,7 +59,9 @@ export function ZonesView() {
       return {
         zone,
         total: zoneRiders.length,
-        on: todayLogs.filter((log) => log.status?.toUpperCase() === "ON").length,
+        on: todayLogs.filter((log) =>
+          ["ON", "WORKING_REST_DAY", "NO_PICKUP"].includes(log.status?.toUpperCase() ?? ""),
+        ).length,
         off: todayLogs.filter((log) => log.status?.toUpperCase().includes("OFF")).length,
       };
     });

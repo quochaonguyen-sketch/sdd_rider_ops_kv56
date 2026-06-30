@@ -31,7 +31,14 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 
-type ScheduleStatus = "" | "ON" | "OFF_WEEKLY" | "OFF_APPROVED" | "OFF_UNEXPECTED";
+type ScheduleStatus =
+  | ""
+  | "ON"
+  | "OFF_WEEKLY"
+  | "OFF_APPROVED"
+  | "OFF_UNEXPECTED"
+  | "WORKING_REST_DAY"
+  | "NO_PICKUP";
 
 type ScheduleResponse = {
   success: boolean;
@@ -69,7 +76,12 @@ const statusOptions: Array<{ value: ScheduleStatus; label: string }> = [
   { value: "OFF_WEEKLY", label: "OFF tuần" },
   { value: "OFF_APPROVED", label: "OFF phép" },
   { value: "OFF_UNEXPECTED", label: "OFF đột xuất" },
+  { value: "WORKING_REST_DAY", label: "OFF nhưng không OFF" },
+  { value: "NO_PICKUP", label: "Không đi pick" },
 ];
+
+const riderPageSizes = [25, 50, 100];
+const importIssuePageSize = 50;
 
 export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }: { initialMonth?: string }) {
   const [riders, setRiders] = useState<Rider[]>([]);
@@ -89,15 +101,17 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   const [importing, setImporting] = useState(false);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [importIssues, setImportIssues] = useState<ImportIssue[]>([]);
+  const [issuesImportedPartially, setIssuesImportedPartially] = useState(false);
+  const [riderPage, setRiderPage] = useState(1);
+  const [riderPageSize, setRiderPageSize] = useState(25);
+  const [issuePage, setIssuePage] = useState(1);
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
   const [editor, setEditor] = useState<CellEditor | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const desktopScrollRef = useRef<HTMLDivElement>(null);
   const realtimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const busyRef = useRef(false);
-  const [desktopStartIndex, setDesktopStartIndex] = useState(0);
   const deferredQuery = useDeferredValue(query);
 
   const load = useCallback(async () => {
@@ -185,27 +199,39 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
     return map;
   }, [logs, riders]);
 
-  const selectedSummary = useMemo(
-    () => summarizeDate(selectedDate, filteredRiders, logMap),
-    [filteredRiders, logMap, selectedDate],
+  const dailySummaries = useMemo(
+    () =>
+      new Map(
+        days.map((day) => {
+          const date = format(day, "yyyy-MM-dd");
+          return [date, summarizeDate(date, filteredRiders, logMap)] as const;
+        }),
+      ),
+    [days, filteredRiders, logMap],
   );
+  const selectedSummary = dailySummaries.get(selectedDate) ?? {
+    on: 0,
+    off: 0,
+    defaultOn: 0,
+    total: filteredRiders.length,
+  };
+  const selectedDayIndex = Math.max(0, days.findIndex((day) => format(day, "yyyy-MM-dd") === selectedDate));
+  const dayWindowIndex = Math.floor(selectedDayIndex / 7);
+  const dayWindowCount = Math.ceil(days.length / 7);
+  const visibleDays = days.slice(dayWindowIndex * 7, dayWindowIndex * 7 + 7);
 
-  const desktopWindow = useMemo(() => {
-    const rowHeight = 74;
-    const overscan = 6;
-    const visibleRows = 18;
-    const maxStart = Math.max(0, filteredRiders.length - visibleRows);
-    const startIndex = Math.min(maxStart, desktopStartIndex);
-    const endIndex = Math.min(filteredRiders.length, startIndex + visibleRows + overscan * 2);
-    return {
-      endIndex,
-      rowHeight,
-      startIndex,
-      topPadding: startIndex * rowHeight,
-      bottomPadding: Math.max(0, (filteredRiders.length - endIndex) * rowHeight),
-      rows: filteredRiders.slice(startIndex, endIndex),
-    };
-  }, [desktopStartIndex, filteredRiders]);
+  const riderPageCount = Math.max(1, Math.ceil(filteredRiders.length / riderPageSize));
+  const safeRiderPage = Math.min(riderPage, riderPageCount);
+  const paginatedRiders = useMemo(
+    () => filteredRiders.slice((safeRiderPage - 1) * riderPageSize, safeRiderPage * riderPageSize),
+    [filteredRiders, riderPageSize, safeRiderPage],
+  );
+  const issuePageCount = Math.max(1, Math.ceil(importIssues.length / importIssuePageSize));
+  const safeIssuePage = Math.min(issuePage, issuePageCount);
+  const paginatedImportIssues = useMemo(
+    () => importIssues.slice((safeIssuePage - 1) * importIssuePageSize, safeIssuePage * importIssuePageSize),
+    [importIssues, safeIssuePage],
+  );
 
   async function saveUpdates(updates: ScheduleUpdate[], message?: string) {
     const keys = updates.map((item) => cellKey(item.rider_id, item.work_date));
@@ -310,6 +336,15 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
     setMonth(nextMonth);
     setSelectedDate(`${nextMonth}-01`);
     setImportIssues([]);
+    setIssuesImportedPartially(false);
+    setRiderPage(1);
+    setIssuePage(1);
+  }
+
+  function changeDayWindow(nextWindow: number) {
+    const safeWindow = Math.max(0, Math.min(dayWindowCount - 1, nextWindow));
+    const firstDay = days[safeWindow * 7];
+    if (firstDay) setSelectedDate(format(firstDay, "yyyy-MM-dd"));
   }
 
   async function downloadTemplate() {
@@ -341,6 +376,8 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
     setError(null);
     setSuccess(null);
     setImportIssues([]);
+    setIssuesImportedPartially(false);
+    setIssuePage(1);
 
     const body = new FormData();
     body.set("file", file);
@@ -354,6 +391,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
           imported?: number;
           cleared?: number;
           riders?: number;
+          skipped?: number;
         }
       | null;
 
@@ -364,13 +402,17 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
     if (!response.ok || !result?.success) {
       setError(result?.error ?? "Không thể import lịch rider");
       setImportIssues(result?.errors ?? []);
+      setIssuesImportedPartially(false);
       return;
     }
+
+    setImportIssues(result.errors ?? []);
+    setIssuesImportedPartially(Boolean(result.errors?.length));
 
     setSuccess(
       `Đã import ${result.imported ?? 0} ô lịch cho ${result.riders ?? 0} rider${
         result.cleared ? `, xóa ${result.cleared} ô` : ""
-      }.`,
+      }${result.skipped ? `; bỏ qua ${result.skipped} lỗi` : ""}.`,
     );
     await load();
   }
@@ -456,28 +498,31 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
             className="pl-10"
             placeholder="Tìm ID, tên, quận giao, phường giao"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setRiderPage(1);
+            }}
           />
         </label>
-        <Select value={kv} onChange={(event) => setKv(event.target.value)}>
+        <Select value={kv} onChange={(event) => { setKv(event.target.value); setRiderPage(1); }}>
           <option value="all">Tất cả KV</option>
           {kvOptions.map((option) => (
             <option key={option}>{option}</option>
           ))}
         </Select>
-        <Select value={cot} onChange={(event) => setCot(event.target.value)}>
+        <Select value={cot} onChange={(event) => { setCot(event.target.value); setRiderPage(1); }}>
           <option value="all">Tất cả COT</option>
           {cotOptions.map((option) => (
             <option key={option}>{option}</option>
           ))}
         </Select>
-        <Select value={deliveryDistrict} onChange={(event) => setDeliveryDistrict(event.target.value)}>
+        <Select value={deliveryDistrict} onChange={(event) => { setDeliveryDistrict(event.target.value); setRiderPage(1); }}>
           <option value="all">Tất cả quận giao</option>
           {deliveryDistrictOptions.map((option) => (
             <option key={option}>{option}</option>
           ))}
         </Select>
-        <Select value={rosterStatus} onChange={(event) => setRosterStatus(event.target.value)}>
+        <Select value={rosterStatus} onChange={(event) => { setRosterStatus(event.target.value); setRiderPage(1); }}>
           <option value="active">Rider active</option>
           <option value="inactive">Rider inactive</option>
           <option value="all">Tất cả rider</option>
@@ -487,7 +532,13 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
       <Card className="grid gap-3 border-blue-100 bg-blue-50 p-3 sm:grid-cols-[180px_1fr_auto] sm:items-end sm:p-4">
         <label>
           <span className="mb-1 block text-xs font-bold uppercase text-blue-700">Ngày xếp nhanh</span>
-          <Input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+          <Input
+            type="date"
+            min={format(days[0], "yyyy-MM-dd")}
+            max={format(days[days.length - 1], "yyyy-MM-dd")}
+            value={selectedDate}
+            onChange={(event) => setSelectedDate(event.target.value)}
+          />
         </label>
         <label>
           <span className="mb-1 block text-xs font-bold uppercase text-blue-700">Trạng thái</span>
@@ -512,9 +563,13 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="font-bold text-red-900">File có {importIssues.length} lỗi</h2>
-              <p className="mt-1 text-sm text-red-700">Chưa có dữ liệu nào được import.</p>
+              <p className="mt-1 text-sm text-red-700">
+                {issuesImportedPartially
+                  ? "Các ô hợp lệ đã được import; danh sách dưới đây là phần bị bỏ qua."
+                  : "Không có dữ liệu hợp lệ được import; kiểm tra các lỗi dưới đây."}
+              </p>
             </div>
-            <Button type="button" variant="ghost" className="size-10 p-0" onClick={() => setImportIssues([])}>
+            <Button type="button" variant="ghost" className="size-10 p-0" onClick={() => { setImportIssues([]); setIssuePage(1); setIssuesImportedPartially(false); }}>
               <X size={18} />
             </Button>
           </div>
@@ -529,9 +584,9 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
                 </tr>
               </thead>
               <tbody>
-                {importIssues.map((issue, index) => (
+                {paginatedImportIssues.map((issue, index) => (
                   <tr
-                    key={`${issue.row}-${issue.rider_code ?? ""}-${issue.date ?? ""}-${index}`}
+                    key={`${issue.row}-${issue.rider_code ?? ""}-${issue.date ?? ""}-${(safeIssuePage - 1) * importIssuePageSize + index}`}
                     className="border-t border-red-100 text-red-800"
                   >
                     <td className="px-3 py-2">{issue.row}</td>
@@ -543,6 +598,14 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
               </tbody>
             </table>
           </div>
+          <PaginationBar
+            className="mt-3"
+            page={safeIssuePage}
+            pageCount={issuePageCount}
+            total={importIssues.length}
+            pageSize={importIssuePageSize}
+            onPageChange={setIssuePage}
+          />
         </Card>
       ) : null}
       {!canEdit && !loading ? (
@@ -551,12 +614,41 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
         </p>
       ) : null}
 
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3">
+        <Button
+          type="button"
+          variant="secondary"
+          className="size-10 p-0"
+          disabled={dayWindowIndex <= 0}
+          onClick={() => changeDayWindow(dayWindowIndex - 1)}
+          aria-label="7 ngày trước"
+        >
+          <ChevronLeft size={17} />
+        </Button>
+        <div className="text-center">
+          <p className="text-xs font-black text-slate-800">Tuần {dayWindowIndex + 1}/{dayWindowCount}</p>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            {format(visibleDays[0], "dd/MM")} - {format(visibleDays[visibleDays.length - 1], "dd/MM/yyyy")}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          className="size-10 p-0"
+          disabled={dayWindowIndex >= dayWindowCount - 1}
+          onClick={() => changeDayWindow(dayWindowIndex + 1)}
+          aria-label="7 ngày sau"
+        >
+          <ChevronRight size={17} />
+        </Button>
+      </div>
+
       <div className="md:hidden">
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-3">
-          {days.map((day) => {
+          {visibleDays.map((day) => {
             const date = format(day, "yyyy-MM-dd");
             const active = date === selectedDate;
-            const summary = summarizeDate(date, filteredRiders, logMap);
+            const summary = dailySummaries.get(date) ?? { on: 0, total: 0 };
             return (
               <button
                 key={date}
@@ -581,7 +673,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
         </div>
 
         <div className="space-y-3">
-          {filteredRiders.map((rider) => {
+          {paginatedRiders.map((rider) => {
             const log = logMap.get(cellKey(rider.id, selectedDate));
             const status = displayStatus(log?.status);
             const saving = savingCells.has(cellKey(rider.id, selectedDate));
@@ -628,14 +720,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
       </div>
 
       <Card className="hidden overflow-hidden p-0 md:block">
-        <div
-          ref={desktopScrollRef}
-          className="max-h-[70vh] overflow-auto"
-          onScroll={(event) => {
-            const nextStartIndex = Math.max(0, Math.floor(event.currentTarget.scrollTop / 74) - 6);
-            setDesktopStartIndex((current) => (current === nextStartIndex ? current : nextStartIndex));
-          }}
-        >
+        <div className="max-h-[70vh] overflow-auto">
           <table className="min-w-max border-separate border-spacing-0 text-left text-xs">
             <thead className="sticky top-0 z-30">
               <tr>
@@ -643,9 +728,9 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
                   <p className="text-sm font-bold">Rider</p>
                   <p className="mt-1 font-normal text-slate-300">{filteredRiders.length} người trong danh sách</p>
                 </th>
-                {days.map((day) => {
+                {visibleDays.map((day) => {
                   const date = format(day, "yyyy-MM-dd");
-                  const summary = summarizeDate(date, filteredRiders, logMap);
+                  const summary = dailySummaries.get(date) ?? { on: 0, total: 0 };
                   const percentage = summary.total ? Math.round((summary.on / summary.total) * 100) : 0;
                   return (
                     <th
@@ -677,17 +762,12 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
               </tr>
             </thead>
             <tbody>
-              {desktopWindow.topPadding > 0 ? (
-                <tr aria-hidden="true">
-                  <td colSpan={days.length + 1} style={{ height: desktopWindow.topPadding }} />
-                </tr>
-              ) : null}
-              {desktopWindow.rows.map((rider, index) => (
+              {paginatedRiders.map((rider, index) => (
                 <DesktopScheduleRow
                   key={rider.id}
                   rider={rider}
-                  index={desktopWindow.startIndex + index}
-                  days={days}
+                  index={(safeRiderPage - 1) * riderPageSize + index}
+                  days={visibleDays}
                   logMap={logMap}
                   savingCells={savingCells}
                   selectedDate={selectedDate}
@@ -695,15 +775,33 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
                   onEdit={openEditor}
                 />
               ))}
-              {desktopWindow.bottomPadding > 0 ? (
-                <tr aria-hidden="true">
-                  <td colSpan={days.length + 1} style={{ height: desktopWindow.bottomPadding }} />
-                </tr>
-              ) : null}
             </tbody>
           </table>
         </div>
       </Card>
+
+      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+        <PaginationBar
+          page={safeRiderPage}
+          pageCount={riderPageCount}
+          total={filteredRiders.length}
+          pageSize={riderPageSize}
+          onPageChange={setRiderPage}
+        />
+        <label className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+          Số rider mỗi trang
+          <Select
+            className="h-9 w-24"
+            value={String(riderPageSize)}
+            onChange={(event) => {
+              setRiderPageSize(Number(event.target.value));
+              setRiderPage(1);
+            }}
+          >
+            {riderPageSizes.map((size) => <option key={size} value={size}>{size}</option>)}
+          </Select>
+        </label>
+      </div>
 
       {editor ? (
         <div className="fixed inset-0 z-50 grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
@@ -937,6 +1035,55 @@ function SummaryCard({
   );
 }
 
+function PaginationBar({
+  page,
+  pageCount,
+  total,
+  pageSize,
+  onPageChange,
+  className = "",
+}: {
+  page: number;
+  pageCount: number;
+  total: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  className?: string;
+}) {
+  const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const end = Math.min(total, page * pageSize);
+  return (
+    <div className={`flex flex-wrap items-center justify-between gap-3 ${className}`}>
+      <p className="text-xs font-semibold text-slate-500">
+        {start}-{end} / {total}
+      </p>
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          className="size-9 p-0"
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+          aria-label="Trang trước"
+        >
+          <ChevronLeft size={16} />
+        </Button>
+        <span className="min-w-20 text-center text-xs font-bold text-slate-700">Trang {page}/{pageCount}</span>
+        <Button
+          type="button"
+          variant="secondary"
+          className="size-9 p-0"
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(page + 1)}
+          aria-label="Trang sau"
+        >
+          <ChevronRight size={16} />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function summarizeDate(date: string, riders: Rider[], logMap: Map<string, AttendanceLog>) {
   let on = 0;
   let off = 0;
@@ -944,7 +1091,7 @@ function summarizeDate(date: string, riders: Rider[], logMap: Map<string, Attend
   for (const rider of riders) {
     const log = logMap.get(cellKey(rider.id, date));
     const status = displayStatus(log?.status);
-    if (status === "ON") on += 1;
+    if (isWorkingStatus(status)) on += 1;
     else if (status.startsWith("OFF_")) off += 1;
     if (!log) defaultOn += 1;
   }
@@ -955,6 +1102,8 @@ function normalizeStatus(status: string | null | undefined): ScheduleStatus {
   const normalized = status?.trim().toUpperCase() ?? "";
   if (!normalized) return "";
   if (normalized === "ON") return "ON";
+  if (normalized === "WORKING_REST_DAY") return "WORKING_REST_DAY";
+  if (normalized === "NO_PICKUP") return "NO_PICKUP";
   if (normalized.includes("UNEXPECTED") || normalized.includes("ĐỘT") || normalized.includes("DOT")) {
     return "OFF_UNEXPECTED";
   }
@@ -978,6 +1127,8 @@ function statusShortLabel(status: ScheduleStatus) {
   if (status === "OFF_WEEKLY") return "Tuần";
   if (status === "OFF_APPROVED") return "Phép";
   if (status === "OFF_UNEXPECTED") return "Đột xuất";
+  if (status === "WORKING_REST_DAY") return "Đi làm OFF";
+  if (status === "NO_PICKUP") return "Không pick";
   return "-";
 }
 
@@ -986,6 +1137,8 @@ function statusChipClasses(status: ScheduleStatus) {
   if (status === "OFF_WEEKLY") return "border-amber-200 bg-amber-50 text-amber-700";
   if (status === "OFF_APPROVED") return "border-blue-200 bg-blue-50 text-blue-700";
   if (status === "OFF_UNEXPECTED") return "border-red-200 bg-red-50 text-red-700";
+  if (status === "WORKING_REST_DAY") return "border-cyan-200 bg-cyan-50 text-cyan-700";
+  if (status === "NO_PICKUP") return "border-slate-300 bg-slate-100 text-slate-700";
   return "border-slate-200 bg-white text-slate-300";
 }
 
@@ -994,7 +1147,13 @@ function statusClasses(status: ScheduleStatus) {
   if (status === "OFF_WEEKLY") return "border-amber-200 bg-amber-100 text-amber-800";
   if (status === "OFF_APPROVED") return "border-blue-200 bg-blue-100 text-blue-800";
   if (status === "OFF_UNEXPECTED") return "border-red-200 bg-red-100 text-red-800";
+  if (status === "WORKING_REST_DAY") return "border-cyan-200 bg-cyan-100 text-cyan-800";
+  if (status === "NO_PICKUP") return "border-slate-300 bg-slate-200 text-slate-800";
   return "border-slate-200 bg-slate-100 text-slate-500";
+}
+
+function isWorkingStatus(status: ScheduleStatus) {
+  return status === "ON" || status === "WORKING_REST_DAY" || status === "NO_PICKUP";
 }
 
 function cellKey(riderId: string, date: string) {

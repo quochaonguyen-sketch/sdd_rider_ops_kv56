@@ -5,7 +5,15 @@ import { createClient } from "@/lib/supabase/server";
 
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const scheduleStatusSchema = z.enum(["", "ON", "OFF_WEEKLY", "OFF_APPROVED", "OFF_UNEXPECTED"]);
+const scheduleStatusSchema = z.enum([
+  "",
+  "ON",
+  "OFF_WEEKLY",
+  "OFF_APPROVED",
+  "OFF_UNEXPECTED",
+  "WORKING_REST_DAY",
+  "NO_PICKUP",
+]);
 
 const updateSchema = z.object({
   updates: z

@@ -87,8 +87,8 @@ export function DashboardView() {
       }
     }
 
-    const onToday = Array.from(todayByRider.values()).filter(
-      (log) => log.status?.toUpperCase() === "ON",
+    const onToday = Array.from(todayByRider.values()).filter((log) =>
+      ["ON", "WORKING_REST_DAY", "NO_PICKUP"].includes(log.status?.toUpperCase() ?? ""),
     ).length;
     const offToday = Array.from(todayByRider.values()).filter((log) =>
       log.status?.toUpperCase().includes("OFF"),

@@ -12,7 +12,10 @@ type RealtimeTable =
   | "delivery_order"
   | "delivery_volume"
   | "pickup_volume"
-  | "pickup_assignments";
+  | "pickup_assignments"
+  | "morning_delivery_assignments"
+  | "morning_delivery_absence_notes"
+  | "realtime_delivery_riders";
 
 type Options<T extends Record<string, unknown>> = {
   table: RealtimeTable;

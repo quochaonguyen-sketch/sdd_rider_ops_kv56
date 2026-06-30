@@ -3,7 +3,14 @@ import * as XLSX from "xlsx";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
-type ScheduleStatus = "" | "ON" | "OFF_WEEKLY" | "OFF_APPROVED" | "OFF_UNEXPECTED";
+type ScheduleStatus =
+  | ""
+  | "ON"
+  | "OFF_WEEKLY"
+  | "OFF_APPROVED"
+  | "OFF_UNEXPECTED"
+  | "WORKING_REST_DAY"
+  | "NO_PICKUP";
 
 type DateColumn = {
   column: number;
@@ -49,10 +56,16 @@ function normalizeStatus(value: unknown): ScheduleStatus | null {
   if (!normalized) return "";
   if (["on", "lam", "di lam", "work", "working"].includes(normalized)) return "ON";
   if (["off", "off tuan", "nghi", "nghi tuan"].includes(normalized)) return "OFF_WEEKLY";
-  if (["off phep", "nghi phep", "phep", "approved"].includes(normalized)) return "OFF_APPROVED";
+  if (["off phep", "off co phep", "off co xin phep", "nghi phep", "nghi co phep", "phep", "approved"].includes(normalized)) {
+    return "OFF_APPROVED";
+  }
   if (["off dot xuat", "nghi dot xuat", "dot xuat", "unexpected"].includes(normalized)) {
     return "OFF_UNEXPECTED";
   }
+  if (["off nhung khong off", "off nhung van di lam", "di lam ngay off"].includes(normalized)) {
+    return "WORKING_REST_DAY";
+  }
+  if (["khong di pick", "khong pick", "no pickup", "no pick"].includes(normalized)) return "NO_PICKUP";
   if (["xoa", "clear", "chua xep", "chua co lich"].includes(normalized)) return "";
   return null;
 }
@@ -269,6 +282,8 @@ export async function GET(request: Request) {
     ["OFF hoặc OFF tuần", "Nghỉ tuần"],
     ["OFF phép", "Nghỉ có phép"],
     ["OFF đột xuất", "Nghỉ đột xuất"],
+    ["OFF nhưng không OFF", "Vẫn đi làm trong ngày OFF"],
+    ["Không đi pick", "Đi làm nhưng không chạy pickup"],
     ["XÓA hoặc CHƯA XẾP", "Xóa lịch của ngày đó"],
     ["Ô trống", "Giữ nguyên dữ liệu hiện tại"],
   ]);
@@ -349,25 +364,29 @@ export async function POST(request: Request) {
     );
   }
 
-  if (issues.length > 0) {
+  const sortedIssues = issues.sort((a, b) => a.row - b.row || (a.date ?? "").localeCompare(b.date ?? ""));
+  const blockedRows = new Set(
+    sortedIssues
+      .filter((issue) => !issue.date && issue.rider_code)
+      .map((issue) => `${issue.row}:${issue.rider_code}`),
+  );
+  const validUpdates = parsed.updates.filter(
+    (item) => ridersByCode.has(item.rider_code) && !blockedRows.has(`${item.row}:${item.rider_code}`),
+  );
+
+  if (validUpdates.length === 0) {
     return NextResponse.json(
       {
         success: false,
-        error: `File có ${issues.length} lỗi, chưa import dữ liệu`,
-        errors: issues.sort((a, b) => a.row - b.row || (a.date ?? "").localeCompare(b.date ?? "")),
+        error: sortedIssues.length > 0 ? `File có ${sortedIssues.length} lỗi, không có dữ liệu hợp lệ để import` : "Không có ô lịch nào để import",
+        errors: sortedIssues,
       },
-      { status: 409 },
-    );
-  }
-  if (parsed.updates.length === 0) {
-    return NextResponse.json(
-      { success: false, error: "Không có ô ON/OFF nào để import" },
-      { status: 400 },
+      { status: sortedIssues.length > 0 ? 409 : 400 },
     );
   }
 
-  const clearItems = parsed.updates.filter((item) => !item.status || item.status === "ON");
-  const upsertItems = parsed.updates
+  const clearItems = validUpdates.filter((item) => !item.status || item.status === "ON");
+  const upsertItems = validUpdates
     .filter((item) => item.status && item.status !== "ON")
     .map((item) => {
       const rider = ridersByCode.get(item.rider_code)!;
@@ -408,12 +427,13 @@ export async function POST(request: Request) {
   await session.admin.from("activity_logs").insert({
     entity_type: "attendance_schedule",
     action: "imported",
-    message: `Imported ${parsed.updates.length} schedule cells from ${file.name}`,
+    message: `Imported ${validUpdates.length} schedule cells from ${file.name}`,
     raw_data: {
       source_file: file.name,
       month,
-      cells: parsed.updates.length,
+      cells: validUpdates.length,
       riders: uniqueCodes.length,
+      skipped_errors: sortedIssues.length,
     },
   });
 
@@ -421,6 +441,8 @@ export async function POST(request: Request) {
     success: true,
     imported: upsertItems.length,
     cleared: clearItems.length,
-    riders: uniqueCodes.length,
+    riders: new Set(validUpdates.map((item) => item.rider_code)).size,
+    errors: sortedIssues,
+    skipped: sortedIssues.length,
   });
 }

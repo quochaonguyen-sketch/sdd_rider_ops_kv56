@@ -1,0 +1,706 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CalendarDays, Check, ClipboardCheck, Download, MapPin, RefreshCcw, Save, ScanLine, Search, Trash2, Truck, UserCheck, Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { hcmDistricts } from "@/lib/locations/hcm";
+import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
+import { cn } from "@/utils/cn";
+
+type MorningRider = {
+  id: string;
+  rider_code: string;
+  full_name: string | null;
+  kv: string | null;
+  cot: string | null;
+  pickup_district: string | null;
+  pickup_ward: string | null;
+  status: string | null;
+};
+
+type AssignmentRow = {
+  id: string;
+  work_date: string;
+  rider_id: string;
+  rider_code: string;
+  district: string;
+  ward: string;
+  assigned_at: string;
+  riders?: { full_name: string | null; cot: string | null } | null;
+};
+
+type AssignmentGroup = {
+  key: string;
+  rider_id: string;
+  rider_code: string;
+  full_name: string | null;
+  district: string;
+  wards: string[];
+  assigned_at: string;
+};
+
+type AttendanceRow = {
+  id: string;
+  rider_id: string | null;
+  rider_code: string;
+  work_date: string;
+  status: string;
+  note: string | null;
+};
+
+type AbsenceNoteRow = {
+  id: string;
+  work_date: string;
+  rider_id: string;
+  rider_code: string;
+  reason: string;
+  is_excused: boolean;
+  updated_at: string;
+};
+
+type AbsenceNoteDraft = Pick<AbsenceNoteRow, "reason" | "is_excused">;
+
+type ApiResponse = {
+  success: boolean;
+  error?: string;
+  can_edit?: boolean;
+  riders?: MorningRider[];
+  assignments?: AssignmentRow[];
+  attendance?: AttendanceRow[];
+  absence_notes?: AbsenceNoteRow[];
+  absence_note?: AbsenceNoteRow | null;
+  active_delivery_rider_count?: number;
+  realtime_delivery_updated_at?: string | null;
+};
+
+export function MorningDeliveryView() {
+  const [date, setDate] = useState(todayInVietnam());
+  const [riders, setRiders] = useState<MorningRider[]>([]);
+  const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
+  const [activeDeliveryRiderCount, setActiveDeliveryRiderCount] = useState(0);
+  const [absenceNoteDrafts, setAbsenceNoteDrafts] = useState<Record<string, AbsenceNoteDraft>>({});
+  const [selectedRider, setSelectedRider] = useState<MorningRider | null>(null);
+  const [selectedDistrictId, setSelectedDistrictId] = useState(hcmDistricts[0]?.id ?? "");
+  const [selectedWards, setSelectedWards] = useState<Set<string>>(new Set());
+  const [scanValue, setScanValue] = useState("");
+  const [assignmentQuery, setAssignmentQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savingNoteRiderId, setSavingNoteRiderId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const scanInputRef = useRef<HTMLInputElement | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const response = await fetch(`/api/morning-delivery?date=${date}`, { cache: "no-store" });
+    const result = (await response.json().catch(() => null)) as ApiResponse | null;
+    if (!response.ok || !result?.success) {
+      setError(result?.error ?? "Không thể tải dữ liệu điểm danh sáng");
+      setLoading(false);
+      return;
+    }
+    setRiders(result.riders ?? []);
+    setAssignments(result.assignments ?? []);
+    setAttendance(result.attendance ?? []);
+    setActiveDeliveryRiderCount(result.active_delivery_rider_count ?? 0);
+    setAbsenceNoteDrafts(
+      Object.fromEntries(
+        (result.absence_notes ?? []).map((note) => [
+          note.rider_id,
+          { reason: note.reason, is_excused: note.is_excused },
+        ]),
+      ),
+    );
+    setCanEdit(Boolean(result.can_edit));
+    setLoading(false);
+  }, [date]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
+  }, [load]);
+
+  useSupabaseRealtime({ table: "morning_delivery_assignments", onChange: load });
+  useSupabaseRealtime({ table: "attendance_logs", onChange: load });
+  useSupabaseRealtime({ table: "morning_delivery_absence_notes", onChange: load });
+  useSupabaseRealtime({ table: "realtime_delivery_riders", onChange: load });
+
+  const selectedDistrict = hcmDistricts.find((district) => district.id === selectedDistrictId) ?? hcmDistricts[0];
+  const occupiedAreas = useMemo(
+    () => new Set(assignments.map((assignment) => areaKey(assignment.district, assignment.ward))),
+    [assignments],
+  );
+  const availableWards = useMemo(
+    () =>
+      selectedDistrict?.wards.filter(
+        (ward) => !occupiedAreas.has(areaKey(selectedDistrict.name, ward.name)),
+      ) ?? [],
+    [occupiedAreas, selectedDistrict],
+  );
+  const groups = useMemo(() => groupAssignments(assignments), [assignments]);
+  const filteredGroups = useMemo(() => {
+    const query = normalize(assignmentQuery);
+    if (!query) return groups;
+    return groups.filter((group) =>
+      normalize([group.rider_code, group.full_name, group.district, ...group.wards].filter(Boolean).join(" ")).includes(query),
+    );
+  }, [assignmentQuery, groups]);
+  const requiredRiders = useMemo(
+    () => riders.filter((rider) => !rider.pickup_district?.trim() && !rider.pickup_ward?.trim()),
+    [riders],
+  );
+  const attendanceByRider = useMemo(() => {
+    const map = new Map<string, AttendanceRow>();
+    for (const log of attendance) {
+      if (log.rider_id) map.set(log.rider_id, log);
+      map.set(normalize(log.rider_code), log);
+    }
+    return map;
+  }, [attendance]);
+  const assignedRiderIds = useMemo(
+    () => new Set(assignments.map((assignment) => assignment.rider_id)),
+    [assignments],
+  );
+  const requiredAbsentRiders = useMemo(
+    () =>
+      requiredRiders
+        .filter((rider) => !assignedRiderIds.has(rider.id))
+        .map((rider) => ({
+          rider,
+          attendance: attendanceByRider.get(rider.id) ?? attendanceByRider.get(normalize(rider.rider_code)) ?? null,
+        })),
+    [assignedRiderIds, attendanceByRider, requiredRiders],
+  );
+  const assignedRiderCount = new Set(assignments.map((assignment) => assignment.rider_id)).size;
+  const totalAreaCount = hcmDistricts.reduce((total, district) => total + district.wards.length, 0);
+
+  function scanRider(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSuccess(null);
+    const code = normalize(scanValue);
+    if (!code) return;
+    const rider = riders.find((item) => normalize(item.rider_code) === code) ?? null;
+    if (!rider) {
+      setSelectedRider(null);
+      setError("Không tìm thấy Rider ID thuộc COT 1.");
+      return;
+    }
+    const existingGroups = groups.filter((group) => group.rider_id === rider.id);
+    if (existingGroups.length > 0) {
+      const assignedRoutes = existingGroups
+        .map((group) => routeLabel(group.district.replace(/^(Quận|Huyện)\s+/i, ""), group.wards))
+        .join(" · ");
+      setSelectedRider(null);
+      setScanValue("");
+      setSuccess(`${rider.full_name?.trim() || rider.rider_code} đã điểm danh: ${assignedRoutes}.`);
+      return;
+    }
+    setSelectedRider(rider);
+    setScanValue("");
+    setSelectedWards(new Set());
+  }
+
+  function toggleWard(ward: string) {
+    setSelectedWards((current) => {
+      const next = new Set(current);
+      if (next.has(ward)) next.delete(ward);
+      else next.add(ward);
+      return next;
+    });
+  }
+
+  async function assignAreas() {
+    if (!selectedRider || !selectedDistrict || selectedWards.size === 0) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    const response = await fetch("/api/morning-delivery", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        work_date: date,
+        rider_id: selectedRider.id,
+        district: selectedDistrict.name,
+        wards: Array.from(selectedWards),
+      }),
+    });
+    const result = (await response.json().catch(() => null)) as ApiResponse | null;
+    if (!response.ok || !result?.success) {
+      setError(result?.error ?? "Không thể chia khu vực");
+      setSaving(false);
+      await load();
+      return;
+    }
+    setSuccess(`Đã điểm danh ${selectedRider.rider_code} và chia ${routeLabel(selectedDistrict.shortName, Array.from(selectedWards))}.`);
+    setSelectedRider(null);
+    setSelectedWards(new Set());
+    setSaving(false);
+    await load();
+    window.requestAnimationFrame(() => scanInputRef.current?.focus());
+  }
+
+  async function removeGroup(group: AssignmentGroup) {
+    setSaving(true);
+    setError(null);
+    const response = await fetch("/api/morning-delivery", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ work_date: date, rider_id: group.rider_id, district: group.district }),
+    });
+    const result = (await response.json().catch(() => null)) as ApiResponse | null;
+    if (!response.ok || !result?.success) setError(result?.error ?? "Không thể huỷ chia khu vực");
+    setSaving(false);
+    await load();
+  }
+
+  function updateAbsenceNoteDraft(riderId: string, patch: Partial<AbsenceNoteDraft>) {
+    setAbsenceNoteDrafts((current) => {
+      const existing = current[riderId] ?? { reason: "", is_excused: false };
+      return { ...current, [riderId]: { ...existing, ...patch } };
+    });
+  }
+
+  async function saveAbsenceNote(rider: MorningRider) {
+    const draft = absenceNoteDrafts[rider.id] ?? { reason: "", is_excused: false };
+    setSavingNoteRiderId(rider.id);
+    setError(null);
+    setSuccess(null);
+
+    const response = await fetch("/api/morning-delivery", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        work_date: date,
+        rider_id: rider.id,
+        reason: draft.reason,
+        is_excused: draft.is_excused,
+      }),
+    });
+    const result = (await response.json().catch(() => null)) as ApiResponse | null;
+    if (!response.ok || !result?.success) {
+      setError(result?.error ?? "Không thể lưu lý do vắng");
+      setSavingNoteRiderId(null);
+      return;
+    }
+
+    setSuccess(`Đã lưu lý do vắng của ${rider.rider_code}.`);
+    setSavingNoteRiderId(null);
+  }
+
+  async function exportAbsentRiders() {
+    setExporting(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/morning-delivery/export?date=${date}`);
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(result?.error ?? "Không thể xuất danh sách");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `rider-chua-diem-danh-${date}.xlsx`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Không thể xuất danh sách");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const riderHasPickupRoute = Boolean(selectedRider?.pickup_district?.trim() || selectedRider?.pickup_ward?.trim());
+
+  return (
+    <div className="space-y-5">
+      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">Morning dispatch</p>
+          <h1 className="mt-1 text-2xl font-black text-slate-950">Điểm danh sáng & chia khu vực giao</h1>
+          <p className="mt-1 text-sm text-slate-500">Rider COT 1 đều có thể lên lấy hàng; nhóm chưa có tuyến pickup là nhóm bắt buộc.</p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="relative block min-w-[200px]">
+            <CalendarDays size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Input type="date" value={date} onChange={(event) => setDate(event.target.value)} className="pl-9" />
+          </label>
+          <Button type="button" variant="secondary" onClick={() => void load()} disabled={loading}>
+            <RefreshCcw size={16} className={loading ? "animate-spin" : undefined} />
+            Làm mới
+          </Button>
+        </div>
+      </header>
+
+      {error ? <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p> : null}
+      {success ? <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{success}</p> : null}
+
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5" aria-label="Tổng quan điểm danh sáng">
+        <Metric icon={Users} label="Bắt buộc chưa tuyến pick" value={requiredRiders.length} />
+        <Metric icon={UserCheck} label="Rider đã chia" value={assignedRiderCount} />
+        <Metric icon={Truck} label="Rider có đơn realtime" value={activeDeliveryRiderCount} />
+        <Metric icon={MapPin} label="Phường đã nhận" value={assignments.length} />
+        <Metric icon={ClipboardCheck} label="Phường còn trống" value={Math.max(0, totalAreaCount - assignments.length)} />
+      </section>
+
+      <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)_390px]">
+        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <div className="border-b border-slate-100 px-4 py-3">
+            <h2 className="font-bold text-slate-950">1. Quét Rider ID</h2>
+            <p className="mt-0.5 text-xs text-slate-500">Nhấn Enter sau khi máy quét nhập mã.</p>
+          </div>
+          <div className="space-y-4 p-4">
+            <form onSubmit={scanRider} className="flex gap-2">
+              <label className="relative min-w-0 flex-1">
+                <ScanLine size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  ref={scanInputRef}
+                  autoFocus
+                  value={scanValue}
+                  onChange={(event) => setScanValue(event.target.value)}
+                  placeholder="Bắn hoặc nhập Rider ID"
+                  className="h-10 w-full rounded-md border border-slate-200 bg-white pl-10 pr-3 text-sm font-bold text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                />
+              </label>
+              <Button type="submit" aria-label="Tra Rider ID"><Search size={17} /></Button>
+            </form>
+
+            {selectedRider ? (
+              <div className={cn("rounded-lg border p-4", riderHasPickupRoute ? "border-blue-200 bg-blue-50" : "border-amber-200 bg-amber-50")}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold uppercase text-slate-500">Rider đã quét</p>
+                    <h3 className="mt-1 truncate font-black text-slate-950">{selectedRider.full_name?.trim() || "Chưa có tên"}</h3>
+                    <p className="mt-0.5 text-sm font-bold text-slate-600">{selectedRider.rider_code}</p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <span className="rounded-md bg-white px-2 py-1 text-xs font-black text-emerald-700">{selectedRider.cot}</span>
+                    <span className={cn("rounded-md px-2 py-1 text-[10px] font-bold uppercase", riderHasPickupRoute ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-800")}>
+                      {riderHasPickupRoute ? "Có tuyến pickup" : "Bắt buộc lên lấy"}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-3 border-t border-black/5 pt-3 text-xs text-slate-600">
+                  <p>Tuyến pickup: {[selectedRider.pickup_district, selectedRider.pickup_ward].filter(Boolean).join(" · ") || "Chưa có"}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">Chưa quét rider.</div>
+            )}
+
+            {selectedRider && selectedDistrict && selectedWards.size > 0 ? (
+              <div className="rounded-md bg-slate-950 p-3 text-white">
+                <p className="text-[10px] font-bold uppercase text-slate-400">Tuyến giao dự kiến</p>
+                <p className="mt-1 text-sm font-bold">{routeLabel(selectedDistrict.shortName, Array.from(selectedWards))}</p>
+              </div>
+            ) : null}
+
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => void assignAreas()}
+              disabled={!canEdit || saving || !selectedRider || selectedWards.size === 0}
+            >
+              <Check size={17} />
+              Điểm danh & chia khu vực
+            </Button>
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <div className="border-b border-slate-100 px-4 py-3">
+            <h2 className="font-bold text-slate-950">2. Khu vực còn trống</h2>
+            <p className="mt-0.5 text-xs text-slate-500">Phường đã có rider nhận sẽ tự ẩn khỏi danh sách.</p>
+          </div>
+          <div className="border-b border-slate-100 p-3">
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {hcmDistricts.map((district) => (
+                <button
+                  key={district.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedDistrictId(district.id);
+                    setSelectedWards(new Set());
+                  }}
+                  className={cn(
+                    "shrink-0 rounded-md border px-3 py-2 text-xs font-bold transition",
+                    selectedDistrictId === district.id
+                      ? "border-slate-950 bg-slate-950 text-white"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                  )}
+                >
+                  {district.shortName}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-black text-slate-950">{selectedDistrict?.name}</h3>
+                <p className="text-xs text-slate-500">{availableWards.length} phường/xã còn trống</p>
+              </div>
+              {selectedWards.size > 0 ? (
+                <button type="button" onClick={() => setSelectedWards(new Set())} className="text-xs font-bold text-red-600">Bỏ chọn</button>
+              ) : null}
+            </div>
+            <div className="grid max-h-[520px] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">
+              {availableWards.map((ward) => {
+                const selected = selectedWards.has(ward.name);
+                return (
+                  <button
+                    key={ward.name}
+                    type="button"
+                    onClick={() => toggleWard(ward.name)}
+                    className={cn(
+                      "min-h-16 rounded-md border px-3 py-2 text-left text-sm font-semibold transition",
+                      selected
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-500"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50",
+                    )}
+                  >
+                    <span className="block truncate">{ward.name}</span>
+                    <span className="mt-1 block text-[10px] font-bold uppercase text-slate-400">{selected ? "Đã chọn" : "Còn trống"}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {availableWards.length === 0 ? (
+              <p className="rounded-md border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">Quận này đã được chia hết.</p>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <div className="border-b border-slate-100 px-4 py-3">
+            <h2 className="font-bold text-slate-950">3. Đã điểm danh & chia tuyến</h2>
+            <p className="mt-0.5 text-xs text-slate-500">{groups.length} rider trong ngày {formatDate(date)}.</p>
+          </div>
+          <div className="border-b border-slate-100 p-3">
+            <label className="relative block">
+              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input value={assignmentQuery} onChange={(event) => setAssignmentQuery(event.target.value)} placeholder="Tìm rider hoặc khu vực" className="pl-9" />
+            </label>
+          </div>
+          <div className="max-h-[620px] divide-y divide-slate-100 overflow-y-auto">
+            {filteredGroups.map((group) => (
+              <article key={group.key} className="px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-black text-slate-950">{group.full_name?.trim() || "Chưa có tên"}</h3>
+                    <p className="text-xs font-bold text-slate-500">{group.rider_code}</p>
+                  </div>
+                  {canEdit ? (
+                    <button type="button" onClick={() => void removeGroup(group)} disabled={saving} className="grid size-8 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Huỷ chia tuyến ${group.rider_code}`}>
+                      <Trash2 size={15} />
+                    </button>
+                  ) : null}
+                </div>
+                <div className="mt-2 rounded-md bg-slate-50 p-2.5">
+                  <p className="text-xs font-bold text-slate-800">{routeLabel(group.district.replace(/^(Quận|Huyện)\s+/i, ""), group.wards)}</p>
+                  <p className="mt-1 text-[10px] text-slate-400">{formatTime(group.assigned_at)}</p>
+                </div>
+              </article>
+            ))}
+            {!loading && filteredGroups.length === 0 ? (
+              <p className="p-8 text-center text-sm text-slate-500">Chưa có rider được chia khu vực.</p>
+            ) : null}
+          </div>
+        </section>
+      </div>
+
+      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-bold text-slate-950">Rider bắt buộc chưa điểm danh</h2>
+            <p className="mt-0.5 text-xs text-slate-500">Rider COT 1 chưa có tuyến pickup và chưa được chia khu vực ngày {formatDate(date)}.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-fit rounded-md bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">
+              {requiredAbsentRiders.length} rider
+            </span>
+            <Button type="button" variant="secondary" disabled={exporting} onClick={() => void exportAbsentRiders()}>
+              <Download size={16} />
+              {exporting ? "Đang xuất..." : "Xuất Excel"}
+            </Button>
+          </div>
+        </div>
+
+        {requiredAbsentRiders.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1180px] text-left text-sm">
+              <thead className="bg-slate-50 text-[11px] font-bold uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Rider ID</th>
+                  <th className="px-4 py-3">Tên rider</th>
+                  <th className="px-4 py-3">KV</th>
+                  <th className="px-4 py-3">Trạng thái</th>
+                  <th className="px-4 py-3">Ghi chú lịch OFF</th>
+                  <th className="px-4 py-3">Lý do không lên lấy hàng</th>
+                  <th className="px-4 py-3 text-center">Có phép</th>
+                  <th className="px-4 py-3 text-right">Lưu</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {requiredAbsentRiders.map(({ rider, attendance: log }) => {
+                  const off = isOffStatus(log?.status);
+                  const draft = absenceNoteDrafts[rider.id] ?? { reason: "", is_excused: false };
+                  return (
+                    <tr key={rider.id} className="transition hover:bg-slate-50">
+                      <td className="px-4 py-3 font-black text-slate-950">{rider.rider_code}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-700">{rider.full_name?.trim() || "Chưa có tên"}</td>
+                      <td className="px-4 py-3">
+                        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
+                          {rider.kv?.trim() || "-"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={cn(
+                          "inline-flex rounded-md px-2 py-1 text-[11px] font-bold",
+                          off ? offStatusClass(log?.status) : "bg-red-50 text-red-700",
+                        )}>
+                          {off ? attendanceStatusLabel(log?.status) : "Chưa điểm danh"}
+                        </span>
+                      </td>
+                      <td className="max-w-[440px] px-4 py-3 text-slate-600">
+                        {off ? log?.note?.trim() || "Có lịch OFF, chưa có ghi chú." : "-"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Input
+                          value={draft.reason}
+                          disabled={!canEdit || savingNoteRiderId === rider.id}
+                          onChange={(event) => updateAbsenceNoteDraft(rider.id, { reason: event.target.value })}
+                          placeholder="Nhập lý do vắng"
+                          maxLength={500}
+                          className="min-w-64"
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={draft.is_excused}
+                          disabled={!canEdit || savingNoteRiderId === rider.id}
+                          onChange={(event) => updateAbsenceNoteDraft(rider.id, { is_excused: event.target.checked })}
+                          aria-label={`Đánh dấu ${rider.rider_code} vắng có phép`}
+                          className="size-5 rounded border-slate-300 accent-emerald-600"
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="size-10 p-0"
+                          disabled={!canEdit || savingNoteRiderId === rider.id}
+                          onClick={() => void saveAbsenceNote(rider)}
+                          aria-label={`Lưu lý do vắng của ${rider.rider_code}`}
+                        >
+                          <Save size={16} className={savingNoteRiderId === rider.id ? "animate-pulse" : undefined} />
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="p-8 text-center text-sm text-slate-500">Tất cả rider bắt buộc đã được điểm danh và chia khu vực.</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function Metric({ icon: Icon, label, value }: { icon: typeof Users; label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-bold uppercase text-slate-500">{label}</p>
+        <span className="grid size-8 place-items-center rounded-md bg-emerald-50 text-emerald-700"><Icon size={17} /></span>
+      </div>
+      <p className="mt-3 text-2xl font-black text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function groupAssignments(rows: AssignmentRow[]): AssignmentGroup[] {
+  const groups = new Map<string, AssignmentGroup>();
+  for (const row of rows) {
+    const key = `${row.rider_id}|${row.district}`;
+    const current = groups.get(key) ?? {
+      key,
+      rider_id: row.rider_id,
+      rider_code: row.rider_code,
+      full_name: row.riders?.full_name ?? null,
+      district: row.district,
+      wards: [],
+      assigned_at: row.assigned_at,
+    };
+    current.wards.push(row.ward);
+    groups.set(key, current);
+  }
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    wards: group.wards.sort((a, b) => a.localeCompare(b, "vi", { numeric: true })),
+  }));
+}
+
+function areaKey(district: string, ward: string) {
+  return `${normalize(district)}|${normalize(ward)}`;
+}
+
+function routeLabel(district: string, wards: string[]) {
+  return `${district} · ${wards.map(shortWard).join(", ")}`;
+}
+
+function shortWard(value: string) {
+  return value.replace(/^Phường\s+/i, "P.").replace(/^Xã\s+/i, "X.").replace(/^Thị trấn\s+/i, "TT.");
+}
+
+function normalize(value: string | null | undefined) {
+  return (value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toLowerCase().trim();
+}
+
+function todayInVietnam() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function formatDate(date: string) {
+  return new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(
+    new Date(`${date}T00:00:00Z`),
+  );
+}
+
+function formatTime(value: string) {
+  return new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Ho_Chi_Minh" }).format(
+    new Date(value),
+  );
+}
+
+function isOffStatus(status: string | null | undefined) {
+  return (status ?? "").toUpperCase().includes("OFF");
+}
+
+function attendanceStatusLabel(status: string | null | undefined) {
+  if (status === "OFF_APPROVED") return "OFF phép";
+  if (status === "OFF_UNEXPECTED") return "OFF đột xuất";
+  return "OFF tuần";
+}
+
+function offStatusClass(status: string | null | undefined) {
+  if (status === "OFF_APPROVED") return "bg-blue-50 text-blue-700";
+  if (status === "OFF_UNEXPECTED") return "bg-red-50 text-red-700";
+  return "bg-amber-50 text-amber-700";
+}
