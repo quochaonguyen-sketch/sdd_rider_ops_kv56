@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  Activity,
   BarChart3,
   Bike,
   CalendarDays,
@@ -27,6 +28,7 @@ import { cn } from "@/utils/cn";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
+  { href: "/realtime-dashboard", label: "Realtime Dashboard", icon: Activity },
   { href: "/riders", label: "Riders", icon: Bike },
   { href: "/attendance", label: "Attendance", icon: CalendarDays },
   { href: "/morning-delivery", label: "Morning Dispatch", icon: ClipboardCheck },
