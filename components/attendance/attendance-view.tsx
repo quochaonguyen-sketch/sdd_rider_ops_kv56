@@ -395,11 +395,11 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
         }
       | null;
 
-    setImporting(false);
-    busyRef.current = savingCells.size > 0;
     if (fileInputRef.current) fileInputRef.current.value = "";
 
     if (!response.ok || !result?.success) {
+      setImporting(false);
+      busyRef.current = savingCells.size > 0;
       setError(result?.error ?? "Không thể import lịch rider");
       setImportIssues(result?.errors ?? []);
       setIssuesImportedPartially(false);
@@ -414,7 +414,13 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
         result.cleared ? `, xóa ${result.cleared} ô` : ""
       }${result.skipped ? `; bỏ qua ${result.skipped} lỗi` : ""}.`,
     );
+    if (realtimeTimerRef.current) {
+      clearTimeout(realtimeTimerRef.current);
+      realtimeTimerRef.current = null;
+    }
     await load();
+    setImporting(false);
+    busyRef.current = savingCells.size > 0;
   }
 
   return (

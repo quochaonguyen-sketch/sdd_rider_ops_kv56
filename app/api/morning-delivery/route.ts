@@ -9,6 +9,7 @@ const assignSchema = z.object({
   rider_id: z.string().uuid(),
   district: z.string().trim().min(1).max(100),
   wards: z.array(z.string().trim().min(1).max(100)).min(1).max(30),
+  preassigned: z.boolean().optional().default(false),
 });
 const removeSchema = z.object({
   work_date: dateSchema,
@@ -20,6 +21,10 @@ const absenceNoteSchema = z.object({
   rider_id: z.string().uuid(),
   reason: z.string().trim().max(500),
   is_excused: z.boolean(),
+});
+const checkInSchema = z.object({
+  work_date: dateSchema,
+  rider_id: z.string().uuid(),
 });
 
 async function getSession() {
@@ -54,12 +59,12 @@ export async function GET(request: Request) {
   const [riderResult, assignmentResult, attendanceResult, absenceNoteResult, latestRealtimeDeliveryResult] = await Promise.all([
     session.admin
       .from("riders")
-      .select("id,rider_code,full_name,kv,cot,pickup_district,pickup_ward,status")
+      .select("id,rider_code,full_name,kv,cot,pickup_district,pickup_ward,delivery_district,delivery_ward,status")
       .eq("status", "active")
       .order("rider_code"),
     session.admin
       .from("morning_delivery_assignments")
-      .select("id,work_date,rider_id,rider_code,district,ward,assigned_at,riders(full_name,cot)")
+      .select("id,work_date,rider_id,rider_code,district,ward,assigned_at,checked_in_at,riders(full_name,cot)")
       .eq("work_date", workDate)
       .order("assigned_at", { ascending: false }),
     session.admin
@@ -85,17 +90,24 @@ export async function GET(request: Request) {
   const cot1Riders = (riderResult.data ?? []).filter((rider) => isCot1(rider.cot));
   const latestSnapshotId = latestRealtimeDeliveryResult.data?.snapshot_id ?? null;
   let activeDeliveryRiderCount = 0;
+  let realtimeDeliveryRiders: Array<{
+    driver_id: string;
+    total_assigned: number;
+    delivered: number;
+    delivering: number;
+    failed: number;
+  }> = [];
   if (latestSnapshotId) {
     const activeDeliveryResult = await session.admin
       .from("realtime_delivery_riders")
-      .select("driver_id", { count: "exact", head: true })
+      .select("driver_id,total_assigned,delivered,delivering,failed", { count: "exact" })
       .eq("work_date", workDate)
-      .eq("snapshot_id", latestSnapshotId)
-      .gt("total_assigned", 0);
+      .eq("snapshot_id", latestSnapshotId);
     if (activeDeliveryResult.error) {
       return NextResponse.json({ success: false, error: activeDeliveryResult.error.message }, { status: 400 });
     }
-    activeDeliveryRiderCount = activeDeliveryResult.count ?? 0;
+    realtimeDeliveryRiders = activeDeliveryResult.data ?? [];
+    activeDeliveryRiderCount = realtimeDeliveryRiders.filter((row) => row.total_assigned > 0).length;
   }
   return NextResponse.json({
     success: true,
@@ -105,6 +117,7 @@ export async function GET(request: Request) {
     attendance: attendanceResult.data ?? [],
     absence_notes: absenceNoteResult.data ?? [],
     active_delivery_rider_count: activeDeliveryRiderCount,
+    realtime_delivery_riders: realtimeDeliveryRiders,
     realtime_delivery_updated_at: latestRealtimeDeliveryResult.data?.snapshot_at ?? null,
   });
 }
@@ -237,6 +250,7 @@ export async function POST(request: Request) {
     rider_code: rider.rider_code,
     district: parsed.data.district,
     ward,
+    checked_in_at: parsed.data.preassigned ? null : new Date().toISOString(),
   }));
   const { error: insertError } = await session.admin.from("morning_delivery_assignments").insert(rows);
   if (insertError) return NextResponse.json({ success: false, error: insertError.message }, { status: 409 });
@@ -245,11 +259,45 @@ export async function POST(request: Request) {
     entity_type: "morning_delivery_assignment",
     entity_id: rider.id,
     action: "assigned",
-    message: `Assigned ${rider.rider_code} to ${parsed.data.district}: ${wards.join(", ")}`,
-    raw_data: { work_date: parsed.data.work_date, district: parsed.data.district, wards },
+    message: `${parsed.data.preassigned ? "Pre-assigned" : "Assigned"} ${rider.rider_code} to ${parsed.data.district}: ${wards.join(", ")}`,
+    raw_data: { work_date: parsed.data.work_date, district: parsed.data.district, wards, preassigned: parsed.data.preassigned },
   });
 
   return NextResponse.json({ success: true });
+}
+
+export async function PATCH(request: Request) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  if (!canEdit(session.role)) {
+    return NextResponse.json({ success: false, error: "Bạn không có quyền điểm danh rider" }, { status: 403 });
+  }
+
+  const parsed = checkInSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ success: false, error: "Dữ liệu điểm danh không hợp lệ" }, { status: 400 });
+  }
+
+  const checkedInAt = new Date().toISOString();
+  const { data, error } = await session.admin
+    .from("morning_delivery_assignments")
+    .update({ checked_in_at: checkedInAt })
+    .eq("work_date", parsed.data.work_date)
+    .eq("rider_id", parsed.data.rider_id)
+    .is("checked_in_at", null)
+    .select("id");
+
+  if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+  if (!data?.length) {
+    const { count } = await session.admin
+      .from("morning_delivery_assignments")
+      .select("id", { count: "exact", head: true })
+      .eq("work_date", parsed.data.work_date)
+      .eq("rider_id", parsed.data.rider_id);
+    if (!count) return NextResponse.json({ success: false, error: "Rider chưa được chia phường" }, { status: 409 });
+  }
+
+  return NextResponse.json({ success: true, checked_in_at: checkedInAt });
 }
 
 export async function DELETE(request: Request) {

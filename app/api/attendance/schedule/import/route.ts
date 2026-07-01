@@ -328,7 +328,10 @@ export async function POST(request: Request) {
 
   let workbook: XLSX.WorkBook;
   try {
-    workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+    // Keep Excel dates as serial numbers. Converting them to JS Date here can
+    // shift a displayed date to the previous day because of server timezone
+    // and floating-point time fractions (for example 01/07 -> 30/06 23:59:30).
+    workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: false });
   } catch {
     return NextResponse.json({ success: false, error: "Không đọc được file Excel" }, { status: 400 });
   }
@@ -413,14 +416,34 @@ export async function POST(request: Request) {
     }
   }
 
+  const clearCodesByDate = new Map<string, Set<string>>();
   for (const item of clearItems) {
-    const { error } = await session.admin
-      .from("attendance_logs")
-      .delete()
-      .eq("rider_code", item.rider_code)
-      .eq("work_date", item.work_date);
-    if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+    const codes = clearCodesByDate.get(item.work_date) ?? new Set<string>();
+    codes.add(item.rider_code);
+    clearCodesByDate.set(item.work_date, codes);
+  }
+
+  const deleteJobs = Array.from(clearCodesByDate, ([workDate, codes]) => {
+    const riderCodes = Array.from(codes);
+    return Array.from({ length: Math.ceil(riderCodes.length / 500) }, (_, index) => ({
+      workDate,
+      riderCodes: riderCodes.slice(index * 500, (index + 1) * 500),
+    }));
+  }).flat();
+
+  for (let index = 0; index < deleteJobs.length; index += 6) {
+    const results = await Promise.all(
+      deleteJobs.slice(index, index + 6).map((job) =>
+        session.admin
+          .from("attendance_logs")
+          .delete()
+          .eq("work_date", job.workDate)
+          .in("rider_code", job.riderCodes),
+      ),
+    );
+    const failed = results.find((result) => result.error);
+    if (failed?.error) {
+      return NextResponse.json({ success: false, error: failed.error.message }, { status: 400 });
     }
   }
 

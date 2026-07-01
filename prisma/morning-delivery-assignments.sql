@@ -6,9 +6,24 @@ create table if not exists public.morning_delivery_assignments (
   district text not null,
   ward text not null,
   assigned_at timestamptz not null default now(),
+  checked_in_at timestamptz,
   created_at timestamptz not null default now(),
   constraint morning_delivery_assignments_area_key unique (work_date, district, ward)
 );
+
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'morning_delivery_assignments'
+      and column_name = 'checked_in_at'
+  ) then
+    alter table public.morning_delivery_assignments add column checked_in_at timestamptz;
+    -- Rows made by the old flow were assigned only after the rider scanned.
+    update public.morning_delivery_assignments set checked_in_at = assigned_at;
+  end if;
+end $$;
 
 create index if not exists morning_delivery_assignments_date_idx
 on public.morning_delivery_assignments (work_date);

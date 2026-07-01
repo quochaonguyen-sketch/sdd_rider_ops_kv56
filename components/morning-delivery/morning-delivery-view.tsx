@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Check, ClipboardCheck, Download, MapPin, RefreshCcw, Save, ScanLine, Search, Trash2, Truck, UserCheck, Users } from "lucide-react";
+import { CalendarClock, CalendarDays, Check, ClipboardCheck, Copy, Download, MapPin, RefreshCcw, Save, ScanLine, Search, Trash2, Truck, UserCheck, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { hcmDistricts } from "@/lib/locations/hcm";
+import { hcmDistricts, type DistrictDefinition, type WardDefinition } from "@/lib/locations/hcm";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
 import { cn } from "@/utils/cn";
 
@@ -16,7 +16,17 @@ type MorningRider = {
   cot: string | null;
   pickup_district: string | null;
   pickup_ward: string | null;
+  delivery_district: string | null;
+  delivery_ward: string | null;
   status: string | null;
+};
+
+type RealtimeDeliveryRider = {
+  driver_id: string;
+  total_assigned: number;
+  delivered: number;
+  delivering: number;
+  failed: number;
 };
 
 type AssignmentRow = {
@@ -27,6 +37,7 @@ type AssignmentRow = {
   district: string;
   ward: string;
   assigned_at: string;
+  checked_in_at: string | null;
   riders?: { full_name: string | null; cot: string | null } | null;
 };
 
@@ -38,6 +49,7 @@ type AssignmentGroup = {
   district: string;
   wards: string[];
   assigned_at: string;
+  checked_in_at: string | null;
 };
 
 type AttendanceRow = {
@@ -71,6 +83,7 @@ type ApiResponse = {
   absence_notes?: AbsenceNoteRow[];
   absence_note?: AbsenceNoteRow | null;
   active_delivery_rider_count?: number;
+  realtime_delivery_riders?: RealtimeDeliveryRider[];
   realtime_delivery_updated_at?: string | null;
 };
 
@@ -80,6 +93,7 @@ export function MorningDeliveryView() {
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
   const [activeDeliveryRiderCount, setActiveDeliveryRiderCount] = useState(0);
+  const [realtimeDeliveryRiders, setRealtimeDeliveryRiders] = useState<RealtimeDeliveryRider[]>([]);
   const [absenceNoteDrafts, setAbsenceNoteDrafts] = useState<Record<string, AbsenceNoteDraft>>({});
   const [selectedRider, setSelectedRider] = useState<MorningRider | null>(null);
   const [selectedDistrictId, setSelectedDistrictId] = useState(hcmDistricts[0]?.id ?? "");
@@ -90,6 +104,8 @@ export function MorningDeliveryView() {
   const [saving, setSaving] = useState(false);
   const [savingNoteRiderId, setSavingNoteRiderId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [planningDefaults, setPlanningDefaults] = useState(false);
+  const [savingDefaultRiderId, setSavingDefaultRiderId] = useState<string | null>(null);
   const [canEdit, setCanEdit] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -109,6 +125,7 @@ export function MorningDeliveryView() {
     setAssignments(result.assignments ?? []);
     setAttendance(result.attendance ?? []);
     setActiveDeliveryRiderCount(result.active_delivery_rider_count ?? 0);
+    setRealtimeDeliveryRiders(result.realtime_delivery_riders ?? []);
     setAbsenceNoteDrafts(
       Object.fromEntries(
         (result.absence_notes ?? []).map((note) => [
@@ -164,7 +181,7 @@ export function MorningDeliveryView() {
     return map;
   }, [attendance]);
   const assignedRiderIds = useMemo(
-    () => new Set(assignments.map((assignment) => assignment.rider_id)),
+    () => new Set(assignments.filter((assignment) => assignment.checked_in_at).map((assignment) => assignment.rider_id)),
     [assignments],
   );
   const requiredAbsentRiders = useMemo(
@@ -177,10 +194,16 @@ export function MorningDeliveryView() {
         })),
     [assignedRiderIds, attendanceByRider, requiredRiders],
   );
-  const assignedRiderCount = new Set(assignments.map((assignment) => assignment.rider_id)).size;
+  const assignedRiderCount = new Set(
+    assignments.filter((assignment) => assignment.checked_in_at).map((assignment) => assignment.rider_id),
+  ).size;
   const totalAreaCount = hcmDistricts.reduce((total, district) => total + district.wards.length, 0);
+  const realtimeByRider = useMemo(
+    () => new Map(realtimeDeliveryRiders.map((row) => [normalize(row.driver_id), row])),
+    [realtimeDeliveryRiders],
+  );
 
-  function scanRider(event: React.FormEvent<HTMLFormElement>) {
+  async function scanRider(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setSuccess(null);
@@ -197,14 +220,37 @@ export function MorningDeliveryView() {
       const assignedRoutes = existingGroups
         .map((group) => routeLabel(group.district.replace(/^(Quận|Huyện)\s+/i, ""), group.wards))
         .join(" · ");
+      if (existingGroups.some((group) => !group.checked_in_at)) {
+        const response = await fetch("/api/morning-delivery", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ work_date: date, rider_id: rider.id }),
+        });
+        const result = (await response.json().catch(() => null)) as ApiResponse | null;
+        if (!response.ok || !result?.success) {
+          setError(result?.error ?? "Không thể xác nhận rider có mặt");
+          return;
+        }
+        await load();
+        setSuccess(`${rider.full_name?.trim() || rider.rider_code} đã có mặt: ${assignedRoutes}.`);
+      } else {
+        setSuccess(`${rider.full_name?.trim() || rider.rider_code} đã có mặt trước đó: ${assignedRoutes}.`);
+      }
       setSelectedRider(null);
       setScanValue("");
-      setSuccess(`${rider.full_name?.trim() || rider.rider_code} đã điểm danh: ${assignedRoutes}.`);
       return;
     }
     setSelectedRider(rider);
     setScanValue("");
-    setSelectedWards(new Set());
+    const defaultDistrict = findDefaultDistrict(rider.delivery_district);
+    if (defaultDistrict) {
+      setSelectedDistrictId(defaultDistrict.id);
+      const defaultWards = findDefaultWards(defaultDistrict, rider.delivery_ward)
+        .filter((ward) => !occupiedAreas.has(areaKey(defaultDistrict.name, ward.name)));
+      setSelectedWards(new Set(defaultWards.map((ward) => ward.name)));
+    } else {
+      setSelectedWards(new Set());
+    }
   }
 
   function toggleWard(ward: string) {
@@ -317,6 +363,137 @@ export function MorningDeliveryView() {
     }
   }
 
+  async function assignDefaultAreas() {
+    if (!canEdit || planningDefaults) return;
+    const offPreassignments = groups.filter((group) => {
+      const log = attendanceByRider.get(group.rider_id) ?? attendanceByRider.get(normalize(group.rider_code));
+      return !group.checked_in_at && isOffStatus(log?.status);
+    });
+    const removedKeys = new Set(offPreassignments.map((group) => group.key));
+    const remainingAssignments = assignments.filter(
+      (assignment) => !removedKeys.has(`${assignment.rider_id}|${assignment.district}`),
+    );
+    const occupied = new Set(remainingAssignments.map((assignment) => areaKey(assignment.district, assignment.ward)));
+    const alreadyAssigned = new Set(remainingAssignments.map((assignment) => assignment.rider_id));
+    const candidates = riders.filter((rider) => {
+      const log = attendanceByRider.get(rider.id) ?? attendanceByRider.get(normalize(rider.rider_code));
+      const hasPickupRoute = Boolean(rider.pickup_district?.trim() || rider.pickup_ward?.trim());
+      return !hasPickupRoute && !alreadyAssigned.has(rider.id) && !isOffStatus(log?.status);
+    });
+    const plans: Array<{ rider: MorningRider; district: DistrictDefinition; wards: WardDefinition[] }> = [];
+    let missingDefault = 0;
+    let duplicatedArea = 0;
+
+    for (const rider of candidates) {
+      const district = findDefaultDistrict(rider.delivery_district);
+      const defaultWards = district ? findDefaultWards(district, rider.delivery_ward) : [];
+      if (!district || defaultWards.length === 0) {
+        missingDefault += 1;
+        continue;
+      }
+      const availableDefaultWards = defaultWards.filter((ward) => {
+        const key = areaKey(district.name, ward.name);
+        if (occupied.has(key)) {
+          duplicatedArea += 1;
+          return false;
+        }
+        occupied.add(key);
+        return true;
+      });
+      if (availableDefaultWards.length > 0) {
+        plans.push({ rider, district, wards: availableDefaultWards });
+      }
+    }
+
+    if (plans.length === 0 && offPreassignments.length === 0) {
+      setError(`Không có tuyến mặc định nào có thể xếp. Thiếu mặc định: ${missingDefault}; phường đã có người: ${duplicatedArea}.`);
+      return;
+    }
+    if (!window.confirm(`Đồng bộ tuyến cố định ngày ${formatDate(date)}: xếp ${plans.length} rider và gỡ ${offPreassignments.length} rider OFF?`)) return;
+
+    setPlanningDefaults(true);
+    setError(null);
+    setSuccess(null);
+    let assigned = 0;
+    let removed = 0;
+    const failures: string[] = [];
+    for (const group of offPreassignments) {
+      const response = await fetch("/api/morning-delivery", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ work_date: date, rider_id: group.rider_id, district: group.district }),
+      });
+      if (response.ok) removed += 1;
+      else failures.push(group.rider_code);
+    }
+    for (const plan of plans) {
+      const response = await fetch("/api/morning-delivery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          work_date: date,
+          rider_id: plan.rider.id,
+          district: plan.district.name,
+          wards: plan.wards.map((ward) => ward.name),
+          preassigned: true,
+        }),
+      });
+      if (response.ok) assigned += 1;
+      else failures.push(plan.rider.rider_code);
+    }
+    await load();
+    setPlanningDefaults(false);
+    if (failures.length > 0) setError(`Không xếp được ${failures.length} rider: ${failures.join(", ")}.`);
+    setSuccess(`Đã đồng bộ: xếp ${assigned} rider, gỡ ${removed} rider OFF; còn ${missingDefault} rider thiếu tuyến cố định và ${duplicatedArea} rider trùng phường.`);
+  }
+
+  function updateDefaultRoute(riderId: string, district: string, ward = "") {
+    setRiders((current) => current.map((rider) =>
+      rider.id === riderId ? { ...rider, delivery_district: district || null, delivery_ward: ward || null } : rider,
+    ));
+  }
+
+  async function saveDefaultRoute(rider: MorningRider) {
+    setSavingDefaultRiderId(rider.id);
+    setError(null);
+    const response = await fetch("/api/morning-delivery/default-routes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rider_id: rider.id,
+        delivery_district: rider.delivery_district,
+        delivery_ward: rider.delivery_ward,
+      }),
+    });
+    const result = (await response.json().catch(() => null)) as ApiResponse | null;
+    if (!response.ok || !result?.success) setError(result?.error ?? "Không thể lưu tuyến cố định");
+    else setSuccess(`Đã lưu tuyến cố định cho ${rider.rider_code}.`);
+    setSavingDefaultRiderId(null);
+  }
+
+  async function copyPlanForGroup() {
+    const offRiders = riders.filter((rider) => {
+      const log = attendanceByRider.get(rider.id) ?? attendanceByRider.get(normalize(rider.rider_code));
+      return isOffStatus(log?.status);
+    });
+    const lines = [
+      `PHÂN TUYẾN GIAO SÁNG ${formatDate(date)}`,
+      "",
+      ...groups.map((group, index) =>
+        `${index + 1}. ${group.rider_code} - ${group.full_name?.trim() || "Chưa có tên"}: ${routeLabel(group.district, group.wards)} [${group.checked_in_at ? "ĐÃ CÓ MẶT" : "ĐÃ ĐƯỢC CHIA - CHƯA LÊN"}]`,
+      ),
+      "",
+      `RIDER OFF (${offRiders.length}): ${offRiders.map((rider) => rider.rider_code).join(", ") || "Không có"}`,
+    ];
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setSuccess("Đã sao chép danh sách phân tuyến để gửi lên nhóm.");
+      setError(null);
+    } catch {
+      setError("Trình duyệt không cho phép sao chép. Hãy cấp quyền clipboard rồi thử lại.");
+    }
+  }
+
   const riderHasPickupRoute = Boolean(selectedRider?.pickup_district?.trim() || selectedRider?.pickup_ward?.trim());
 
   return (
@@ -336,6 +513,14 @@ export function MorningDeliveryView() {
             <RefreshCcw size={16} className={loading ? "animate-spin" : undefined} />
             Làm mới
           </Button>
+          <Button type="button" onClick={() => void assignDefaultAreas()} disabled={!canEdit || loading || planningDefaults}>
+            <CalendarClock size={16} />
+            {planningDefaults ? "Đang đồng bộ..." : "Đồng bộ tuyến cố định"}
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => void copyPlanForGroup()} disabled={loading || groups.length === 0}>
+            <Copy size={16} />
+            Sao chép gửi nhóm
+          </Button>
         </div>
       </header>
 
@@ -344,7 +529,7 @@ export function MorningDeliveryView() {
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-5" aria-label="Tổng quan điểm danh sáng">
         <Metric icon={Users} label="Bắt buộc chưa tuyến pick" value={requiredRiders.length} />
-        <Metric icon={UserCheck} label="Rider đã chia" value={assignedRiderCount} />
+        <Metric icon={UserCheck} label="Rider đã có mặt" value={assignedRiderCount} />
         <Metric icon={Truck} label="Rider có đơn realtime" value={activeDeliveryRiderCount} />
         <Metric icon={MapPin} label="Phường đã nhận" value={assignments.length} />
         <Metric icon={ClipboardCheck} label="Phường còn trống" value={Math.max(0, totalAreaCount - assignments.length)} />
@@ -388,6 +573,12 @@ export function MorningDeliveryView() {
                   </div>
                 </div>
                 <div className="mt-3 border-t border-black/5 pt-3 text-xs text-slate-600">
+                  <p className="font-bold text-slate-800">
+                    Mặc định giao: {[selectedRider.delivery_district, selectedRider.delivery_ward].filter(Boolean).join(" · ") || "Chưa có"}
+                  </p>
+                  <p className="mt-1">
+                    Số đơn Supabase: <strong>{realtimeByRider.get(normalize(selectedRider.rider_code))?.total_assigned ?? "Chưa có dữ liệu"}</strong>
+                  </p>
                   <p>Tuyến pickup: {[selectedRider.pickup_district, selectedRider.pickup_ward].filter(Boolean).join(" · ") || "Chưa có"}</p>
                 </div>
               </div>
@@ -505,7 +696,15 @@ export function MorningDeliveryView() {
                 </div>
                 <div className="mt-2 rounded-md bg-slate-50 p-2.5">
                   <p className="text-xs font-bold text-slate-800">{routeLabel(group.district.replace(/^(Quận|Huyện)\s+/i, ""), group.wards)}</p>
-                  <p className="mt-1 text-[10px] text-slate-400">{formatTime(group.assigned_at)}</p>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <p className="text-[10px] text-slate-400">Chia lúc {formatTime(group.assigned_at)}</p>
+                    <span className={cn(
+                      "rounded px-2 py-0.5 text-[10px] font-black uppercase",
+                      group.checked_in_at ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700",
+                    )}>
+                      {group.checked_in_at ? "Đã có mặt" : "Đã được chia"}
+                    </span>
+                  </div>
                 </div>
               </article>
             ))}
@@ -515,6 +714,90 @@ export function MorningDeliveryView() {
           </div>
         </section>
       </div>
+
+      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <div className="border-b border-slate-100 px-4 py-3">
+          <h2 className="font-bold text-slate-950">Bảng tuyến giao cố định</h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Chỉ gồm rider COT 1 không có tuyến pickup. Tuyến này được dùng cho mọi ngày; tối chỉ cần cập nhật lịch OFF rồi bấm Đồng bộ tuyến cố định.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[920px] text-left text-sm">
+            <thead className="bg-slate-50 text-[11px] font-bold uppercase text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Rider</th>
+                <th className="px-4 py-3">Lịch {formatDate(date)}</th>
+                <th className="px-4 py-3">Quận cố định</th>
+                <th className="px-4 py-3">Phường cố định</th>
+                <th className="px-4 py-3">Trạng thái chia</th>
+                <th className="px-4 py-3 text-right">Lưu</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {requiredRiders.map((rider) => {
+                const log = attendanceByRider.get(rider.id) ?? attendanceByRider.get(normalize(rider.rider_code));
+                const off = isOffStatus(log?.status);
+                const district = findDefaultDistrict(rider.delivery_district);
+                const riderAssignments = groups.filter((group) => group.rider_id === rider.id);
+                const assignmentState = riderAssignments.some((group) => group.checked_in_at)
+                  ? "Đã có mặt"
+                  : riderAssignments.length > 0 ? "Đã được chia" : "Chưa chia";
+                return (
+                  <tr key={rider.id} className={off ? "bg-amber-50/50" : undefined}>
+                    <td className="px-4 py-3">
+                      <p className="font-black text-slate-950">{rider.rider_code}</p>
+                      <p className="text-xs text-slate-500">{rider.full_name?.trim() || "Chưa có tên"}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={cn("rounded-md px-2 py-1 text-xs font-bold", off ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-700")}>
+                        {off ? attendanceStatusLabel(log?.status) : "Đi làm"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <select
+                        value={district?.id ?? ""}
+                        disabled={!canEdit || savingDefaultRiderId === rider.id}
+                        onChange={(event) => {
+                          const next = hcmDistricts.find((item) => item.id === event.target.value);
+                          updateDefaultRoute(rider.id, next?.name ?? "");
+                        }}
+                        className="h-10 min-w-48 rounded-md border border-slate-200 bg-white px-3 font-semibold"
+                      >
+                        <option value="">Chọn quận</option>
+                        {hcmDistricts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      <select
+                        multiple
+                        size={Math.min(5, Math.max(3, district?.wards.length ?? 3))}
+                        value={district ? findDefaultWards(district, rider.delivery_ward).map((ward) => ward.name) : []}
+                        disabled={!canEdit || !district || savingDefaultRiderId === rider.id}
+                        onChange={(event) => updateDefaultRoute(
+                          rider.id,
+                          district?.name ?? "",
+                          Array.from(event.target.selectedOptions, (option) => option.value).join(", "),
+                        )}
+                        className="min-w-52 rounded-md border border-slate-200 bg-white px-3 py-2 font-semibold"
+                      >
+                        {(district?.wards ?? []).map((ward) => <option key={ward.name} value={ward.name}>{ward.name}</option>)}
+                      </select>
+                      <p className="mt-1 text-[10px] text-slate-400">Giữ Ctrl để chọn nhiều phường</p>
+                    </td>
+                    <td className="px-4 py-3 font-bold text-slate-600">{assignmentState}</td>
+                    <td className="px-4 py-3 text-right">
+                      <Button type="button" variant="secondary" className="size-10 p-0" disabled={!canEdit || savingDefaultRiderId === rider.id} onClick={() => void saveDefaultRoute(rider)}>
+                        <Save size={16} />
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
         <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -642,8 +925,10 @@ function groupAssignments(rows: AssignmentRow[]): AssignmentGroup[] {
       district: row.district,
       wards: [],
       assigned_at: row.assigned_at,
+      checked_in_at: row.checked_in_at,
     };
     current.wards.push(row.ward);
+    if (row.checked_in_at && !current.checked_in_at) current.checked_in_at = row.checked_in_at;
     groups.set(key, current);
   }
   return Array.from(groups.values()).map((group) => ({
@@ -654,6 +939,33 @@ function groupAssignments(rows: AssignmentRow[]): AssignmentGroup[] {
 
 function areaKey(district: string, ward: string) {
   return `${normalize(district)}|${normalize(ward)}`;
+}
+
+function findDefaultDistrict(value: string | null) {
+  const target = normalizeLocation(value);
+  if (!target) return null;
+  return hcmDistricts.find((district) =>
+    [district.name, district.shortName, ...district.aliases].some((candidate) => normalizeLocation(candidate) === target),
+  ) ?? null;
+}
+
+function findDefaultWards(district: DistrictDefinition, value: string | null) {
+  const targets = (value ?? "")
+    .split(/[,;|]+/)
+    .map(normalizeLocation)
+    .filter(Boolean);
+  if (targets.length === 0) return [];
+  return district.wards.filter((ward: WardDefinition) => {
+    const aliases = [ward.name, ...(ward.aliases ?? [])].map(normalizeLocation);
+    return targets.some((target) => aliases.includes(target));
+  });
+}
+
+function normalizeLocation(value: string | null | undefined) {
+  return normalize(value)
+    .replace(/\b(quan|huyen|phuong|xa|thi tran|district|ward)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function routeLabel(district: string, wards: string[]) {
