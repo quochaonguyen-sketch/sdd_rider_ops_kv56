@@ -347,8 +347,8 @@ function parseRouteBreakdown(value: string | null | undefined, fallbackCount: nu
 }
 
 function normalizeCot(value: string | null | undefined) {
-  const match = value?.match(/\bCOT\s*([12])\b/i);
-  return match ? `COT ${match[1]}` : value?.trim() || null;
+  const match = value?.match(/\bCOT\s*([12])(?:\.([12]))?\b/i);
+  return match ? `COT ${match[1]}${match[2] ? `.${match[2]}` : ""}` : value?.trim() || null;
 }
 
 function sortCotSummaries(cots: Map<string, number>): CotSummary[] {

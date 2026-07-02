@@ -22,30 +22,35 @@ export async function GET(request: Request) {
   }
 
   const admin = createAdminClient();
-  const [riderResult, assignmentResult, attendanceResult, absenceNoteResult] = await Promise.all([
+  const [riderResult, assignmentResult, attendanceResult, absenceNoteResult, realtime10amResult] = await Promise.all([
     admin
       .from("riders")
       .select("id,rider_code,full_name,kv,cot,pickup_district,pickup_ward,status")
       .eq("status", "active")
       .order("rider_code"),
-    admin.from("morning_delivery_assignments").select("rider_id").eq("work_date", workDate),
+    admin.from("morning_delivery_assignments").select("rider_id,checked_in_at").eq("work_date", workDate),
     admin.from("attendance_logs").select("rider_id,rider_code,status,note").eq("work_date", workDate),
     admin
       .from("morning_delivery_absence_notes")
       .select("rider_id,reason,is_excused")
       .eq("work_date", workDate),
+    admin
+      .from("realtime_delivery_riders_10am")
+      .select("driver_id,total_assigned")
+      .eq("work_date", workDate),
   ]);
 
-  const error = riderResult.error ?? assignmentResult.error ?? attendanceResult.error ?? absenceNoteResult.error;
+  const error = riderResult.error ?? assignmentResult.error ?? attendanceResult.error ?? absenceNoteResult.error ?? realtime10amResult.error;
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 });
 
-  const assignedRiderIds = new Set((assignmentResult.data ?? []).map((item) => item.rider_id));
+  const assignedRiderIds = new Set((assignmentResult.data ?? []).filter((item) => item.checked_in_at).map((item) => item.rider_id));
   const attendanceByRider = new Map<string, { status: string; note: string | null }>();
   for (const log of attendanceResult.data ?? []) {
     if (log.rider_id) attendanceByRider.set(log.rider_id, log);
     attendanceByRider.set(log.rider_code, log);
   }
   const absenceByRider = new Map((absenceNoteResult.data ?? []).map((item) => [item.rider_id, item]));
+  const realtime10amByRider = new Map((realtime10amResult.data ?? []).map((item) => [item.driver_id, item.total_assigned]));
   const absentRiders = (riderResult.data ?? []).filter(
     (rider) =>
       isCot1(rider.cot) &&
@@ -57,6 +62,7 @@ export async function GET(request: Request) {
   const rows = absentRiders.map((rider, index) => {
     const attendance = attendanceByRider.get(rider.id) ?? attendanceByRider.get(rider.rider_code);
     const absence = absenceByRider.get(rider.id);
+    const realtimeOrders = realtime10amByRider.get(rider.rider_code) ?? 0;
     return [
       index + 1,
       rider.rider_code,
@@ -65,6 +71,7 @@ export async function GET(request: Request) {
       rider.cot ?? "",
       attendance?.status ?? "Chưa điểm danh",
       attendance?.note ?? "",
+      realtimeOrders > 0 ? `Có đi giao nhưng không điểm danh (${realtimeOrders} đơn tính đến 10:00)` : "",
       absence?.reason ?? "",
       absence?.is_excused ? "Có" : "Không",
     ];
@@ -72,7 +79,7 @@ export async function GET(request: Request) {
 
   const workbook = XLSX.utils.book_new();
   const sheet = XLSX.utils.aoa_to_sheet([
-    ["STT", "Rider ID", "Tên rider", "KV", "COT", "Trạng thái", "Ghi chú lịch OFF", "Lý do không lên lấy hàng", "Có phép"],
+    ["STT", "Rider ID", "Tên rider", "KV", "COT", "Trạng thái", "Ghi chú lịch OFF", "Đối chiếu realtime 10:00", "Lý do không lên lấy hàng", "Có phép"],
     ...rows,
   ]);
   sheet["!cols"] = [
@@ -83,6 +90,7 @@ export async function GET(request: Request) {
     { wch: 12 },
     { wch: 20 },
     { wch: 32 },
+    { wch: 48 },
     { wch: 40 },
     { wch: 12 },
   ];

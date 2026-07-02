@@ -267,11 +267,11 @@ function CotVolumeCard({
       <div className="border-b border-slate-100 px-4 py-3 sm:px-5">
         <h2 className="font-bold text-slate-950">Volume theo COT</h2>
         <p className="mt-0.5 text-xs text-slate-500">
-          {isAverage ? "Sản lượng trung bình/ngày theo nhóm COT." : "Tỷ trọng sản lượng giữa hai nhóm vận hành."}
+          {isAverage ? "Sản lượng trung bình/ngày theo nhóm COT." : "COT 1.1 và COT 1.2 là volume giao buổi sáng."}
         </p>
       </div>
       <div className="divide-y divide-slate-100">
-        {["COT 1", "COT 2"].map((name, index) => {
+        {["COT 1.1", "COT 1.2", "COT 2"].map((name, index) => {
           const value = cotValue(cotVolumes, name);
           const percentage = totalOrders > 0 ? (value / totalOrders) * 100 : 0;
           return (
@@ -285,7 +285,7 @@ function CotVolumeCard({
               </div>
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
                 <div
-                  className={cn("h-full rounded-full", index === 0 ? "bg-blue-500" : "bg-emerald-500")}
+                  className={cn("h-full rounded-full", index === 0 ? "bg-sky-500" : index === 1 ? "bg-blue-700" : "bg-emerald-500")}
                   style={{ width: `${percentage}%` }}
                 />
               </div>
@@ -523,7 +523,8 @@ function WardDetailPanel({
                 <span className="rounded-md bg-slate-100 px-2.5 py-1.5 text-slate-600">
                   {formatNumber(district.count)} {isAverage ? "TB/ngày" : "đơn"}
                 </span>
-                <span className="rounded-md bg-blue-50 px-2.5 py-1.5 text-blue-700">COT 1: {formatNumber(cotValue(district.cots, "COT 1"))}</span>
+                <span className="rounded-md bg-sky-50 px-2.5 py-1.5 text-sky-700">COT 1.1: {formatNumber(cotValue(district.cots, "COT 1.1"))}</span>
+                <span className="rounded-md bg-blue-50 px-2.5 py-1.5 text-blue-700">COT 1.2: {formatNumber(cotValue(district.cots, "COT 1.2"))}</span>
                 <span className="rounded-md bg-emerald-50 px-2.5 py-1.5 text-emerald-700">COT 2: {formatNumber(cotValue(district.cots, "COT 2"))}</span>
                 <span className="flex items-center gap-1.5 rounded-md bg-white px-2.5 py-1.5 text-slate-600 ring-1 ring-slate-200">
                   <GrowthBadge current={district.count} previous={comparisonDistrict?.count ?? 0} />
@@ -555,7 +556,8 @@ function WardDetailPanel({
             <tr className="text-left text-[11px] font-bold uppercase text-slate-500">
               <th className="border-b border-slate-200 bg-slate-50 px-3 py-2.5">Phường/xã</th>
               <th className="border-b border-slate-200 bg-slate-50 px-3 py-2.5 text-right">{isAverage ? "TB đơn/ngày" : "Tổng đơn"}</th>
-              <th className="border-b border-slate-200 bg-blue-50/70 px-3 py-2.5 text-right text-blue-700">COT 1{isAverage ? " TB" : ""}</th>
+              <th className="border-b border-slate-200 bg-sky-50/70 px-3 py-2.5 text-right text-sky-700">COT 1.1{isAverage ? " TB" : ""}</th>
+              <th className="border-b border-slate-200 bg-blue-50/70 px-3 py-2.5 text-right text-blue-700">COT 1.2{isAverage ? " TB" : ""}</th>
               <th className="border-b border-slate-200 bg-emerald-50/70 px-3 py-2.5 text-right text-emerald-700">COT 2{isAverage ? " TB" : ""}</th>
               <th className="border-b border-slate-200 bg-slate-50 px-3 py-2.5 text-right">Tăng trưởng</th>
             </tr>
@@ -565,7 +567,8 @@ function WardDetailPanel({
               <tr key={ward.ward} className={cn("transition hover:bg-blue-50/60", index % 2 === 1 && "bg-slate-50/60")}>
                 <td className="border-b border-slate-100 px-3 py-3 font-semibold text-slate-800">{ward.ward}</td>
                 <td className="border-b border-slate-100 px-3 py-3 text-right font-black text-slate-950">{formatNumber(ward.count)}</td>
-                <td className="border-b border-slate-100 px-3 py-3 text-right font-semibold text-blue-700">{formatNumber(cotValue(ward.cots, "COT 1"))}</td>
+                <td className="border-b border-slate-100 px-3 py-3 text-right font-semibold text-sky-700">{formatNumber(cotValue(ward.cots, "COT 1.1"))}</td>
+                <td className="border-b border-slate-100 px-3 py-3 text-right font-semibold text-blue-700">{formatNumber(cotValue(ward.cots, "COT 1.2"))}</td>
                 <td className="border-b border-slate-100 px-3 py-3 text-right font-semibold text-emerald-700">{formatNumber(cotValue(ward.cots, "COT 2"))}</td>
                 <td className="border-b border-slate-100 px-3 py-3 text-right">
                   <GrowthBadge
@@ -625,7 +628,8 @@ function GrowthBadge({ current, previous }: { current: number; previous: number 
 function CotMetadata({ cots }: { cots: DeliveryCotSummary[] }) {
   return (
     <div className="mt-1.5 flex gap-3 text-[11px] font-semibold text-slate-500">
-      <span>COT 1: {formatNumber(cotValue(cots, "COT 1"))}</span>
+      <span>COT 1.1: {formatNumber(cotValue(cots, "COT 1.1"))}</span>
+      <span>COT 1.2: {formatNumber(cotValue(cots, "COT 1.2"))}</span>
       <span>COT 2: {formatNumber(cotValue(cots, "COT 2"))}</span>
     </div>
   );
@@ -636,6 +640,9 @@ function EmptyState({ text }: { text: string }) {
 }
 
 function cotValue(cots: DeliveryCotSummary[], name: string) {
+  if (name === "COT 1") {
+    return cots.filter((cot) => /^COT 1(?:\.|$)/.test(cot.cot)).reduce((total, cot) => total + cot.count, 0);
+  }
   return cots.find((cot) => cot.cot === name)?.count ?? 0;
 }
 

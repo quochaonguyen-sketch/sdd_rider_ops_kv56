@@ -56,7 +56,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: false, error: "Ngày không hợp lệ" }, { status: 400 });
   }
 
-  const [riderResult, assignmentResult, attendanceResult, absenceNoteResult, latestRealtimeDeliveryResult] = await Promise.all([
+  const [riderResult, assignmentResult, attendanceResult, absenceNoteResult, latestRealtimeDeliveryResult, realtime10amResult] = await Promise.all([
     session.admin
       .from("riders")
       .select("id,rider_code,full_name,kv,cot,pickup_district,pickup_ward,delivery_district,delivery_ward,status")
@@ -82,9 +82,13 @@ export async function GET(request: Request) {
       .order("snapshot_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    session.admin
+      .from("realtime_delivery_riders_10am")
+      .select("driver_id,total_assigned,delivered,delivering,failed,snapshot_at")
+      .eq("work_date", workDate),
   ]);
 
-  const error = riderResult.error ?? assignmentResult.error ?? attendanceResult.error ?? absenceNoteResult.error ?? latestRealtimeDeliveryResult.error;
+  const error = riderResult.error ?? assignmentResult.error ?? attendanceResult.error ?? absenceNoteResult.error ?? latestRealtimeDeliveryResult.error ?? realtime10amResult.error;
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 });
 
   const cot1Riders = (riderResult.data ?? []).filter((rider) => isCot1(rider.cot));
@@ -118,6 +122,7 @@ export async function GET(request: Request) {
     absence_notes: absenceNoteResult.data ?? [],
     active_delivery_rider_count: activeDeliveryRiderCount,
     realtime_delivery_riders: realtimeDeliveryRiders,
+    realtime_delivery_riders_10am: realtime10amResult.data ?? [],
     realtime_delivery_updated_at: latestRealtimeDeliveryResult.data?.snapshot_at ?? null,
   });
 }

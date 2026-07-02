@@ -63,15 +63,15 @@ export function AppShell({
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-slate-200 bg-white md:block">
-        <div className="flex h-16 items-center gap-3 border-b border-slate-200 px-5">
-          <div className="flex size-10 items-center justify-center rounded-md bg-slate-950 text-white">
+    <div className="min-h-screen bg-slate-50/80">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-slate-200/80 bg-white md:block">
+        <div className="flex h-16 items-center gap-3 border-b border-slate-100 px-5">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-200">
             <Database size={20} />
           </div>
           <div>
-            <p className="text-sm font-semibold text-slate-950">Rider Ops</p>
-            <p className="text-xs text-slate-500">Realtime workforce</p>
+            <p className="text-sm font-bold leading-5 text-slate-950">Rider Ops</p>
+            <p className="text-xs leading-4 text-slate-500">Realtime workforce</p>
           </div>
         </div>
         <nav className="space-y-1 p-3">
@@ -111,8 +111,8 @@ export function AppShell({
                     key={item.href}
                     href={item.href}
                     className={cn(
-                      "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-950",
-                      active && "bg-slate-950 text-white hover:bg-slate-950 hover:text-white",
+                      "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-500 transition duration-150 hover:bg-blue-50 hover:text-blue-700",
+                      active && "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-100",
                     )}
                   >
                     <Icon size={16} />
@@ -130,8 +130,8 @@ export function AppShell({
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950",
-                  active && "bg-slate-950 text-white hover:bg-slate-950 hover:text-white",
+                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-600 transition duration-150 hover:bg-blue-50 hover:text-blue-700",
+                  active && "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-100",
                 )}
               >
                 <Icon size={18} />
@@ -142,9 +142,9 @@ export function AppShell({
         </nav>
       </aside>
       <div className="md:pl-64">
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 backdrop-blur md:px-6">
+        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 shadow-[0_1px_3px_rgba(15,23,42,0.03)] backdrop-blur-xl md:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-slate-950 text-white md:hidden">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white md:hidden">
               <Database size={18} />
             </div>
             <div className="min-w-0">
