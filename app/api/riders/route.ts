@@ -172,3 +172,28 @@ export async function PATCH(request: Request) {
 
   return NextResponse.json({ success: true, rider: data });
 }
+
+export async function DELETE(request: Request) {
+  const user = await getSignedInUser();
+  if (!user) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  const admin = createAdminClient();
+  const { data: profile } = await admin.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (profile?.role !== "admin" && profile?.role !== "leader") {
+    return NextResponse.json({ success: false, error: "Bạn không có quyền xóa rider" }, { status: 403 });
+  }
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ success: false, error: "Rider không hợp lệ" }, { status: 400 });
+  const { data: rider, error: findError } = await admin.from("riders").select("id,rider_code,full_name").eq("id", parsed.data.id).maybeSingle();
+  if (findError || !rider) return NextResponse.json({ success: false, error: "Không tìm thấy rider" }, { status: 404 });
+
+  const [attendanceResult, violationResult] = await Promise.all([
+    admin.from("attendance_logs").update({ rider_id: null }).eq("rider_id", rider.id),
+    admin.from("rider_violations").update({ rider_id: null }).eq("rider_id", rider.id),
+  ]);
+  const unlinkError = attendanceResult.error ?? violationResult.error;
+  if (unlinkError) return NextResponse.json({ success: false, error: unlinkError.message }, { status: 400 });
+  const { error } = await admin.from("riders").delete().eq("id", rider.id);
+  if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+  await admin.from("activity_logs").insert({ entity_type: "rider", entity_id: null, action: "deleted", message: `Deleted rider ${rider.rider_code}`, raw_data: rider });
+  return NextResponse.json({ success: true, id: rider.id });
+}

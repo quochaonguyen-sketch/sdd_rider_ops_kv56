@@ -9,6 +9,7 @@ import {
   Bike,
   CalendarDays,
   ClipboardCheck,
+  ChevronDown,
   Database,
   ListChecks,
   LogOut,
@@ -44,6 +45,10 @@ const volumeItems = [
   { href: "/volume/delivery", label: "Delivery", icon: Truck },
   { href: "/volume/pickup", label: "Pickup", icon: PackagePlus },
 ];
+const toolItems = [
+  { href: "/zone-builder", label: "Zone Builder", icon: PencilRuler },
+  { href: "/pickup-management", label: "Pickup Management", icon: ListChecks },
+];
 const moreNavItems = [...volumeItems, ...navItems.slice(4)];
 
 export function AppShell({
@@ -56,6 +61,10 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
+  const volumeActive = pathname.startsWith("/volume");
+  const [volumeOpen, setVolumeOpen] = useState(volumeActive);
+  const toolsActive = toolItems.some((item) => pathname.startsWith(item.href));
+  const [toolsOpen, setToolsOpen] = useState(toolsActive);
 
   async function signOut() {
     await createClient().auth.signOut();
@@ -93,16 +102,20 @@ export function AppShell({
             );
           })}
           <div className="pt-1">
-            <div
+            <button
+              type="button"
+              aria-expanded={volumeOpen}
+              onClick={() => setVolumeOpen((current) => !current)}
               className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold",
-                pathname.startsWith("/volume") ? "text-slate-950" : "text-slate-500",
+                "flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950",
+                volumeActive && "text-slate-950",
               )}
             >
               <PackageOpen size={18} />
-              Volume
-            </div>
-            <div className="ml-6 space-y-1 border-l border-slate-200 pl-3">
+              <span className="flex-1">Volume</span>
+              <ChevronDown size={15} className={cn("transition-transform", volumeOpen && "rotate-180")} />
+            </button>
+            {volumeOpen ? <div className="ml-6 space-y-1 border-l border-slate-200 pl-3">
               {volumeItems.map((item) => {
                 const active = pathname === item.href;
                 const Icon = item.icon;
@@ -120,9 +133,43 @@ export function AppShell({
                   </Link>
                 );
               })}
-            </div>
+            </div> : null}
           </div>
-          {navItems.slice(6).map((item) => {
+          <div className="pt-1">
+            <button
+              type="button"
+              aria-expanded={toolsOpen}
+              onClick={() => setToolsOpen((current) => !current)}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950",
+                toolsActive && "text-slate-950",
+              )}
+            >
+              <PencilRuler size={18} />
+              <span className="flex-1">Tools</span>
+              <ChevronDown size={15} className={cn("transition-transform", toolsOpen && "rotate-180")} />
+            </button>
+            {toolsOpen ? <div className="ml-6 space-y-1 border-l border-slate-200 pl-3">
+              {toolItems.map((item) => {
+                const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-500 transition duration-150 hover:bg-blue-50 hover:text-blue-700",
+                      active && "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-100",
+                    )}
+                  >
+                    <Icon size={16} />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div> : null}
+          </div>
+          {navItems.slice(8).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return (

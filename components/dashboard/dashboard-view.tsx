@@ -1,222 +1,183 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCcw } from "lucide-react";
-import { startOfWeek, format } from "date-fns";
+import Link from "next/link";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { Activity, Bike, CalendarCheck2, ChevronRight, CircleAlert, Clock3, PackageCheck, RefreshCcw, Truck } from "lucide-react";
+import { format, subDays } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
 import type { ActivityLog, AttendanceLog, Rider, Zone } from "@/types";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Select } from "@/components/ui/select";
+import { cn } from "@/utils/cn";
+import { WeeklyRiderViolationsCard, type RiderViolation } from "@/components/dashboard/weekly-rider-violations-card";
 
-type DashboardState = {
-  riders: Rider[];
-  zones: Zone[];
-  attendance: AttendanceLog[];
-  activity: ActivityLog[];
-};
-
-const emptyState: DashboardState = {
-  riders: [],
-  zones: [],
-  attendance: [],
-  activity: [],
-};
+type RangeKey = "today" | "yesterday" | "7d";
+type VolumeMode = "delivery" | "pickup" | "all";
+type VolumeGrouping = "week" | "month";
+type VolumeRow = { report_date: string | null; district: string | null; total_orders: number | null };
+type DailyVolumeRecord = { date: string; volume: number; type: "delivery" | "pickup" };
+type RealtimeRow = { driver_id: string; total_assigned: number; delivered: number; delivering: number; failed: number; idle_delivery_seconds: number; snapshot_id: string; snapshot_at: string };
+type DashboardState = { riders: Rider[]; zones: Zone[]; attendance: AttendanceLog[]; activity: ActivityLog[]; delivery: VolumeRow[]; pickup: VolumeRow[]; realtime: RealtimeRow[] };
+const emptyState: DashboardState = { riders: [], zones: [], attendance: [], activity: [], delivery: [], pickup: [], realtime: [] };
 
 export function DashboardView() {
   const [state, setState] = useState<DashboardState>(emptyState);
+  const [range, setRange] = useState<RangeKey>("today");
+  const [volumeMode, setVolumeMode] = useState<VolumeMode>("all");
+  const [volumeGrouping, setVolumeGrouping] = useState<VolumeGrouping>("week");
+  const [volumeZone, setVolumeZone] = useState("all");
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const dateRange = useMemo(() => getDateRange(range), [range]);
 
   const loadDashboard = useCallback(async () => {
     const supabase = createClient();
+    setLoading(true);
     setError(null);
-    const weekStart = format(startOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd");
-
-    const [riders, zones, attendance, activity] = await Promise.all([
+    const historyStart = monthStartOffset(dateRange.end, -11);
+    const [riders, zones, attendance, activity, delivery, pickup, realtime] = await Promise.all([
       supabase.from("riders").select("*, zones(id,name,area,hub)").order("updated_at", { ascending: false }),
       supabase.from("zones").select("*").order("name"),
-      supabase
-        .from("attendance_logs")
-        .select("*, riders(id,full_name,rider_code,zone_id,zones(id,name))")
-        .gte("work_date", weekStart)
-        .order("created_at", { ascending: false }),
-      supabase.from("activity_logs").select("*").order("created_at", { ascending: false }).limit(20),
+      supabase.from("attendance_logs").select("*, riders(id,full_name,rider_code,zone_id,zones(id,name))").gte("work_date", shiftDateValue(dateRange.end, -59)).lte("work_date", dateRange.end).order("work_date"),
+      supabase.from("activity_logs").select("*").order("created_at", { ascending: false }).limit(10),
+      supabase.from("delivery_order").select("report_date,district,total_orders").gte("report_date", historyStart).lte("report_date", dateRange.end).limit(5000),
+      supabase.from("pickup_volume").select("report_date,district,total_orders").gte("report_date", historyStart).lte("report_date", dateRange.end).limit(5000),
+      supabase.from("realtime_delivery_riders").select("driver_id,total_assigned,delivered,delivering,failed,idle_delivery_seconds,snapshot_id,snapshot_at").eq("work_date", dateRange.end).order("snapshot_at", { ascending: false }).limit(2000),
     ]);
-
-    const firstError = riders.error ?? zones.error ?? attendance.error ?? activity.error;
-    if (firstError) {
-      setError(firstError.message);
-    } else {
-      setState({
-        riders: (riders.data ?? []) as Rider[],
-        zones: (zones.data ?? []) as Zone[],
-        attendance: (attendance.data ?? []) as AttendanceLog[],
-        activity: (activity.data ?? []) as ActivityLog[],
-      });
+    const results = [riders, zones, attendance, activity, delivery, pickup, realtime];
+    const firstError = results.find((result) => result.error)?.error;
+    if (firstError) setError(firstError.message);
+    else {
+      const realtimeRows = (realtime.data ?? []) as RealtimeRow[];
+      const latestSnapshot = realtimeRows[0]?.snapshot_id;
+      setState({ riders: (riders.data ?? []) as Rider[], zones: (zones.data ?? []) as Zone[], attendance: (attendance.data ?? []) as AttendanceLog[], activity: (activity.data ?? []) as ActivityLog[], delivery: (delivery.data ?? []) as VolumeRow[], pickup: (pickup.data ?? []) as VolumeRow[], realtime: realtimeRows.filter((row) => row.snapshot_id === latestSnapshot) });
+      setLastUpdated(new Date());
     }
-
     setLoading(false);
-  }, []);
+  }, [dateRange.end]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadDashboard();
   }, [loadDashboard]);
-
-  const refresh = useCallback(() => {
-    void loadDashboard();
-  }, [loadDashboard]);
-
+  const refresh = useCallback(() => { void loadDashboard(); }, [loadDashboard]);
   useSupabaseRealtime({ table: "riders", onChange: refresh });
   useSupabaseRealtime({ table: "attendance_logs", onChange: refresh });
   useSupabaseRealtime({ table: "zones", onChange: refresh });
   useSupabaseRealtime({ table: "activity_logs", onChange: refresh });
+  useSupabaseRealtime({ table: "delivery_order", onChange: refresh });
+  useSupabaseRealtime({ table: "pickup_volume", onChange: refresh });
+  useSupabaseRealtime({ table: "realtime_delivery_riders", onChange: refresh });
 
-  const metrics = useMemo(() => {
-    const today = format(new Date(), "yyyy-MM-dd");
-    const todayLogs = state.attendance.filter((log) => log.work_date === today);
-    const activeRiders = state.riders.filter((rider) => rider.status === "active");
-    const activeCodes = new Set(activeRiders.map((rider) => rider.rider_code));
-    const todayByRider = new Map<string, AttendanceLog>();
+  const summary = useMemo(() => buildSummary(state, dateRange), [dateRange, state]);
+  const volumeZones = useMemo(() => Array.from(new Set([...state.delivery, ...state.pickup].map((row) => row.district?.trim()).filter((value): value is string => Boolean(value)))).sort((a, b) => a.localeCompare(b, "vi", { numeric: true })), [state.delivery, state.pickup]);
+  const volumeAnalytics = useMemo(() => buildVolumeAnalytics(state.delivery, state.pickup, volumeMode, volumeGrouping, volumeZone), [state.delivery, state.pickup, volumeGrouping, volumeMode, volumeZone]);
+  const volumeDailyData = useMemo(() => buildDailyVolumeRecords(state.delivery, state.pickup, volumeMode, volumeZone), [state.delivery, state.pickup, volumeMode, volumeZone]);
+  const alerts = useMemo(() => buildAlerts(state, summary), [state, summary]);
+  const violations = useMemo(() => buildViolationEvents(state), [state]);
 
-    for (const log of todayLogs) {
-      if (activeCodes.has(log.rider_code) && !todayByRider.has(log.rider_code)) {
-        todayByRider.set(log.rider_code, log);
-      }
-    }
+  return <div className="mx-auto max-w-[1600px] space-y-6">
+    <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><div className="flex items-center gap-2"><p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">Operations control center</p><span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700"><span className="size-1.5 rounded-full bg-emerald-500" />Live</span></div><h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-950">Tổng quan vận hành</h1><p className="mt-1 text-sm text-slate-500">Hiệu suất, quân số và rủi ro quan trọng trong một màn hình.</p></div><div className="flex items-center gap-2"><Select className="w-40" value={range} onChange={(event) => setRange(event.target.value as RangeKey)} aria-label="Khoảng thời gian"><option value="today">Hôm nay</option><option value="yesterday">Hôm qua</option><option value="7d">7 ngày gần nhất</option></Select><Button type="button" variant="secondary" className="shrink-0" onClick={refresh} disabled={loading}><RefreshCcw size={16} className={loading ? "animate-spin" : undefined} /><span className="hidden sm:inline">Làm mới</span></Button></div></header>
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"><Clock3 size={14} className="text-blue-600" /><strong>{rangeLabel(range)}</strong><span>·</span><span>{lastUpdated ? `Cập nhật lúc ${format(lastUpdated, "HH:mm:ss")}` : "Đang tải dữ liệu"}</span></div>
+    {error ? <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">Không thể tải dashboard: {error}</p> : null}
 
-    const onToday = Array.from(todayByRider.values()).filter((log) =>
-      ["ON", "WORKING_REST_DAY", "NO_PICKUP"].includes(log.status?.toUpperCase() ?? ""),
-    ).length;
-    const offToday = Array.from(todayByRider.values()).filter((log) =>
-      log.status?.toUpperCase().includes("OFF"),
-    ).length;
-    const weeklyOff = state.attendance.filter(
-      (log) => activeCodes.has(log.rider_code) && log.status?.toUpperCase().includes("OFF"),
-    );
+    <section aria-labelledby="current-state" className="space-y-4"><div><h2 id="current-state" className="font-semibold text-slate-950">Vận hành hiện tại</h2><p className="text-sm text-slate-500">Các tín hiệu quan trọng nhất trong phạm vi đã chọn.</p></div><div className="grid grid-cols-12 gap-4">
+      <KpiCard className="col-span-6 xl:col-span-2" href="/realtime-dashboard" icon={Activity} label="Đơn đang giao" value={summary.delivering} context={`${summary.assigned.toLocaleString("vi-VN")} đơn được phân`} tone="blue" loading={loading} />
+      <KpiCard className="col-span-6 xl:col-span-2" href="/volume/delivery" icon={Truck} label="Tổng volume" value={summary.totalVolume} context={`${summary.deliveryVolume.toLocaleString("vi-VN")} delivery`} tone="blue" loading={loading} />
+      <KpiCard className="col-span-6 xl:col-span-2" href="/realtime-dashboard" icon={PackageCheck} label="Đã giao" value={summary.delivered} context={`Tiến độ ${summary.deliveryRate}%`} tone="green" loading={loading} />
+      <KpiCard className="col-span-6 xl:col-span-2" href="/riders" icon={Bike} label="Rider active" value={`${summary.activeRiders}/${state.riders.length}`} context={`${summary.unassignedRiders} chưa gán zone`} tone="slate" loading={loading} />
+      <KpiCard className="col-span-6 xl:col-span-2" href="/attendance" icon={CalendarCheck2} label="Tỷ lệ đi làm" value={`${summary.attendanceRate}%`} context={`${summary.present}/${summary.scheduled} rider`} tone="green" loading={loading} />
+      <KpiCard className="col-span-6 xl:col-span-2" href="#alerts" icon={CircleAlert} label="Cảnh báo" value={alerts.length} context={`${summary.failed} đơn giao lỗi`} tone={alerts.length ? "red" : "green"} loading={loading} />
+    </div></section>
 
-    return {
-      totalRiders: activeRiders.length,
-      onToday,
-      offToday,
-      unassignedToday: Math.max(0, activeRiders.length - onToday - offToday),
-      offApproved: weeklyOff.filter(
-        (log) => log.status === "OFF_APPROVED" || /approved|xin phep|permission/i.test(log.note ?? ""),
-      ).length,
-      offUnexpected: weeklyOff.filter(
-        (log) => log.status === "OFF_UNEXPECTED" || /unexpected|dot xuat|đột xuất/i.test(log.note ?? ""),
-      ).length,
-    };
-  }, [state]);
+    <section aria-labelledby="volume-question" className="space-y-4"><div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between"><div><h2 id="volume-question" className="font-semibold text-slate-950">Volume đang diễn biến thế nào?</h2><p className="text-sm text-slate-500">So sánh Delivery/Pickup theo tuần hoặc tháng trong 12 tháng gần nhất.</p></div><div className="grid gap-2 sm:grid-cols-3"><Select value={volumeMode} onChange={(event) => setVolumeMode(event.target.value as VolumeMode)} aria-label="Chế độ volume"><option value="all">Delivery + Pickup</option><option value="delivery">Delivery</option><option value="pickup">Pickup</option></Select><Select value={volumeGrouping} onChange={(event) => setVolumeGrouping(event.target.value as VolumeGrouping)} aria-label="Nhóm volume"><option value="week">Theo tuần</option><option value="month">Theo tháng</option></Select><Select value={volumeZone} onChange={(event) => setVolumeZone(event.target.value)} aria-label="Khu vực volume"><option value="all">Tất cả khu vực</option>{volumeZones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}</Select></div></div><div className="grid grid-cols-12 gap-4">{volumeGrouping === "week" ? <WeeklyVolumeTrendWithDailyBars className="col-span-12 xl:col-span-8" data={volumeDailyData} defaultWeeksRange={4} loading={loading} /> : <VolumeAnalyticsChart className="col-span-12 xl:col-span-8" analytics={volumeAnalytics} grouping={volumeGrouping} loading={loading} />}<div className="col-span-12 grid gap-4 sm:grid-cols-2 xl:col-span-4 xl:grid-cols-1"><VolumeComparisonCard analytics={volumeAnalytics} /><ProgressChart delivered={summary.delivered} delivering={summary.delivering} failed={summary.failed} /></div></div></section>
 
-  return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-950 sm:text-2xl">Dashboard</h1>
-          <p className="mt-0.5 text-sm text-slate-500">Tổng quan vận hành rider theo thời gian thực.</p>
-        </div>
-        <Button type="button" variant="secondary" className="shrink-0 px-3" onClick={refresh} disabled={loading}>
-          <RefreshCcw size={16} />
-          <span className="hidden sm:inline">Refresh</span>
-        </Button>
-      </div>
+    <section aria-label="Tóm tắt vận hành" className="grid grid-cols-12 gap-4">
+      <SectionCard className="col-span-12 lg:col-span-4" title="Quân số rider" description="Mức sẵn sàng và phân bổ rider" href="/riders" linkLabel="Xem riders"><SummaryRow label="Đang hoạt động" value={summary.activeRiders} tone="green" /><SummaryRow label="Chưa gán khu vực" value={summary.unassignedRiders} tone={summary.unassignedRiders ? "amber" : "slate"} /><SummaryRow label="Chờ trên 1 giờ" value={summary.idleRiders} tone={summary.idleRiders ? "red" : "slate"} /></SectionCard>
+      <SectionCard className="col-span-12 lg:col-span-4" title="Chấm công hôm nay" description="Có mặt, nghỉ và vắng đột xuất" href="/attendance" linkLabel="Xem chấm công"><DistributionBar values={[{ label: "Có mặt", value: summary.present, color: "bg-emerald-500" }, { label: "Nghỉ phép", value: summary.leave, color: "bg-blue-500" }, { label: "Vắng", value: summary.absent, color: "bg-red-500" }]} /><p className="mt-4 text-sm text-slate-500">Tỷ lệ có mặt <strong className="text-slate-900">{summary.attendanceRate}%</strong></p></SectionCard>
+      <SectionCard className="col-span-12 lg:col-span-4" title="Phân bổ khu vực" description="Các zone theo số rider active" href="/zones" linkLabel="Xem zones"><div className="space-y-3">{summary.zoneRows.slice(0, 4).map((zone) => <div key={zone.name} className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-medium text-slate-800">{zone.name}</p><p className="text-xs text-slate-500">{zone.total} rider</p></div><span className="text-sm font-bold tabular-nums text-slate-900">{zone.active} active</span></div>)}{summary.zoneRows.length === 0 ? <Empty text="Chưa có dữ liệu zone." /> : null}</div></SectionCard>
+    </section>
 
-      {error ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
+    <WeeklyRiderViolationsCard violations={violations} defaultRange="LAST_7_DAYS" />
+    <section id="alerts" className="grid grid-cols-12 gap-4"><AlertsList className="col-span-12 xl:col-span-7" alerts={alerts} /><SectionCard className="col-span-12 xl:col-span-5" title="Lối tắt vận hành" description="Đi nhanh đến các màn hình chuyên sâu" href="/realtime-dashboard" linkLabel="Mở realtime"><div className="grid grid-cols-2 gap-2">{[["Morning Dispatch", "/morning-delivery"], ["Delivery Volume", "/volume/delivery"], ["Pickup Volume", "/volume/pickup"], ["Zone Builder", "/zone-builder"]].map(([label, href]) => <Link key={href} href={href} className="rounded-lg border border-slate-200 px-3 py-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700">{label}</Link>)}</div><div className="mt-4 border-t border-slate-100 pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Cập nhật gần đây</p>{state.activity.slice(0, 3).map((item) => <p key={item.id} className="mt-2 line-clamp-1 text-sm text-slate-600">{item.message}</p>)}</div></SectionCard></section>
+  </div>;
+}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-6">
-        <MetricCard label="Rider active" value={metrics.totalRiders} loading={loading} tone="blue" />
-        <MetricCard label="Đi làm hôm nay" value={metrics.onToday} loading={loading} tone="green" />
-        <MetricCard label="Nghỉ hôm nay" value={metrics.offToday} loading={loading} tone="red" />
-        <MetricCard label="Chưa xếp lịch" value={metrics.unassignedToday} loading={loading} tone="amber" />
-        <MetricCard label="OFF phép tuần" value={metrics.offApproved} loading={loading} tone="slate" />
-        <MetricCard
-          label="OFF đột xuất tuần"
-          value={metrics.offUnexpected}
-          loading={loading}
-          tone="red"
-        />
-      </div>
+export const KpiCard = memo(function KpiCard({ href, icon: Icon, label, value, context, tone, loading, className }: { href: string; icon: typeof Activity; label: string; value: number | string; context: string; tone: "blue" | "green" | "red" | "slate"; loading: boolean; className?: string }) { const colors = { blue: "bg-blue-50 text-blue-700", green: "bg-emerald-50 text-emerald-700", red: "bg-red-50 text-red-700", slate: "bg-slate-100 text-slate-700" }; return <Link href={href} className={cn("group min-h-36 rounded-xl border border-slate-200 bg-white p-4 transition hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500", className)}><div className="flex items-start justify-between gap-2"><p className="text-sm font-medium text-slate-600">{label}</p><span className={cn("grid size-9 place-items-center rounded-lg", colors[tone])}><Icon size={18} /></span></div><p className="mt-2 text-2xl font-bold tabular-nums text-slate-950">{loading ? "—" : typeof value === "number" ? value.toLocaleString("vi-VN") : value}</p><p className="mt-4 text-xs text-slate-500">{context}</p></Link>; });
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
-        <Card>
-          <h2 className="mb-4 text-base font-semibold text-slate-950">By zone</h2>
-          <div className="space-y-3">
-            {state.zones.length === 0 && !loading ? <Empty text="No zones found." /> : null}
-            {state.zones.map((zone) => {
-              const riders = state.riders.filter((rider) => rider.zone_id === zone.id);
-              const active = riders.filter((rider) => rider.status === "active").length;
-              const inactive = riders.filter((rider) => rider.status === "inactive").length;
-              return (
-                <div key={zone.id} className="rounded-md border border-slate-100 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-slate-950">{zone.name}</p>
-                      <p className="text-sm text-slate-500">{zone.area ?? zone.hub ?? "No area assigned"}</p>
-                    </div>
-                    <Badge tone="blue">{riders.length} riders</Badge>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                    <span className="rounded-md bg-emerald-50 p-2 text-emerald-700">Active {active}</span>
-                    <span className="rounded-md bg-red-50 p-2 text-red-700">Inactive {inactive}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-        <Card>
-          <h2 className="mb-4 text-base font-semibold text-slate-950">Recent updates</h2>
-          <div className="space-y-3">
-            {state.activity.length === 0 && !loading ? <Empty text="No recent updates yet." /> : null}
-            {state.activity.map((log) => (
-              <div key={log.id} className="border-b border-slate-100 pb-3 last:border-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge>{log.entity_type}</Badge>
-                  <span className="text-xs text-slate-400">{new Date(log.created_at).toLocaleString()}</span>
-                </div>
-                <p className="mt-1 text-sm font-medium text-slate-800">{log.message}</p>
-                <p className="text-xs uppercase text-slate-400">{log.action}</p>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
+export function TrendChart({ points, loading, className }: { points: ReturnType<typeof buildVolumeTrend>; loading: boolean; className?: string }) { const max = Math.max(1, ...points.flatMap((point) => [point.delivery, point.pickup])); const delivery = points.map((point, index) => `${points.length > 1 ? index / (points.length - 1) * 100 : 0},${92 - point.delivery / max * 78}`).join(" "); const pickup = points.map((point, index) => `${points.length > 1 ? index / (points.length - 1) * 100 : 0},${92 - point.pickup / max * 78}`).join(" "); const firstDate = points[0]?.date; const lastDate = points[points.length - 1]?.date; return <article className={cn("min-h-72 rounded-xl border border-slate-200 bg-white p-4", className)}><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-950">Volume theo ngày</h3><p className="mt-1 text-sm text-slate-500">Tổng đơn từ dữ liệu volume đã import.</p></div><div className="flex gap-3 text-xs text-slate-600"><span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-blue-600" />Delivery</span><span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-violet-500" />Pickup</span></div></div><div className={cn("mt-6 h-44", loading && "animate-pulse rounded bg-slate-50")}><svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" role="img" aria-label="Xu hướng volume delivery và pickup"><line x1="0" y1="92" x2="100" y2="92" stroke="#e2e8f0" /><polyline points={delivery} fill="none" stroke="#2563eb" strokeWidth="2" vectorEffect="non-scaling-stroke" /><polyline points={pickup} fill="none" stroke="#8b5cf6" strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg></div><div className="flex justify-between text-xs text-slate-400"><span>{firstDate ? formatDate(firstDate) : ""}</span><span>{lastDate ? formatDate(lastDate) : ""}</span></div></article>; }
+
+export function WeeklyVolumeTrendWithDailyBars({ data, defaultWeeksRange = 4, loading, className }: { data: DailyVolumeRecord[]; defaultWeeksRange?: number; loading: boolean; className?: string }) {
+  const [weeksRange, setWeeksRange] = useState(defaultWeeksRange);
+  const [showBars, setShowBars] = useState(true);
+  const [showLine, setShowLine] = useState(true);
+  const [hovered, setHovered] = useState<{ kind: "day" | "week"; x: number; title: string; value: number; detail: string } | null>(null);
+  const chart = useMemo(() => aggregateDailyWeeks(data, weeksRange), [data, weeksRange]);
+  const width = 1000;
+  const plotLeft = 42;
+  const plotRight = 984;
+  const plotTop = 20;
+  const plotBottom = 238;
+  const plotWidth = plotRight - plotLeft;
+  const plotHeight = plotBottom - plotTop;
+  const dayStep = plotWidth / Math.max(1, chart.days.length);
+  const barWidth = Math.max(3, dayStep * 0.62);
+  const dailyMax = Math.max(1, ...chart.days.map((day) => day.total));
+  const weeklyMax = Math.max(1, ...chart.weeks.map((week) => week.total));
+  const weeklyLine = chart.weeks.map((week, index) => `${plotLeft + (index * 7 + 3.5) * dayStep},${plotBottom - week.total / weeklyMax * plotHeight}`).join(" ");
+
+  return <article className={cn("min-h-[430px] rounded-xl border border-slate-200 bg-white p-4", className)}>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h3 className="font-semibold text-slate-950">Weekly Volume Trend (with Daily Breakdown)</h3><p className="mt-1 text-sm text-slate-500">Mỗi cột là một ngày; đường biểu diễn tổng volume của tuần.</p></div><div className="inline-flex self-start rounded-lg bg-slate-100 p-1"><button type="button" aria-pressed={weeksRange === 4} onClick={() => setWeeksRange(4)} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold text-slate-600", weeksRange === 4 && "bg-white text-blue-700 shadow-sm")}>4 tuần</button><button type="button" aria-pressed={weeksRange === 8} onClick={() => setWeeksRange(8)} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold text-slate-600", weeksRange === 8 && "bg-white text-blue-700 shadow-sm")}>8 tuần</button></div></div>
+    <div className="mt-4 flex flex-wrap items-center gap-2"><button type="button" aria-pressed={showBars} onClick={() => setShowBars((value) => !value)} className={cn("flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", showBars ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-400")}><span className="size-2 rounded-sm bg-blue-500" />Daily volume</button><button type="button" aria-pressed={showLine} onClick={() => setShowLine((value) => !value)} className={cn("flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", showLine ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-400")}><span className="h-0.5 w-3 bg-current" />Weekly total</button><span className="ml-auto text-[11px] text-slate-400">Cột: trục trái · Đường: trục phải</span></div>
+    <div className={cn("relative mt-4 overflow-hidden", loading && "animate-pulse rounded bg-slate-50")} onMouseLeave={() => setHovered(null)}>
+      <svg viewBox={`0 0 ${width} 300`} className="h-[300px] w-full" role="img" aria-label="Biểu đồ volume ngày và tổng tuần">
+        {[0, 0.5, 1].map((ratio) => <g key={ratio}><line x1={plotLeft} y1={plotBottom - ratio * plotHeight} x2={plotRight} y2={plotBottom - ratio * plotHeight} stroke="#e2e8f0" strokeDasharray={ratio === 0 ? undefined : "3 4"} /><text x={plotLeft - 6} y={plotBottom - ratio * plotHeight + 4} textAnchor="end" fontSize="10" fill="#94a3b8">{compactVolume(Math.round(dailyMax * ratio))}</text><text x={plotRight + 6} y={plotBottom - ratio * plotHeight + 4} fontSize="10" fill="#94a3b8">{compactVolume(Math.round(weeklyMax * ratio))}</text></g>)}
+        {chart.weeks.map((week, index) => { const x = plotLeft + index * 7 * dayStep; const highlighted = week.isCurrent || week.isPeak; return <g key={week.key}><rect x={x} y={plotTop} width={dayStep * 7} height={plotHeight} fill={highlighted ? "#eff6ff" : index % 2 ? "#f8fafc" : "transparent"} opacity={highlighted ? 0.9 : 0.65} />{index > 0 ? <line x1={x} y1={plotTop} x2={x} y2={plotBottom + 28} stroke="#cbd5e1" strokeDasharray="3 4" /> : null}<text x={x + dayStep * 3.5} y={plotBottom + 38} textAnchor="middle" fontSize="11" fontWeight="600" fill={highlighted ? "#1d4ed8" : "#64748b"}>{week.label}</text>{week.change !== null ? <text x={x + dayStep * 3.5} y={plotTop + 12} textAnchor="middle" fontSize="9" fontWeight="600" fill={week.change >= 0 ? "#047857" : "#b91c1c"}>{week.change >= 0 ? "+" : ""}{week.change.toFixed(0)}%</text> : null}</g>; })}
+        {showBars ? chart.days.map((day, index) => { const x = plotLeft + index * dayStep + (dayStep - barWidth) / 2; const deliveryHeight = day.delivery / dailyMax * plotHeight; const pickupHeight = day.pickup / dailyMax * plotHeight; return <g key={day.date} tabIndex={0} role="img" aria-label={`${formatFullDate(day.date)}: ${day.total} đơn`} onFocus={() => setHovered({ kind: "day", x: (x + barWidth / 2) / width * 100, title: formatFullDate(day.date), value: day.total, detail: `${day.weekLabel} · Delivery ${day.delivery.toLocaleString("vi-VN")} · Pickup ${day.pickup.toLocaleString("vi-VN")}` })} onBlur={() => setHovered(null)} onMouseEnter={() => setHovered({ kind: "day", x: (x + barWidth / 2) / width * 100, title: formatFullDate(day.date), value: day.total, detail: `${day.weekLabel} · Delivery ${day.delivery.toLocaleString("vi-VN")} · Pickup ${day.pickup.toLocaleString("vi-VN")}` })}><rect x={x} y={plotBottom - deliveryHeight} width={barWidth} height={deliveryHeight} rx="2" fill="#3b82f6" /><rect x={x} y={plotBottom - deliveryHeight - pickupHeight} width={barWidth} height={pickupHeight} rx="2" fill="#8b5cf6" /><rect x={x - dayStep * 0.18} y={plotTop} width={dayStep * 1.36} height={plotHeight} fill="transparent" /></g>; }) : null}
+        {showLine && chart.weeks.length ? <><polyline points={weeklyLine} fill="none" stroke="#0f172a" strokeWidth="2.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />{chart.weeks.map((week, index) => { const x = plotLeft + (index * 7 + 3.5) * dayStep; const y = plotBottom - week.total / weeklyMax * plotHeight; return <circle key={week.key} cx={x} cy={y} r={week.isPeak ? 5 : 4} fill="white" stroke="#0f172a" strokeWidth="2.5" tabIndex={0} role="img" aria-label={`${week.label}: ${week.total} đơn`} onFocus={() => setHovered({ kind: "week", x: x / width * 100, title: week.label, value: week.total, detail: week.change === null ? "Tuần đầu trong phạm vi" : `${week.change >= 0 ? "+" : ""}${week.change.toFixed(1)}% so với tuần trước` })} onBlur={() => setHovered(null)} onMouseEnter={() => setHovered({ kind: "week", x: x / width * 100, title: week.label, value: week.total, detail: week.change === null ? "Tuần đầu trong phạm vi" : `${week.change >= 0 ? "+" : ""}${week.change.toFixed(1)}% so với tuần trước` })} />})}</> : null}
+        {chart.days.map((day, index) => index % (weeksRange === 8 ? 7 : 3) === 0 ? <text key={`label-${day.date}`} x={plotLeft + (index + 0.5) * dayStep} y={plotBottom + 16} textAnchor="middle" fontSize="9" fill="#94a3b8">{day.date.slice(8, 10)}</text> : null)}
+      </svg>
+      {hovered ? <div className="pointer-events-none absolute top-3 z-10 w-52 -translate-x-1/2 rounded-lg border border-slate-200 bg-white p-3 shadow-lg" style={{ left: `${Math.min(88, Math.max(12, hovered.x))}%` }}><p className="text-xs font-semibold text-slate-500">{hovered.kind === "day" ? "Daily volume" : "Weekly total"}</p><p className="mt-1 text-sm font-bold text-slate-950">{hovered.title} · {hovered.value.toLocaleString("vi-VN")}</p><p className="mt-1 text-xs leading-5 text-slate-500">{hovered.detail}</p></div> : null}
     </div>
-  );
+  </article>;
 }
 
-function MetricCard({
-  label,
-  value,
-  loading,
-  tone,
-  className,
-}: {
-  label: string;
-  value: number;
-  loading: boolean;
-  tone: "blue" | "green" | "amber" | "red" | "slate";
-  className?: string;
-}) {
-  const accents = {
-    blue: "bg-blue-500",
-    green: "bg-emerald-500",
-    amber: "bg-amber-500",
-    red: "bg-red-500",
-    slate: "bg-slate-500",
-  };
-  return (
-    <Card className={className}>
-      <span className={`block h-1 w-8 rounded-full ${accents[tone]}`} />
-      <p className="mt-3 text-xs font-medium text-slate-500 sm:text-sm">{label}</p>
-      <p className="mt-1 text-2xl font-bold text-slate-950 sm:text-3xl">{loading ? "-" : value}</p>
-    </Card>
-  );
-}
+function VolumeAnalyticsChart({ analytics, grouping, loading, className }: { analytics: ReturnType<typeof buildVolumeAnalytics>; grouping: VolumeGrouping; loading: boolean; className?: string }) { const points = analytics.points; const max = Math.max(1, ...points.flatMap((point) => [point.delivery, point.pickup])); const delivery = points.map((point, index) => `${points.length > 1 ? index / (points.length - 1) * 100 : 0},${92 - point.delivery / max * 78}`).join(" "); const pickup = points.map((point, index) => `${points.length > 1 ? index / (points.length - 1) * 100 : 0},${92 - point.pickup / max * 78}`).join(" "); return <article className={cn("min-h-80 rounded-xl border border-slate-200 bg-white p-4", className)}><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-950">Xu hướng theo {grouping === "week" ? "tuần" : "tháng"}</h3><p className="mt-1 text-sm text-slate-500">Tổng volume và cơ cấu theo nguồn đơn.</p></div><div className="flex gap-3 text-xs text-slate-600"><span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-blue-600" />Delivery</span><span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-violet-500" />Pickup</span></div></div><div className={cn("mt-6 h-52", loading && "animate-pulse rounded bg-slate-50")}><svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" role="img" aria-label="Xu hướng volume theo thời gian"><line x1="0" y1="92" x2="100" y2="92" stroke="#e2e8f0" /><line x1="0" y1="52" x2="100" y2="52" stroke="#e2e8f0" strokeDasharray="2 2" /><polyline points={delivery} fill="none" stroke="#2563eb" strokeWidth="2" vectorEffect="non-scaling-stroke" /><polyline points={pickup} fill="none" stroke="#8b5cf6" strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg></div><div className="mt-2 flex justify-between text-xs text-slate-400"><span>{points[0]?.label ?? ""}</span><span>{points[points.length - 1]?.label ?? ""}</span></div></article>; }
 
-function Empty({ text }: { text: string }) {
-  return <p className="rounded-md border border-dashed border-slate-200 p-4 text-sm text-slate-500">{text}</p>;
-}
+function VolumeComparisonCard({ analytics }: { analytics: ReturnType<typeof buildVolumeAnalytics> }) { const positive = analytics.change >= 0; return <article className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-sm font-medium text-slate-600">So với kỳ trước</p><div className="mt-3 flex items-end justify-between gap-3"><p className={cn("text-2xl font-bold tabular-nums", positive ? "text-emerald-700" : "text-red-700")}>{positive ? "+" : ""}{analytics.change.toFixed(1)}%</p><span className={cn("rounded-full px-2 py-1 text-xs font-semibold", positive ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}>{positive ? "Tăng" : "Giảm"}</span></div><div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3"><div><p className="text-xs text-slate-500">Kỳ hiện tại</p><p className="mt-1 font-bold tabular-nums text-slate-900">{analytics.current.toLocaleString("vi-VN")}</p></div><div><p className="text-xs text-slate-500">Kỳ trước</p><p className="mt-1 font-bold tabular-nums text-slate-900">{analytics.previous.toLocaleString("vi-VN")}</p></div></div></article>; }
+
+function ProgressChart({ delivered, delivering, failed, className }: { delivered: number; delivering: number; failed: number; className?: string }) { const values = [{ label: "Đã giao", value: delivered, color: "bg-emerald-500" }, { label: "Đang giao", value: delivering, color: "bg-blue-600" }, { label: "Giao lỗi", value: failed, color: "bg-red-500" }]; const max = Math.max(1, ...values.map((item) => item.value)); return <article className={cn("min-h-72 rounded-xl border border-slate-200 bg-white p-4", className)}><h3 className="font-semibold text-slate-950">Tiến độ giao hàng</h3><p className="mt-1 text-sm text-slate-500">Snapshot realtime mới nhất.</p><div className="mt-7 space-y-5">{values.map((item) => <div key={item.label}><div className="mb-1.5 flex justify-between text-sm"><span className="text-slate-600">{item.label}</span><strong className="tabular-nums text-slate-900">{item.value.toLocaleString("vi-VN")}</strong></div><div className="h-2.5 rounded-full bg-slate-100"><div className={cn("h-full rounded-full", item.color)} style={{ width: `${item.value / max * 100}%` }} /></div></div>)}</div></article>; }
+
+export function SectionCard({ title, description, href, linkLabel, children, className }: { title: string; description: string; href: string; linkLabel: string; children: React.ReactNode; className?: string }) { return <article className={cn("rounded-xl border border-slate-200 bg-white p-4", className)}><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-950">{title}</h3><p className="mt-1 text-sm text-slate-500">{description}</p></div><Link href={href} className="flex shrink-0 items-center gap-1 text-xs font-semibold text-blue-700 hover:text-blue-800">{linkLabel}<ChevronRight size={14} /></Link></div><div className="mt-5">{children}</div></article>; }
+
+export function AlertsList({ alerts, className }: { alerts: ReturnType<typeof buildAlerts>; className?: string }) { return <article className={cn("rounded-xl border border-slate-200 bg-white p-4", className)}><div className="flex items-center gap-2"><CircleAlert size={18} className="text-red-600" /><h3 className="font-semibold text-slate-950">Rủi ro cần chú ý</h3></div><p className="mt-1 text-sm text-slate-500">Các tín hiệu cần được kiểm tra trong ca vận hành.</p><div className="mt-4 divide-y divide-slate-100">{alerts.map((alert) => <Link key={alert.title} href={alert.href} className="flex items-center gap-3 py-3 hover:bg-slate-50"><span className={cn("rounded-full px-2 py-1 text-[10px] font-bold uppercase", alert.severity === "critical" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700")}>{alert.severity === "critical" ? "Cao" : "Vừa"}</span><div className="min-w-0 flex-1"><p className="text-sm font-semibold text-slate-800">{alert.title}</p><p className="truncate text-xs text-slate-500">{alert.description}</p></div><ChevronRight size={15} className="text-slate-400" /></Link>)}{alerts.length === 0 ? <Empty text="Không có cảnh báo nổi bật trong phạm vi này." /> : null}</div></article>; }
+
+function SummaryRow({ label, value, tone }: { label: string; value: number; tone: "green" | "amber" | "red" | "slate" }) { const colors = { green: "text-emerald-700", amber: "text-amber-700", red: "text-red-700", slate: "text-slate-700" }; return <div className="flex items-center justify-between border-b border-slate-100 py-3 last:border-0"><span className="text-sm text-slate-600">{label}</span><strong className={cn("tabular-nums", colors[tone])}>{value}</strong></div>; }
+function DistributionBar({ values }: { values: Array<{ label: string; value: number; color: string }> }) { const total = values.reduce((sum, item) => sum + item.value, 0); return <><div className="flex h-3 overflow-hidden rounded-full bg-slate-100">{values.map((item) => <div key={item.label} className={item.color} style={{ width: `${total ? item.value / total * 100 : 0}%` }} />)}</div><div className="mt-3 flex flex-wrap gap-3">{values.map((item) => <span key={item.label} className="flex items-center gap-1.5 text-xs text-slate-600"><span className={cn("size-2 rounded-full", item.color)} />{item.label} {item.value}</span>)}</div></>; }
+function Empty({ text }: { text: string }) { return <p className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">{text}</p>; }
+
+function buildSummary(state: DashboardState, range: { start: string; end: string }) { const activeRiders = state.riders.filter((rider) => rider.status === "active"); const attendance = state.attendance.filter((log) => log.work_date === range.end); const present = attendance.filter((log) => isPresent(log.status)).length; const leave = attendance.filter((log) => /OFF_WEEKLY|OFF_APPROVED/i.test(log.status)).length; const absent = attendance.filter((log) => /OFF_UNEXPECTED/i.test(log.status)).length; const realtime = state.realtime.reduce((sum, row) => ({ assigned: sum.assigned + row.total_assigned, delivered: sum.delivered + row.delivered, delivering: sum.delivering + row.delivering, failed: sum.failed + row.failed }), { assigned: 0, delivered: 0, delivering: 0, failed: 0 }); const volumeTotal = (rows: VolumeRow[]) => rows.filter((row) => { const date = row.report_date?.slice(0, 10); return date && date >= range.start && date <= range.end; }).reduce((sum, row) => sum + (row.total_orders ?? 1), 0); const zoneRows = state.zones.map((zone) => { const riders = state.riders.filter((rider) => rider.zone_id === zone.id); return { name: zone.name, total: riders.length, active: riders.filter((rider) => rider.status === "active").length }; }).sort((a, b) => b.active - a.active); return { ...realtime, deliveryRate: realtime.assigned ? Math.round(realtime.delivered / realtime.assigned * 100) : 0, activeRiders: activeRiders.length, unassignedRiders: activeRiders.filter((rider) => !rider.zone_id && !rider.delivery_district).length, idleRiders: state.realtime.filter((row) => row.delivering > 0 && row.idle_delivery_seconds > 3600).length, scheduled: attendance.length, present, leave, absent, attendanceRate: attendance.length ? Math.round(present / attendance.length * 100) : 0, deliveryVolume: volumeTotal(state.delivery), pickupVolume: volumeTotal(state.pickup), totalVolume: volumeTotal(state.delivery) + volumeTotal(state.pickup), zoneRows }; }
+// Retained as the daily trend shape consumed by the exported compact chart component.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function buildVolumeTrend(delivery: VolumeRow[], pickup: VolumeRow[], range: { start: string; end: string }) { const dates = dateSequence(range.start, range.end); const sumByDate = (rows: VolumeRow[]) => { const map = new Map<string, number>(); for (const row of rows) { const date = row.report_date?.slice(0, 10); if (date) map.set(date, (map.get(date) ?? 0) + (row.total_orders ?? 1)); } return map; }; const deliveryMap = sumByDate(delivery); const pickupMap = sumByDate(pickup); return dates.map((date) => ({ date, delivery: deliveryMap.get(date) ?? 0, pickup: pickupMap.get(date) ?? 0 })); }
+function buildVolumeAnalytics(delivery: VolumeRow[], pickup: VolumeRow[], mode: VolumeMode, grouping: VolumeGrouping, zone: string) { const groups = new Map<string, { delivery: number; pickup: number }>(); const addRows = (rows: VolumeRow[], source: "delivery" | "pickup") => { if (mode !== "all" && mode !== source) return; for (const row of rows) { if (zone !== "all" && row.district?.trim() !== zone) continue; const date = row.report_date?.slice(0, 10); if (!date) continue; const key = grouping === "month" ? date.slice(0, 7) : isoWeekKey(date); const item = groups.get(key) ?? { delivery: 0, pickup: 0 }; item[source] += row.total_orders ?? 1; groups.set(key, item); } }; addRows(delivery, "delivery"); addRows(pickup, "pickup"); const points = Array.from(groups, ([key, values]) => ({ key, label: grouping === "month" ? `T${Number(key.slice(5))}/${key.slice(0, 4)}` : key, ...values, total: values.delivery + values.pickup })).sort((a, b) => a.key.localeCompare(b.key)); const current = points[points.length - 1]?.total ?? 0; const previous = points[points.length - 2]?.total ?? 0; return { points, current, previous, change: previous ? (current - previous) / previous * 100 : 0 }; }
+function buildDailyVolumeRecords(delivery: VolumeRow[], pickup: VolumeRow[], mode: VolumeMode, zone: string): DailyVolumeRecord[] { const records: DailyVolumeRecord[] = []; const add = (rows: VolumeRow[], type: "delivery" | "pickup") => { if (mode !== "all" && mode !== type) return; for (const row of rows) { if (zone !== "all" && row.district?.trim() !== zone) continue; const date = row.report_date?.slice(0, 10); if (date) records.push({ date, volume: row.total_orders ?? 1, type }); } }; add(delivery, "delivery"); add(pickup, "pickup"); return records; }
+function aggregateDailyWeeks(data: DailyVolumeRecord[], weeksRange: number) { const dailyMap = new Map<string, { delivery: number; pickup: number }>(); for (const record of data) { const item = dailyMap.get(record.date) ?? { delivery: 0, pickup: 0 }; item[record.type] += record.volume; dailyMap.set(record.date, item); } const latestDataDate = [...dailyMap.keys()].sort().at(-1) ?? todayInVietnamDate(); const latestMonday = startOfIsoWeek(latestDataDate); const start = shiftDate(latestMonday, -(weeksRange - 1) * 7); const days = Array.from({ length: weeksRange * 7 }, (_, index) => { const date = shiftDate(start, index); const values = dailyMap.get(date) ?? { delivery: 0, pickup: 0 }; return { date, ...values, total: values.delivery + values.pickup, weekKey: isoWeekKey(date), weekLabel: isoWeekKey(date).replace(/^\d{4}-/, "") }; }); const todayWeek = isoWeekKey(todayInVietnamDate()); const rawWeeks = Array.from({ length: weeksRange }, (_, index) => { const weekDays = days.slice(index * 7, index * 7 + 7); const total = weekDays.reduce((sum, day) => sum + day.total, 0); return { key: weekDays[0]?.weekKey ?? "", label: weekDays[0]?.weekLabel ?? "", total, isCurrent: weekDays[0]?.weekKey === todayWeek, isPeak: false, change: null as number | null }; }); const peak = Math.max(...rawWeeks.map((week) => week.total)); const weeks = rawWeeks.map((week, index) => ({ ...week, isPeak: week.total > 0 && week.total === peak, change: index > 0 && rawWeeks[index - 1]!.total > 0 ? (week.total - rawWeeks[index - 1]!.total) / rawWeeks[index - 1]!.total * 100 : null })); return { days, weeks }; }
+function buildAlerts(state: DashboardState, summary: ReturnType<typeof buildSummary>) { const alerts: Array<{ title: string; description: string; severity: "critical" | "warning"; href: string }> = []; if (summary.failed > 0) alerts.push({ title: `${summary.failed} đơn giao lỗi`, description: "Kiểm tra rider và khu vực có đơn lỗi trong snapshot mới nhất.", severity: "critical", href: "/realtime-dashboard" }); if (summary.idleRiders > 0) alerts.push({ title: `${summary.idleRiders} rider chờ trên 1 giờ`, description: "Rider vẫn còn đơn đang giao nhưng không có tiến triển.", severity: "critical", href: "/realtime-dashboard" }); if (summary.unassignedRiders > 0) alerts.push({ title: `${summary.unassignedRiders} rider chưa gán khu vực`, description: "Rider active chưa có zone hoặc quận giao.", severity: "warning", href: "/riders" }); if (summary.absent > 0) alerts.push({ title: `${summary.absent} ca nghỉ đột xuất`, description: "Rà soát ảnh hưởng quân số và kế hoạch phân tuyến.", severity: "warning", href: "/attendance" }); if (state.zones.length === 0) alerts.push({ title: "Chưa có cấu hình zone", description: "Thiết lập zone để theo dõi phân bổ rider.", severity: "warning", href: "/zones" }); return alerts; }
+function buildViolationEvents(state: DashboardState): RiderViolation[] { const riderByCode = new Map(state.riders.map((rider) => [rider.rider_code, rider])); const events: RiderViolation[] = []; for (const log of state.attendance) { const rider = riderByCode.get(log.rider_code); const status = log.status?.toUpperCase() ?? ""; const late = log.raw_data?.late === true || log.raw_data?.is_late === true || status.includes("LATE"); if (status.includes("OFF_UNEXPECTED")) events.push({ id: `no-show-${log.id}`, riderId: rider?.id ?? log.rider_id ?? log.rider_code, riderCode: log.rider_code, riderName: rider?.full_name ?? log.riders?.full_name ?? log.rider_code, violationType: "NO_SHOW", severity: "HIGH", zone: rider?.delivery_district ?? log.riders?.zones?.name ?? "Chưa xác định", occurredAt: `${log.work_date}T08:00:00+07:00`, note: log.note ?? "Nghỉ đột xuất / không có mặt trong ca" }); if (late) events.push({ id: `late-${log.id}`, riderId: rider?.id ?? log.rider_id ?? log.rider_code, riderCode: log.rider_code, riderName: rider?.full_name ?? log.riders?.full_name ?? log.rider_code, violationType: "LATE_CHECKIN", severity: "MEDIUM", zone: rider?.delivery_district ?? log.riders?.zones?.name ?? "Chưa xác định", occurredAt: attendanceTimestamp(log) ?? `${log.work_date}T08:00:00+07:00`, note: log.note ?? "Check-in muộn" }); } for (const row of state.realtime) { const rider = riderByCode.get(row.driver_id); if (row.failed > 0) { const failureRate = row.total_assigned ? row.failed / row.total_assigned : 0; events.push({ id: `sla-failed-${row.snapshot_id}-${row.driver_id}`, riderId: rider?.id ?? row.driver_id, riderCode: row.driver_id, riderName: rider?.full_name ?? row.driver_id, violationType: "SLA_BREACH", severity: failureRate >= 0.2 ? "HIGH" : "MEDIUM", zone: rider?.delivery_district ?? "Chưa xác định", occurredAt: row.snapshot_at, note: `${row.failed}/${row.total_assigned} đơn giao lỗi` }); } if (row.delivering > 0 && row.idle_delivery_seconds > 3600) events.push({ id: `sla-idle-${row.snapshot_id}-${row.driver_id}`, riderId: rider?.id ?? row.driver_id, riderCode: row.driver_id, riderName: rider?.full_name ?? row.driver_id, violationType: "SLA_BREACH", severity: row.idle_delivery_seconds > 7200 ? "HIGH" : "MEDIUM", zone: rider?.delivery_district ?? "Chưa xác định", occurredAt: row.snapshot_at, note: `Còn ${row.delivering} đơn, chờ ${Math.floor(row.idle_delivery_seconds / 60)} phút` }); } return events; }
+function attendanceTimestamp(log: AttendanceLog) { const value = log.raw_data?.check_in ?? log.raw_data?.check_in_time; return typeof value === "string" && value ? value : null; }
+function isPresent(status: string | null) { const value = status?.toUpperCase() ?? ""; return !value || value === "ON" || value === "WORKING_REST_DAY" || value === "NO_PICKUP"; }
+function getDateRange(range: RangeKey) { const today = new Date(); if (range === "yesterday") { const date = format(subDays(today, 1), "yyyy-MM-dd"); return { start: date, end: date }; } if (range === "7d") return { start: format(subDays(today, 6), "yyyy-MM-dd"), end: format(today, "yyyy-MM-dd") }; const date = format(today, "yyyy-MM-dd"); return { start: date, end: date }; }
+function dateSequence(start: string, end: string) { const dates: string[] = []; const current = new Date(`${start}T00:00:00Z`); const last = new Date(`${end}T00:00:00Z`); while (current <= last) { dates.push(current.toISOString().slice(0, 10)); current.setUTCDate(current.getUTCDate() + 1); } return dates; }
+function rangeLabel(range: RangeKey) { return range === "today" ? "Hôm nay" : range === "yesterday" ? "Hôm qua" : "7 ngày gần nhất"; }
+function formatDate(value: string) { return new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit" }).format(new Date(`${value}T00:00:00`)); }
+function shiftDateValue(value: string, days: number) { const date = new Date(`${value}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); }
+function formatFullDate(value: string) { return new Intl.DateTimeFormat("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(`${value}T00:00:00`)); }
+function compactVolume(value: number) { return new Intl.NumberFormat("vi-VN", { notation: "compact", maximumFractionDigits: 1 }).format(value); }
+function monthStartOffset(value: string, months: number) { const date = new Date(`${value.slice(0, 7)}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + months); return date.toISOString().slice(0, 10); }
+function isoWeekKey(value: string) { const date = new Date(`${value}T00:00:00Z`); const day = date.getUTCDay() || 7; date.setUTCDate(date.getUTCDate() + 4 - day); const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1)); const week = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7); return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`; }
+function startOfIsoWeek(value: string) { const date = new Date(`${value}T00:00:00Z`); const day = date.getUTCDay() || 7; date.setUTCDate(date.getUTCDate() - day + 1); return date.toISOString().slice(0, 10); }
+function shiftDate(value: string, days: number) { const date = new Date(`${value}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); }
+function todayInVietnamDate() { return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }

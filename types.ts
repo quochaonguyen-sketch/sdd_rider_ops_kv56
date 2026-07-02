@@ -75,3 +75,24 @@ export type ActivityLog = {
   raw_data: Record<string, unknown> | null;
   created_at: string;
 };
+
+export type RiderViolationRecord = {
+  id: string;
+  rider_id: string | null;
+  rider_code: string;
+  rider_name: string | null;
+  work_date: string;
+  violation_type: "LATE_CHECKIN" | "NO_SHOW" | "SLA_BREACH" | "SAFETY" | "POLICY" | "OFF_UNEXPECTED" | "WORKING_REST_DAY";
+  severity: "LOW" | "MEDIUM" | "HIGH";
+  zone: string | null;
+  note: string | null;
+  status: "OPEN" | "RESOLVED";
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
+  source: string;
+  dedupe_key: string | null;
+  raw_data: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};

@@ -1,10 +1,10 @@
 import { ProtectedPage } from "@/components/layout/protected-page";
-import { PickupManagementView } from "@/components/pickup/pickup-management-view";
+import { PickupToolsView } from "@/components/pickup/pickup-tools-view";
 
 export default function PickupManagementPage() {
   return (
     <ProtectedPage>
-      <PickupManagementView />
+      <PickupToolsView />
     </ProtectedPage>
   );
 }

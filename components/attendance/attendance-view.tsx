@@ -13,9 +13,16 @@ import {
 } from "date-fns";
 import { vi } from "date-fns/locale";
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  CalendarDays,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock3,
   Download,
+  Palmtree,
   Pencil,
   RefreshCcw,
   Search,
@@ -71,6 +78,9 @@ type ImportIssue = {
   error: string;
 };
 
+type AttendanceCategory = "present" | "absent" | "late" | "leave";
+type AttendanceSortKey = "name" | "date" | "shift" | "status";
+
 const statusOptions: Array<{ value: ScheduleStatus; label: string }> = [
   { value: "ON", label: "ON" },
   { value: "OFF_WEEKLY", label: "OFF tuần" },
@@ -95,6 +105,9 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   const [cot, setCot] = useState("all");
   const [deliveryDistrict, setDeliveryDistrict] = useState("all");
   const [rosterStatus, setRosterStatus] = useState("active");
+  const [attendanceStatus, setAttendanceStatus] = useState<AttendanceCategory | "all">("all");
+  const [shiftFilter, setShiftFilter] = useState("all");
+  const [attendanceSort, setAttendanceSort] = useState<{ key: AttendanceSortKey; direction: "asc" | "desc" }>({ key: "name", direction: "asc" });
   const [bulkStatus, setBulkStatus] = useState<ScheduleStatus>("ON");
   const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -163,11 +176,11 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   );
 
   const kvOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.kv)), [riders]);
-  const cotOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.cot)), [riders]);
   const deliveryDistrictOptions = useMemo(
     () => uniqueOptions(riders.map((rider) => rider.delivery_district)),
     [riders],
   );
+  const shiftOptions = useMemo(() => uniqueOptions(logs.map((log) => log.shift)), [logs]);
 
   const filteredRiders = useMemo(() => {
     const normalized = deferredQuery.trim().toLocaleLowerCase("vi");
@@ -199,32 +212,43 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
     return map;
   }, [logs, riders]);
 
+  const visibleRiders = useMemo(() => filteredRiders.filter((rider) => {
+    const log = logMap.get(cellKey(rider.id, selectedDate));
+    return (attendanceStatus === "all" || attendanceCategory(log) === attendanceStatus) &&
+      (shiftFilter === "all" || (log?.shift ?? rider.current_shift) === shiftFilter);
+  }).sort((a, b) => compareAttendanceRiders(a, b, logMap, selectedDate, attendanceSort) * (attendanceSort.direction === "asc" ? 1 : -1)), [attendanceSort, attendanceStatus, filteredRiders, logMap, selectedDate, shiftFilter]);
+
   const dailySummaries = useMemo(
     () =>
       new Map(
         days.map((day) => {
           const date = format(day, "yyyy-MM-dd");
-          return [date, summarizeDate(date, filteredRiders, logMap)] as const;
+          return [date, summarizeDate(date, visibleRiders, logMap)] as const;
         }),
       ),
-    [days, filteredRiders, logMap],
+    [days, logMap, visibleRiders],
   );
   const selectedSummary = dailySummaries.get(selectedDate) ?? {
     on: 0,
     off: 0,
     defaultOn: 0,
-    total: filteredRiders.length,
+    present: 0,
+    absent: 0,
+    late: 0,
+    leave: 0,
+    total: visibleRiders.length,
   };
+  const selectedAllSummary = useMemo(() => summarizeDate(selectedDate, filteredRiders, logMap), [filteredRiders, logMap, selectedDate]);
   const selectedDayIndex = Math.max(0, days.findIndex((day) => format(day, "yyyy-MM-dd") === selectedDate));
   const dayWindowIndex = Math.floor(selectedDayIndex / 7);
   const dayWindowCount = Math.ceil(days.length / 7);
   const visibleDays = days.slice(dayWindowIndex * 7, dayWindowIndex * 7 + 7);
 
-  const riderPageCount = Math.max(1, Math.ceil(filteredRiders.length / riderPageSize));
+  const riderPageCount = Math.max(1, Math.ceil(visibleRiders.length / riderPageSize));
   const safeRiderPage = Math.min(riderPage, riderPageCount);
   const paginatedRiders = useMemo(
-    () => filteredRiders.slice((safeRiderPage - 1) * riderPageSize, safeRiderPage * riderPageSize),
-    [filteredRiders, riderPageSize, safeRiderPage],
+    () => visibleRiders.slice((safeRiderPage - 1) * riderPageSize, safeRiderPage * riderPageSize),
+    [riderPageSize, safeRiderPage, visibleRiders],
   );
   const issuePageCount = Math.max(1, Math.ceil(importIssues.length / importIssuePageSize));
   const safeIssuePage = Math.min(issuePage, issuePageCount);
@@ -289,11 +313,11 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   }
 
   async function applyBulkStatus() {
-    if (!canEdit || filteredRiders.length === 0) return;
+    if (!canEdit || visibleRiders.length === 0) return;
     const label = statusLabel(bulkStatus);
-    if (!window.confirm(`Áp dụng "${label}" cho ${filteredRiders.length} rider ngày ${selectedDate}?`)) return;
+    if (!window.confirm(`Áp dụng "${label}" cho ${visibleRiders.length} rider ngày ${selectedDate}?`)) return;
 
-    const updates = filteredRiders.map((rider) => {
+    const updates = visibleRiders.map((rider) => {
       const current = logMap.get(cellKey(rider.id, selectedDate));
       return {
         rider_id: rider.id,
@@ -303,7 +327,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
         note: bulkStatus === "ON" ? null : current?.note,
       };
     });
-    await saveUpdates(updates, `Đã xếp ${label} cho ${filteredRiders.length} rider.`);
+    await saveUpdates(updates, `Đã xếp ${label} cho ${visibleRiders.length} rider.`);
   }
 
   function openEditor(rider: Rider, date: string) {
@@ -424,12 +448,12 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="mx-auto max-w-[1600px] space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-slate-950 sm:text-2xl">Lịch rider</h1>
+          <h1 className="text-xl font-bold text-slate-950 sm:text-2xl">Chấm công rider</h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            Xếp lịch làm, nghỉ và theo dõi quân số theo từng ngày.
+            Theo dõi quân số, tình trạng đi làm và lịch nghỉ theo ngày.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -491,13 +515,15 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        <SummaryCard label="Đi làm" value={selectedSummary.on} total={selectedSummary.total} tone="green" />
-        <SummaryCard label="Nghỉ" value={selectedSummary.off} total={selectedSummary.total} tone="red" />
-        <SummaryCard label="ON" value={selectedSummary.defaultOn} total={selectedSummary.total} tone="slate" />
+      <div className="grid grid-cols-12 gap-4">
+        <AttendanceKpi className="col-span-6 xl:col-span-3" label="Có mặt" value={selectedAllSummary.present} helper={formatSelectedDate(selectedDate)} tone="green" icon={<CheckCircle2 size={18} />} active={attendanceStatus === "present"} onClick={() => { setAttendanceStatus("present"); setRiderPage(1); }} />
+        <AttendanceKpi className="col-span-6 xl:col-span-2" label="Vắng đột xuất" value={selectedAllSummary.absent} helper="Cần xử lý" tone="red" icon={<X size={18} />} active={attendanceStatus === "absent"} onClick={() => { setAttendanceStatus("absent"); setRiderPage(1); }} />
+        <AttendanceKpi className="col-span-6 xl:col-span-2" label="Đi trễ" value={selectedAllSummary.late} helper="Theo dữ liệu check-in" tone="amber" icon={<Clock3 size={18} />} active={attendanceStatus === "late"} onClick={() => { setAttendanceStatus("late"); setRiderPage(1); }} />
+        <AttendanceKpi className="col-span-6 xl:col-span-2" label="Nghỉ phép" value={selectedAllSummary.leave} helper="Tuần hoặc có phép" tone="blue" icon={<Palmtree size={18} />} active={attendanceStatus === "leave"} onClick={() => { setAttendanceStatus("leave"); setRiderPage(1); }} />
+        <AttendanceKpi className="col-span-12 xl:col-span-3" label="Tỷ lệ có mặt" value={`${selectedAllSummary.total ? Math.round(selectedAllSummary.present / selectedAllSummary.total * 100) : 0}%`} helper={`${selectedAllSummary.present}/${selectedAllSummary.total} rider`} tone="green" icon={<UsersRound size={18} />} active={attendanceStatus === "all"} onClick={() => { setAttendanceStatus("all"); setRiderPage(1); }} />
       </div>
 
-      <Card className="grid gap-3 p-3 sm:p-4 md:grid-cols-2 xl:grid-cols-[1fr_130px_140px_180px_140px]">
+      <Card className="grid gap-3 p-3 sm:p-4 md:grid-cols-2 xl:grid-cols-[1fr_150px_180px_160px_140px]">
         <label className="relative">
           <Search className="pointer-events-none absolute left-3 top-2.5 text-slate-400" size={18} />
           <Input
@@ -510,15 +536,11 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
             }}
           />
         </label>
-        <Select value={kv} onChange={(event) => { setKv(event.target.value); setRiderPage(1); }}>
+        <Select value={attendanceStatus} onChange={(event) => { setAttendanceStatus(event.target.value as AttendanceCategory | "all"); setRiderPage(1); }} aria-label="Lọc trạng thái chấm công"><option value="all">Mọi trạng thái</option><option value="present">Có mặt</option><option value="absent">Vắng đột xuất</option><option value="late">Đi trễ</option><option value="leave">Nghỉ phép</option></Select>
+        <Select value={shiftFilter} onChange={(event) => { setShiftFilter(event.target.value); setRiderPage(1); }} aria-label="Lọc ca"><option value="all">Tất cả ca</option>{shiftOptions.map((option) => <option key={option} value={option}>{option}</option>)}</Select>
+        <Select value={kv} onChange={(event) => { setKv(event.target.value); setRiderPage(1); }} className="xl:hidden">
           <option value="all">Tất cả KV</option>
           {kvOptions.map((option) => (
-            <option key={option}>{option}</option>
-          ))}
-        </Select>
-        <Select value={cot} onChange={(event) => { setCot(event.target.value); setRiderPage(1); }}>
-          <option value="all">Tất cả COT</option>
-          {cotOptions.map((option) => (
             <option key={option}>{option}</option>
           ))}
         </Select>
@@ -533,6 +555,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
           <option value="inactive">Rider inactive</option>
           <option value="all">Tất cả rider</option>
         </Select>
+        <div className="col-span-full flex min-h-8 flex-wrap items-center gap-2 border-t border-slate-100 pt-3"><span className="text-xs font-semibold text-slate-500">Đang lọc:</span><FilterPill label={formatSelectedDate(selectedDate)} onRemove={null} />{attendanceStatus !== "all" ? <FilterPill label={attendanceCategoryLabel(attendanceStatus)} onRemove={() => setAttendanceStatus("all")} /> : null}{shiftFilter !== "all" ? <FilterPill label={`Ca ${shiftFilter}`} onRemove={() => setShiftFilter("all")} /> : null}{deliveryDistrict !== "all" ? <FilterPill label={deliveryDistrict} onRemove={() => setDeliveryDistrict("all")} /> : null}<button type="button" className="ml-auto text-xs font-semibold text-blue-700" onClick={() => { setAttendanceStatus("all"); setShiftFilter("all"); setDeliveryDistrict("all"); setKv("all"); setCot("all"); setRosterStatus("active"); setQuery(""); }}>Xóa bộ lọc</button></div>
       </Card>
 
       <Card className="grid gap-3 border-blue-100 bg-blue-50 p-3 sm:grid-cols-[180px_1fr_auto] sm:items-end sm:p-4">
@@ -558,7 +581,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
         </label>
         <Button type="button" disabled={!canEdit || loading} onClick={() => void applyBulkStatus()}>
           <UsersRound size={17} />
-          Áp dụng cho {filteredRiders.length} rider
+          Áp dụng cho {visibleRiders.length} rider
         </Button>
       </Card>
 
@@ -619,6 +642,11 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
           Tài khoản viewer chỉ được xem lịch. Admin hoặc leader mới có thể chỉnh sửa.
         </p>
       ) : null}
+
+      <section aria-label="Biểu đồ chấm công" className="grid grid-cols-12 gap-4">
+        <AttendanceTrendChart className="col-span-12 xl:col-span-7" days={days} summaries={dailySummaries} />
+        <AttendanceDistribution className="col-span-12 xl:col-span-5" summary={selectedSummary} date={selectedDate} />
+      </section>
 
       <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3">
         <Button
@@ -725,72 +753,16 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
         </div>
       </div>
 
-      <Card className="hidden overflow-hidden p-0 md:block">
-        <div className="max-h-[70vh] overflow-auto">
-          <table className="min-w-max border-separate border-spacing-0 text-left text-xs">
-            <thead className="sticky top-0 z-30">
-              <tr>
-                <th className="sticky left-0 z-40 min-w-64 border-b border-r border-slate-200 bg-slate-900 px-4 py-3 text-white">
-                  <p className="text-sm font-bold">Rider</p>
-                  <p className="mt-1 font-normal text-slate-300">{filteredRiders.length} người trong danh sách</p>
-                </th>
-                {visibleDays.map((day) => {
-                  const date = format(day, "yyyy-MM-dd");
-                  const summary = dailySummaries.get(date) ?? { on: 0, total: 0 };
-                  const percentage = summary.total ? Math.round((summary.on / summary.total) * 100) : 0;
-                  return (
-                    <th
-                      key={date}
-                      className={`min-w-24 border-b border-r border-slate-200 px-2 py-2 text-center ${
-                        date === selectedDate ? "bg-blue-100" : "bg-slate-50"
-                      }`}
-                    >
-                      <button type="button" className="w-full" onClick={() => setSelectedDate(date)}>
-                        <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                          {format(day, "EEE", { locale: vi })}
-                        </span>
-                        <span className="mt-0.5 block text-base font-black text-slate-950">{format(day, "dd")}</span>
-                        <span
-                          className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                            percentage >= 95
-                              ? "bg-emerald-100 text-emerald-700"
-                              : percentage >= 85
-                                ? "bg-amber-100 text-amber-700"
-                                : "bg-red-100 text-red-700"
-                          }`}
-                        >
-                          {summary.on}/{summary.total}
-                        </span>
-                      </button>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedRiders.map((rider, index) => (
-                <DesktopScheduleRow
-                  key={rider.id}
-                  rider={rider}
-                  index={(safeRiderPage - 1) * riderPageSize + index}
-                  days={visibleDays}
-                  logMap={logMap}
-                  savingCells={savingCells}
-                  selectedDate={selectedDate}
-                  canEdit={canEdit}
-                  onEdit={openEditor}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+      <section className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white md:block">
+        <div className="border-b border-slate-200 px-4 py-3"><h2 className="font-semibold text-slate-950">Chi tiết chấm công · {formatSelectedDate(selectedDate)}</h2><p className="text-xs text-slate-500">Chọn một dòng để cập nhật lịch hoặc mở lịch sử rider.</p></div>
+        <div className="max-h-[620px] min-h-[420px] overflow-auto"><table className="w-full min-w-[1050px] table-fixed text-left text-sm"><thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-600 shadow-[0_1px_0_#e2e8f0]"><tr><AttendanceSortHeader label="Rider" sortKey="name" current={attendanceSort} onSort={setAttendanceSort} className="w-[24%]" /><AttendanceSortHeader label="Ngày" sortKey="date" current={attendanceSort} onSort={setAttendanceSort} /><AttendanceSortHeader label="Ca" sortKey="shift" current={attendanceSort} onSort={setAttendanceSort} /><AttendanceSortHeader label="Trạng thái" sortKey="status" current={attendanceSort} onSort={setAttendanceSort} /><th className="px-4 py-3 font-semibold">Check-in</th><th className="px-4 py-3 font-semibold">Check-out</th><th className="px-4 py-3 font-semibold">Khu vực</th><th className="w-24" /></tr></thead><tbody className="divide-y divide-slate-100">{paginatedRiders.map((rider) => { const log = logMap.get(cellKey(rider.id, selectedDate)); return <tr key={rider.id} className="h-16 transition hover:bg-blue-50/50"><td className="px-4"><Link href={`/attendance/riders/${rider.id}?month=${month}`} className="font-semibold text-slate-950 hover:text-blue-700">{rider.full_name ?? rider.rider_code}</Link><p className="font-mono text-xs text-slate-500">{rider.rider_code}</p></td><td className="px-4 tabular-nums text-slate-700">{format(parseISO(selectedDate), "dd/MM/yyyy")}</td><td className="px-4 text-slate-700">{log?.shift ?? rider.current_shift ?? "—"}</td><td className="px-4"><AttendanceBadge category={attendanceCategory(log)} /></td><td className="px-4 tabular-nums text-slate-700">{attendanceTime(log, "check_in")}</td><td className="px-4 tabular-nums text-slate-700">{attendanceTime(log, "check_out")}</td><td className="px-4"><p className="truncate font-medium text-slate-700">{rider.delivery_district ?? "—"}</p><p className="truncate text-xs text-slate-500">{rider.delivery_ward ?? rider.kv ?? "—"}</p></td><td className="px-3 text-right"><Button type="button" variant="ghost" className="h-9 px-3" disabled={!canEdit} onClick={() => openEditor(rider, selectedDate)}><Pencil size={15} />Sửa</Button></td></tr>; })}{!loading && paginatedRiders.length === 0 ? <tr><td colSpan={8} className="h-72 text-center text-sm text-slate-500">Không có bản ghi phù hợp.</td></tr> : null}</tbody></table></div>
+      </section>
 
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
         <PaginationBar
           page={safeRiderPage}
           pageCount={riderPageCount}
-          total={filteredRiders.length}
+            total={visibleRiders.length}
           pageSize={riderPageSize}
           onPageChange={setRiderPage}
         />
@@ -884,6 +856,8 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   );
 }
 
+// Kept as the compact monthly matrix renderer used by downstream attendance variants.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const DesktopScheduleRow = memo(function DesktopScheduleRow({
   rider,
   index,
@@ -1016,30 +990,17 @@ function StatusSelect({
   );
 }
 
-function SummaryCard({
-  label,
-  value,
-  total,
-  tone,
-}: {
-  label: string;
-  value: number;
-  total: number;
-  tone: "green" | "red" | "slate";
-}) {
-  const classes = {
-    green: "border-emerald-100 bg-emerald-50 text-emerald-800",
-    red: "border-red-100 bg-red-50 text-red-800",
-    slate: "border-slate-200 bg-white text-slate-800",
-  };
-  return (
-    <div className={`rounded-xl border p-3 sm:p-4 ${classes[tone]}`}>
-      <p className="text-[10px] font-bold uppercase tracking-wide opacity-70 sm:text-xs">{label}</p>
-      <p className="mt-1 text-2xl font-bold sm:text-3xl">{value}</p>
-      <p className="text-[10px] opacity-60 sm:text-xs">trên {total} rider</p>
-    </div>
-  );
-}
+function AttendanceKpi({ label, value, helper, tone, icon, active, onClick, className }: { label: string; value: number | string; helper: string; tone: "green" | "red" | "amber" | "blue"; icon: React.ReactNode; active: boolean; onClick: () => void; className?: string }) { const colors = { green: "bg-emerald-50 text-emerald-700", red: "bg-red-50 text-red-700", amber: "bg-amber-50 text-amber-700", blue: "bg-blue-50 text-blue-700" }; return <button type="button" aria-pressed={active} onClick={onClick} className={`${className ?? ""} min-h-36 rounded-xl border bg-white p-4 text-left transition hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 ${active ? "border-blue-300 ring-1 ring-blue-100" : "border-slate-200"}`}><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium text-slate-600">{label}</p><p className="mt-2 text-2xl font-bold tabular-nums text-slate-950">{value}</p></div><span className={`grid size-9 place-items-center rounded-lg ${colors[tone]}`}>{icon}</span></div><p className="mt-4 text-xs text-slate-500">{helper}</p></button>; }
+
+function AttendanceBadge({ category }: { category: AttendanceCategory }) { const styles = { present: "bg-emerald-50 text-emerald-700 ring-emerald-600/20", absent: "bg-red-50 text-red-700 ring-red-600/20", late: "bg-amber-50 text-amber-800 ring-amber-600/20", leave: "bg-blue-50 text-blue-700 ring-blue-600/20" }; return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${styles[category]}`}>{attendanceCategoryLabel(category)}</span>; }
+
+function FilterPill({ label, onRemove }: { label: string; onRemove: (() => void) | null }) { return <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 py-1 pl-2.5 pr-1 text-xs font-semibold text-blue-700">{label}{onRemove ? <button type="button" className="grid size-5 place-items-center rounded-full hover:bg-blue-100" onClick={onRemove} aria-label={`Xóa ${label}`}><X size={12} /></button> : <span className="w-1" />}</span>; }
+
+function AttendanceSortHeader({ label, sortKey, current, onSort, className }: { label: string; sortKey: AttendanceSortKey; current: { key: AttendanceSortKey; direction: "asc" | "desc" }; onSort: React.Dispatch<React.SetStateAction<{ key: AttendanceSortKey; direction: "asc" | "desc" }>>; className?: string }) { const Icon = current.key !== sortKey ? ArrowUpDown : current.direction === "asc" ? ArrowUp : ArrowDown; return <th className={`px-4 py-3 ${className ?? ""}`}><button type="button" className="flex items-center gap-1 font-semibold hover:text-slate-950" onClick={() => onSort((value) => value.key === sortKey ? { key: sortKey, direction: value.direction === "asc" ? "desc" : "asc" } : { key: sortKey, direction: "asc" })}>{label}<Icon size={13} /></button></th>; }
+
+function AttendanceTrendChart({ days, summaries, className }: { days: Date[]; summaries: Map<string, ReturnType<typeof summarizeDate>>; className?: string }) { const points = days.map((day, index) => { const summary = summaries.get(format(day, "yyyy-MM-dd")); const rate = summary?.total ? summary.present / summary.total : 0; return `${days.length > 1 ? index / (days.length - 1) * 100 : 0},${92 - rate * 80}`; }).join(" "); return <article className={`${className ?? ""} rounded-xl border border-slate-200 bg-white p-4`}><div className="flex items-center gap-2"><CalendarDays size={18} className="text-emerald-700" /><h2 className="font-semibold text-slate-950">Tỷ lệ có mặt theo ngày</h2></div><p className="mt-1 text-sm text-slate-500">Xu hướng trong tháng và phạm vi bộ lọc hiện tại.</p><div className="mt-5 h-44"><svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" role="img" aria-label="Biểu đồ tỷ lệ có mặt"><line x1="0" y1="92" x2="100" y2="92" stroke="#e2e8f0" strokeWidth="1" /><line x1="0" y1="52" x2="100" y2="52" stroke="#e2e8f0" strokeWidth="0.6" strokeDasharray="2 2" /><polyline points={points} fill="none" stroke="#059669" strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg></div><div className="flex justify-between text-xs text-slate-400"><span>{days[0] ? format(days[0], "dd/MM") : ""}</span><span>50%</span><span>{days.at(-1) ? format(days.at(-1)!, "dd/MM") : ""}</span></div></article>; }
+
+function AttendanceDistribution({ summary, date, className }: { summary: ReturnType<typeof summarizeDate>; date: string; className?: string }) { const items: Array<{ key: AttendanceCategory; value: number; color: string }> = [{ key: "present", value: summary.present, color: "bg-emerald-500" }, { key: "absent", value: summary.absent, color: "bg-red-500" }, { key: "late", value: summary.late, color: "bg-amber-500" }, { key: "leave", value: summary.leave, color: "bg-blue-500" }]; const max = Math.max(1, ...items.map((item) => item.value)); return <article className={`${className ?? ""} rounded-xl border border-slate-200 bg-white p-4`}><h2 className="font-semibold text-slate-950">Phân bố trạng thái</h2><p className="mt-1 text-sm text-slate-500">{formatSelectedDate(date)}</p><div className="mt-6 space-y-4">{items.map((item) => <div key={item.key}><div className="mb-1.5 flex justify-between text-sm"><span className="text-slate-600">{attendanceCategoryLabel(item.key)}</span><strong className="tabular-nums text-slate-900">{item.value}</strong></div><div className="h-2 rounded-full bg-slate-100"><div className={`h-full rounded-full ${item.color}`} style={{ width: `${item.value / max * 100}%` }} /></div></div>)}</div></article>; }
 
 function PaginationBar({
   page,
@@ -1094,15 +1055,55 @@ function summarizeDate(date: string, riders: Rider[], logMap: Map<string, Attend
   let on = 0;
   let off = 0;
   let defaultOn = 0;
+  let present = 0;
+  let absent = 0;
+  let late = 0;
+  let leave = 0;
   for (const rider of riders) {
     const log = logMap.get(cellKey(rider.id, date));
     const status = displayStatus(log?.status);
     if (isWorkingStatus(status)) on += 1;
     else if (status.startsWith("OFF_")) off += 1;
     if (!log) defaultOn += 1;
+    const category = attendanceCategory(log);
+    if (category === "present") present += 1;
+    else if (category === "absent") absent += 1;
+    else if (category === "late") late += 1;
+    else leave += 1;
   }
-  return { on, off, defaultOn, total: riders.length };
+  return { on, off, defaultOn, present, absent, late, leave, total: riders.length };
 }
+
+function attendanceCategory(log: AttendanceLog | undefined): AttendanceCategory {
+  const rawStatus = log?.status?.trim().toUpperCase() ?? "";
+  const rawLate = log?.raw_data?.late ?? log?.raw_data?.is_late;
+  if (rawStatus.includes("LATE") || rawLate === true || rawLate === "true" || rawLate === 1) return "late";
+  const status = displayStatus(log?.status);
+  if (status === "OFF_UNEXPECTED") return "absent";
+  if (status === "OFF_APPROVED" || status === "OFF_WEEKLY") return "leave";
+  return "present";
+}
+
+function attendanceCategoryLabel(category: AttendanceCategory) { return ({ present: "Có mặt", absent: "Vắng đột xuất", late: "Đi trễ", leave: "Nghỉ phép" } as const)[category]; }
+
+function attendanceTime(log: AttendanceLog | undefined, kind: "check_in" | "check_out") {
+  const value = kind === "check_in" ? log?.raw_data?.check_in ?? log?.raw_data?.check_in_time : log?.raw_data?.check_out ?? log?.raw_data?.check_out_time;
+  if (typeof value !== "string" || !value.trim()) return "—";
+  const date = new Date(value);
+  if (Number.isFinite(date.getTime())) return new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Ho_Chi_Minh" }).format(date);
+  return value;
+}
+
+function compareAttendanceRiders(a: Rider, b: Rider, logMap: Map<string, AttendanceLog>, date: string, sort: { key: AttendanceSortKey }) {
+  if (sort.key === "name") return (a.full_name ?? a.rider_code).localeCompare(b.full_name ?? b.rider_code, "vi", { numeric: true });
+  if (sort.key === "date") return 0;
+  const aLog = logMap.get(cellKey(a.id, date));
+  const bLog = logMap.get(cellKey(b.id, date));
+  if (sort.key === "shift") return (aLog?.shift ?? a.current_shift ?? "").localeCompare(bLog?.shift ?? b.current_shift ?? "", "vi");
+  return attendanceCategoryLabel(attendanceCategory(aLog)).localeCompare(attendanceCategoryLabel(attendanceCategory(bLog)), "vi");
+}
+
+function formatSelectedDate(value: string) { const date = parseISO(value); return Number.isFinite(date.getTime()) ? format(date, "dd/MM/yyyy") : value; }
 
 function normalizeStatus(status: string | null | undefined): ScheduleStatus {
   const normalized = status?.trim().toUpperCase() ?? "";
