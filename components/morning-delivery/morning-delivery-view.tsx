@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { CalendarClock, CalendarDays, Check, ClipboardCheck, Copy, Download, MapPin, RefreshCcw, Save, ScanLine, Search, Settings2, Trash2, Truck, UserCheck, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,7 +102,6 @@ export function MorningDeliveryView() {
   const [selectedRider, setSelectedRider] = useState<MorningRider | null>(null);
   const [selectedDistrictId, setSelectedDistrictId] = useState(hcmDistricts[0]?.id ?? "");
   const [selectedWards, setSelectedWards] = useState<Set<string>>(new Set());
-  const [scanValue, setScanValue] = useState("");
   const [assignmentQuery, setAssignmentQuery] = useState("");
   const [assignmentDistrict, setAssignmentDistrict] = useState("all");
   const [assignmentWard, setAssignmentWard] = useState("all");
@@ -127,6 +127,7 @@ export function MorningDeliveryView() {
   const [assignmentToast, setAssignmentToast] = useState<{ riderId: string; riderCode: string; district: string; message: string } | null>(null);
   const scanInputRef = useRef<HTMLInputElement | null>(null);
   const emptyWardSearchRef = useRef<HTMLInputElement | null>(null);
+  const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -161,10 +162,19 @@ export function MorningDeliveryView() {
     void load();
   }, [load]);
 
-  useSupabaseRealtime({ table: "morning_delivery_assignments", onChange: load });
-  useSupabaseRealtime({ table: "attendance_logs", onChange: load });
-  useSupabaseRealtime({ table: "morning_delivery_absence_notes", onChange: load });
-  useSupabaseRealtime({ table: "realtime_delivery_riders", onChange: load });
+  const requestRealtimeRefresh = useCallback(() => {
+    if (realtimeRefreshTimerRef.current) clearTimeout(realtimeRefreshTimerRef.current);
+    realtimeRefreshTimerRef.current = setTimeout(() => void load(), 700);
+  }, [load]);
+
+  useEffect(() => () => {
+    if (realtimeRefreshTimerRef.current) clearTimeout(realtimeRefreshTimerRef.current);
+  }, []);
+
+  useSupabaseRealtime({ table: "morning_delivery_assignments", onChange: requestRealtimeRefresh });
+  useSupabaseRealtime({ table: "attendance_logs", onChange: requestRealtimeRefresh });
+  useSupabaseRealtime({ table: "morning_delivery_absence_notes", onChange: requestRealtimeRefresh });
+  useSupabaseRealtime({ table: "realtime_delivery_riders", onChange: requestRealtimeRefresh });
 
   const selectedDistrict = hcmDistricts.find((district) => district.id === selectedDistrictId) ?? hcmDistricts[0];
   const occupiedAreas = useMemo(
@@ -238,16 +248,18 @@ export function MorningDeliveryView() {
     [realtimeDeliveryRiders],
   );
   const defaultDistrictOptions = useMemo(
-    () => Array.from(new Set(requiredRiders.map((rider) => rider.delivery_district?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b, "vi", { numeric: true })),
-    [requiredRiders],
+    () => defaultRoutesOpen ? Array.from(new Set(requiredRiders.map((rider) => rider.delivery_district?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b, "vi", { numeric: true })) : [],
+    [defaultRoutesOpen, requiredRiders],
   );
   const defaultWardOptions = useMemo(() => {
+    if (!defaultRoutesOpen) return [];
     const values = requiredRiders
       .filter((rider) => defaultRouteDistrict === "all" || rider.delivery_district === defaultRouteDistrict)
       .flatMap((rider) => (rider.delivery_ward ?? "").split(/[,;|]+/).map((ward) => ward.trim()).filter(Boolean));
     return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b, "vi", { numeric: true }));
-  }, [defaultRouteDistrict, requiredRiders]);
+  }, [defaultRouteDistrict, defaultRoutesOpen, requiredRiders]);
   const filteredDefaultRiders = useMemo(() => {
+    if (!defaultRoutesOpen) return [];
     const query = normalize(defaultRouteQuery);
     return requiredRiders.filter((rider) => {
       const matchesQuery = !query || normalize(`${rider.rider_code} ${rider.full_name ?? ""} ${rider.delivery_district ?? ""} ${rider.delivery_ward ?? ""}`).includes(query);
@@ -259,13 +271,12 @@ export function MorningDeliveryView() {
       : (a.delivery_district ?? "~").localeCompare(b.delivery_district ?? "~", "vi", { numeric: true })
         || (a.delivery_ward ?? "~").localeCompare(b.delivery_ward ?? "~", "vi", { numeric: true })
         || a.rider_code.localeCompare(b.rider_code, "vi", { numeric: true }));
-  }, [defaultRouteDistrict, defaultRouteQuery, defaultRouteSort, defaultRouteWard, requiredRiders]);
+  }, [defaultRouteDistrict, defaultRouteQuery, defaultRouteSort, defaultRouteWard, defaultRoutesOpen, requiredRiders]);
 
-  async function scanRider(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function scanRider(rawCode: string) {
     setError(null);
     setSuccess(null);
-    const code = normalize(scanValue);
+    const code = normalize(rawCode);
     if (!code) return;
     const rider = riders.find((item) => normalize(item.rider_code) === code) ?? null;
     if (!rider) {
@@ -295,11 +306,9 @@ export function MorningDeliveryView() {
         setSuccess(`${rider.full_name?.trim() || rider.rider_code} đã có mặt trước đó: ${assignedRoutes}.`);
       }
       setSelectedRider(null);
-      setScanValue("");
       return;
     }
     setSelectedRider(rider);
-    setScanValue("");
     const defaultDistrict = findDefaultDistrict(rider.delivery_district);
     if (defaultDistrict) {
       setSelectedDistrictId(defaultDistrict.id);
@@ -659,20 +668,7 @@ export function MorningDeliveryView() {
             <p className="mt-0.5 text-xs text-slate-500">Nhấn Enter sau khi máy quét nhập mã.</p>
           </div>
           <div className="space-y-4 p-4">
-            <form onSubmit={scanRider} className="flex gap-2">
-              <label className="relative min-w-0 flex-1">
-                <ScanLine size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  ref={scanInputRef}
-                  autoFocus
-                  value={scanValue}
-                  onChange={(event) => setScanValue(event.target.value)}
-                  placeholder="Bắn hoặc nhập Rider ID"
-                  className="h-10 w-full rounded-md border border-slate-200 bg-white pl-10 pr-3 text-sm font-bold text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-                />
-              </label>
-              <Button type="submit" aria-label="Tra Rider ID"><Search size={17} /></Button>
-            </form>
+            <RiderScanInput inputRef={scanInputRef} onScan={scanRider} />
 
             {selectedRider ? (
               <div className={cn("rounded-lg border p-4", riderHasPickupRoute ? "border-blue-200 bg-blue-50" : "border-amber-200 bg-amber-50")}>
@@ -1077,6 +1073,19 @@ export function MorningDeliveryView() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function RiderScanInput({ inputRef, onScan }: { inputRef: RefObject<HTMLInputElement | null>; onScan: (value: string) => void | Promise<void> }) {
+  const [value, setValue] = useState("");
+  return (
+    <form onSubmit={(event) => { event.preventDefault(); const code = value.trim(); if (!code) return; setValue(""); void onScan(code); }} className="flex gap-2">
+      <label className="relative min-w-0 flex-1">
+        <ScanLine size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input ref={inputRef} autoFocus value={value} onChange={(event) => setValue(event.target.value)} placeholder="Bắn hoặc nhập Rider ID" className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-sm font-bold text-slate-950 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100" />
+      </label>
+      <Button type="submit" aria-label="Tra Rider ID"><Search size={17} /></Button>
+    </form>
   );
 }
 

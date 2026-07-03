@@ -160,6 +160,7 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
   const pickupDistricts = useMemo(() => summarizePickupDistrictRoutes(rows), [rows]);
   const pickupRouteCount = useMemo(() => countPickupRoutes(pickupDistricts), [pickupDistricts]);
   const deliveryTrend = useMemo(() => summarizeDeliveryTrend(rows), [rows]);
+  const comparisonDeliveryTrend = useMemo(() => summarizeDeliveryTrend(comparisonRows), [comparisonRows]);
 
   if (kind === "pickup") {
     return (
@@ -192,6 +193,7 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
       cotVolumes={deliverySummary.cots}
       districts={deliverySummary.districts}
       trend={deliveryTrend}
+      comparisonTrend={comparisonDeliveryTrend}
       averageDays={deliveryViewMode === "day" ? 1 : deliveryDayCount}
       comparisonTotalOrders={comparisonSummary.total}
       comparisonDistricts={comparisonSummary.districts}
@@ -358,13 +360,20 @@ function sortCotSummaries(cots: Map<string, number>): CotSummary[] {
 }
 
 function summarizeDeliveryTrend(rows: VolumeRow[]): DeliveryTrendPoint[] {
-  const counts = new Map<string, number>();
+  const counts = new Map<string, DeliveryTrendPoint>();
   for (const row of rows) {
     const reportDate = row.report_date?.slice(0, 10);
     if (!reportDate) continue;
-    counts.set(reportDate, (counts.get(reportDate) ?? 0) + (row.total_orders ?? 1));
+    const value = row.total_orders ?? 1;
+    const cot = normalizeCot(row.cot || row.cot_group);
+    const point = counts.get(reportDate) ?? { date: reportDate, count: 0, cot11: 0, cot12: 0, cot2: 0 };
+    point.count += value;
+    if (cot === "COT 1.1") point.cot11 += value;
+    else if (cot === "COT 1.2") point.cot12 += value;
+    else if (cot === "COT 2") point.cot2 += value;
+    counts.set(reportDate, point);
   }
-  return Array.from(counts, ([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date));
+  return Array.from(counts.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 function countReportDays(rows: VolumeRow[]) {

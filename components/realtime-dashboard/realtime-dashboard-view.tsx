@@ -123,6 +123,7 @@ export function RealtimeDashboardView() {
   }), { assigned: 0, delivered: 0, delivering: 0, failed: 0 }), [riders]);
   const activeRiders = riders.filter((rider) => rider.status !== "completed").length;
   const warningRiders = riders.filter((rider) => rider.status === "warning").length;
+  const zeroProgressRiders = riders.filter((rider) => rider.total_assigned > 0 && rider.delivered === 0).length;
   const completedOrders = totals.delivered + totals.failed;
   const onTimeRate = completedOrders ? Math.round((totals.delivered / completedOrders) * 100) : 0;
   const zoneMetrics = useMemo(() => buildZoneMetrics(riders), [riders]);
@@ -170,7 +171,7 @@ export function RealtimeDashboardView() {
           <KpiCard className="col-span-6 xl:col-span-3" icon={Bike} label="Rider đang hoạt động" value={activeRiders} helper={`${riders.length} rider trong danh sách`} tone="blue" />
           <KpiCard className="col-span-6 xl:col-span-3" icon={Activity} label="Đơn đang giao" value={totals.delivering} helper={`${totals.assigned.toLocaleString("vi-VN")} đơn được phân`} tone="blue" />
           <KpiCard className="col-span-6 xl:col-span-3" icon={CheckCircle2} label="Tỷ lệ đúng hạn" value={`${onTimeRate}%`} helper={`${totals.delivered.toLocaleString("vi-VN")} đơn đã giao`} tone="green" />
-          <KpiCard className="col-span-6 xl:col-span-3" icon={CircleAlert} label="Rider cảnh báo" value={warningRiders} helper={`${totals.failed.toLocaleString("vi-VN")} đơn giao lỗi`} tone={warningRiders > 0 ? "red" : "green"} />
+          <KpiCard className="col-span-6 xl:col-span-3" icon={CircleAlert} label="Rider cảnh báo" value={warningRiders} helper={`${zeroProgressRiders} rider tiến độ 0% · ${totals.failed.toLocaleString("vi-VN")} đơn lỗi`} tone={warningRiders > 0 ? "red" : "green"} />
           <PerformanceChart className="col-span-12" totals={totals} />
         </div>
       </section>
@@ -202,8 +203,8 @@ export function FilterBar({ date, timeRange, zone, status, zones, onDateChange, 
 }
 
 export function StatusBadge({ status }: { status: RiderStatus }) {
-  const styles: Record<RiderStatus, string> = { delivering: "bg-blue-50 text-blue-700 ring-blue-600/20", completed: "bg-emerald-50 text-emerald-700 ring-emerald-600/20", warning: "bg-amber-50 text-amber-800 ring-amber-600/20" };
-  return <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset", styles[status])}><span className={cn("size-1.5 rounded-full", status === "delivering" ? "bg-blue-500" : status === "completed" ? "bg-emerald-500" : "bg-amber-500")} />{statusLabel(status)}</span>;
+  const styles: Record<RiderStatus, string> = { delivering: "bg-blue-50 text-blue-700 ring-blue-600/20", completed: "bg-emerald-50 text-emerald-700 ring-emerald-600/20", warning: "bg-red-50 text-red-700 ring-red-600/20" };
+  return <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset", styles[status])}><span className={cn("size-1.5 rounded-full", status === "delivering" ? "bg-blue-500" : status === "completed" ? "bg-emerald-500" : "bg-red-500")} />{statusLabel(status)}</span>;
 }
 
 export function RealtimeIndicator({ snapshotAt, loading }: { snapshotAt: string | null; loading: boolean }) {
@@ -237,7 +238,7 @@ function RiderDetails({ rider, onClose }: { rider: DisplayRider; onClose: () => 
 function SortableHeader({ label, sortKey, current, onSort, align, className }: { label: string; sortKey: SortKey; current: { key: SortKey; direction: "asc" | "desc" }; onSort: (key: SortKey) => void; align?: "right"; className?: string }) { const Icon = current.key !== sortKey ? ArrowUpDown : current.direction === "asc" ? ArrowUp : ArrowDown; return <th className={cn("px-4 py-3", className)}><button type="button" onClick={() => onSort(sortKey)} className={cn("flex items-center gap-1 font-semibold hover:text-slate-950", align === "right" && "ml-auto")}><span>{label}</span><Icon size={13} /></button></th>; }
 function FilterField({ label, children }: { label: string; children: React.ReactNode }) { return <label className="space-y-1.5"><span className="block text-xs font-semibold text-slate-600">{label}</span>{children}</label>; }
 function FilterChip({ children }: { children: React.ReactNode }) { return <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">{children}</span>; }
-function getRiderStatus(row: RealtimeRider): RiderStatus { const failureRate = row.total_assigned > 0 ? row.failed / row.total_assigned : 0; if ((row.delivering > 0 && row.idle_delivery_seconds > 3600) || failureRate >= HIGH_FAILURE_RATE) return "warning"; return row.delivering > 0 ? "delivering" : "completed"; }
+function getRiderStatus(row: RealtimeRider): RiderStatus { const failureRate = row.total_assigned > 0 ? row.failed / row.total_assigned : 0; if ((row.total_assigned > 0 && row.delivered === 0) || (row.delivering > 0 && row.idle_delivery_seconds > 3600) || failureRate >= HIGH_FAILURE_RATE) return "warning"; return row.delivering > 0 ? "delivering" : "completed"; }
 function compareRiders(a: DisplayRider, b: DisplayRider, key: SortKey) { if (key === "name") return a.name.localeCompare(b.name, "vi", { numeric: true }); if (key === "status") return STATUS_ORDER[a.status] - STATUS_ORDER[b.status]; if (key === "eta") return a.idle_delivery_seconds - b.idle_delivery_seconds; return a.delivered - b.delivered; }
 function buildZoneMetrics(riders: DisplayRider[]) { const groups = new Map<string, DisplayRider[]>(); for (const rider of riders) groups.set(rider.district, [...(groups.get(rider.district) ?? []), rider]); return Array.from(groups, ([name, entries]) => { const assigned = entries.reduce((sum, rider) => sum + rider.total_assigned, 0); const delivered = entries.reduce((sum, rider) => sum + rider.delivered, 0); return { name, riders: entries.length, assigned, rate: assigned ? Math.round(delivered / assigned * 100) : 0 }; }).sort((a, b) => b.assigned - a.assigned); }
 function statusLabel(status: RiderStatus) { return ({ delivering: "Đang giao", completed: "Đã giao xong", warning: "Cảnh báo" } as const)[status]; }

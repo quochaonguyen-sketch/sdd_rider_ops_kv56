@@ -30,6 +30,9 @@ export type DeliveryDistrict = {
 export type DeliveryTrendPoint = {
   date: string;
   count: number;
+  cot11: number;
+  cot12: number;
+  cot2: number;
 };
 
 type DeliveryVolumeDashboardProps = {
@@ -45,6 +48,7 @@ type DeliveryVolumeDashboardProps = {
   cotVolumes: DeliveryCotSummary[];
   districts: DeliveryDistrict[];
   trend: DeliveryTrendPoint[];
+  comparisonTrend: DeliveryTrendPoint[];
   averageDays: number;
   comparisonTotalOrders: number;
   comparisonDistricts: DeliveryDistrict[];
@@ -64,6 +68,7 @@ export function DeliveryVolumeDashboard({
   cotVolumes,
   districts,
   trend,
+  comparisonTrend,
   averageDays,
   comparisonTotalOrders,
   comparisonDistricts,
@@ -109,7 +114,7 @@ export function DeliveryVolumeDashboard({
 
       <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
         <CotVolumeCard cotVolumes={cotVolumes} totalOrders={totalOrders} loading={loading} isAverage={isAverage} />
-        <DeliveryTrendCard trend={trend} loading={loading} viewMode={viewMode} />
+        <DeliveryTrendCard trend={trend} comparisonTrend={comparisonTrend} loading={loading} viewMode={viewMode} />
       </div>
 
       <DeliveryAreaExplorer
@@ -299,14 +304,19 @@ function CotVolumeCard({
 
 function DeliveryTrendCard({
   trend,
+  comparisonTrend,
   loading,
   viewMode,
 }: {
   trend: DeliveryTrendPoint[];
+  comparisonTrend: DeliveryTrendPoint[];
   loading: boolean;
   viewMode: DeliveryViewMode;
 }) {
-  const max = Math.max(1, ...trend.map((point) => point.count));
+  const [comparisonSeries, setComparisonSeries] = useState<"total" | "cot11" | "cot12" | "cot2">("total");
+  const comparisonSeriesLabel = comparisonSeries === "cot11" ? "COT 1.1" : comparisonSeries === "cot12" ? "COT 1.2" : comparisonSeries === "cot2" ? "COT 2" : "Tổng";
+  const max = Math.max(1, ...trend.map((point) => point.count), ...comparisonTrend.map((point) => point.count));
+  const lineMax = Math.max(1, ...trend.map((point) => trendSeriesValue(point, comparisonSeries)), ...comparisonTrend.map((point) => trendSeriesValue(point, comparisonSeries)));
   const label = viewMode === "day" ? "Trong ngày đã chọn" : viewMode === "week" ? "7 ngày trong tuần" : "Các ngày trong tháng";
 
   return (
@@ -314,21 +324,70 @@ function DeliveryTrendCard({
       <div className="border-b border-slate-100 px-4 py-3 sm:px-5">
         <h2 className="font-bold text-slate-950">Xu hướng sản lượng</h2>
         <p className="mt-0.5 text-xs text-slate-500">{label}</p>
-      </div>
-      <div className="flex h-[190px] items-end gap-2 overflow-x-auto px-4 pb-4 pt-6 sm:px-5">
-        {!loading && trend.length === 0 ? <p className="m-auto text-sm text-slate-500">Chưa có dữ liệu xu hướng.</p> : null}
-        {trend.map((point) => (
-          <div key={point.date} className="flex min-w-10 flex-1 flex-col items-center justify-end gap-2">
-            <span className="text-[10px] font-bold text-slate-500">{formatCompact(point.count)}</span>
-            <div className="flex h-28 w-full max-w-12 items-end rounded-t bg-blue-50">
-              <div className="w-full rounded-t bg-blue-500" style={{ height: `${Math.max(6, (point.count / max) * 100)}%` }} />
-            </div>
-            <span className="text-[10px] font-semibold text-slate-400">{formatShortDate(point.date)}</span>
+        <div className="mt-2 flex flex-wrap gap-3 text-[10px] font-bold text-slate-500">
+          <Legend color="bg-sky-400" label="COT 1.1" /><Legend color="bg-blue-600" label="COT 1.2" /><Legend color="bg-emerald-500" label="COT 2" />
+          {viewMode !== "day" ? <><Legend color="bg-slate-900" label={`${comparisonSeriesLabel} hiện tại`} line /><Legend color="bg-slate-400" label={`${comparisonSeriesLabel} kỳ trước`} line dashed /></> : null}
+        </div>
+        {viewMode !== "day" ? (
+          <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Chọn COT để so sánh">
+            {([
+              ["total", "Tổng"],
+              ["cot11", "COT 1.1"],
+              ["cot12", "COT 1.2"],
+              ["cot2", "COT 2"],
+            ] as const).map(([value, label]) => (
+              <button key={value} type="button" onClick={() => setComparisonSeries(value)} className={cn("rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition", comparisonSeries === value ? "border-blue-600 bg-blue-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700")}>{label}</button>
+            ))}
           </div>
-        ))}
+        ) : null}
+      </div>
+      <div className="overflow-x-auto px-4 pb-4 pt-5 sm:px-5">
+        {!loading && trend.length === 0 ? <p className="m-auto text-sm text-slate-500">Chưa có dữ liệu xu hướng.</p> : null}
+        {trend.length > 0 ? (
+          <div className="relative h-[190px]" style={{ minWidth: `${Math.max(420, trend.length * 52)}px` }}>
+            <div className="absolute inset-x-0 bottom-6 top-5 flex items-end">
+              {trend.map((point) => (
+                <div key={point.date} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end">
+                  <span className="mb-1 text-[10px] font-bold text-slate-600">{formatCompact(point.count)}</span>
+                  <div className="flex h-28 w-8 flex-col-reverse overflow-hidden rounded-t bg-slate-100 ring-1 ring-slate-200/70">
+                    <TrendSegment value={point.cot11} max={max} className="bg-sky-400" />
+                    <TrendSegment value={point.cot12} max={max} className="bg-blue-600" />
+                    <TrendSegment value={point.cot2} max={max} className="bg-emerald-500" />
+                  </div>
+                  <span className="mt-2 text-[10px] font-semibold text-slate-400">{formatShortDate(point.date)}</span>
+                </div>
+              ))}
+            </div>
+            {viewMode !== "day" ? (
+              <svg className="pointer-events-none absolute inset-x-0 top-5 h-28 w-full overflow-visible" viewBox={`0 0 ${trend.length * 52} 112`} preserveAspectRatio="none" aria-hidden="true">
+                <polyline points={trendLinePoints(trend, lineMax, trend.length, comparisonSeries)} fill="none" stroke="#0f172a" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
+                {comparisonTrend.length > 0 ? <polyline points={trendLinePoints(comparisonTrend.slice(0, trend.length), lineMax, trend.length, comparisonSeries)} fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" /> : null}
+              </svg>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </section>
   );
+}
+
+function TrendSegment({ value, max, className }: { value: number; max: number; className: string }) {
+  return <div className={cn("w-full shrink-0", className)} style={{ height: `${value > 0 ? Math.max(2, (value / max) * 100) : 0}%` }} title={formatNumber(value)} />;
+}
+
+function Legend({ color, label, line = false, dashed = false }: { color: string; label: string; line?: boolean; dashed?: boolean }) {
+  return <span className="inline-flex items-center gap-1.5"><span className={cn(color, line ? "h-0.5 w-5" : "size-2.5 rounded-sm", dashed && "bg-transparent border-t-2 border-dashed border-slate-400")} />{label}</span>;
+}
+
+function trendLinePoints(points: DeliveryTrendPoint[], max: number, slots = points.length, series: "total" | "cot11" | "cot12" | "cot2" = "total") {
+  return points.map((point, index) => `${(index + 0.5) * (slots * 52 / Math.max(1, slots))},${112 - (trendSeriesValue(point, series) / max) * 108}`).join(" ");
+}
+
+function trendSeriesValue(point: DeliveryTrendPoint, series: "total" | "cot11" | "cot12" | "cot2") {
+  if (series === "cot11") return point.cot11;
+  if (series === "cot12") return point.cot12;
+  if (series === "cot2") return point.cot2;
+  return point.count;
 }
 
 function DeliveryAreaExplorer({
