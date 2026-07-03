@@ -1,4 +1,4 @@
-export type Role = "admin" | "leader" | "viewer";
+export type Role = "admin" | "leader" | "viewer" | "member";
 
 export type Zone = {
   id: string;

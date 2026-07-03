@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bike } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AppBrand, AppCopyright } from "@/components/layout/app-brand";
 
 export function LoginForm() {
   const router = useRouter();
@@ -37,17 +37,10 @@ export function LoginForm() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-slate-50 px-4">
-      <form onSubmit={onSubmit} className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-6 flex items-center gap-3">
-          <div className="flex size-11 items-center justify-center rounded-md bg-slate-950 text-white">
-            <Bike size={22} />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold text-slate-950">Rider Ops</h1>
-            <p className="text-sm text-slate-500">Sign in to manage rider operations</p>
-          </div>
-        </div>
+    <main className="flex min-h-screen flex-col items-center justify-center bg-[radial-gradient(circle_at_top,#dbeafe_0,transparent_38%)] bg-slate-50 px-4 py-8">
+      <form onSubmit={onSubmit} className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-7 shadow-[0_24px_70px_rgba(15,23,42,0.1)]">
+        <AppBrand className="mb-3" />
+        <p className="mb-6 pl-14 text-sm leading-5 text-slate-500">Đăng nhập để quản lý và điều phối đội ngũ giao nhận.</p>
         <div className="space-y-4">
           <label className="block">
             <span className="mb-1 block text-sm font-medium text-slate-700">Email</span>
@@ -63,6 +56,7 @@ export function LoginForm() {
           </Button>
         </div>
       </form>
+      <AppCopyright className="mt-6" />
     </main>
   );
 }

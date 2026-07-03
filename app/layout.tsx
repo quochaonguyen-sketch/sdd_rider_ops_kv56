@@ -7,13 +7,13 @@ import { cn } from "@/lib/utils";
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 export const metadata: Metadata = {
-  title: "Rider Ops",
-  description: "Realtime rider workforce management",
+  title: "Rider Operations | Khu vực 5 & 6 SDD",
+  description: "Hệ thống quản lý và điều phối đội ngũ giao nhận Khu vực 5 & 6 SDD",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={cn("font-sans", geist.variable)}>
+    <html lang="vi" className={cn("font-sans", geist.variable)}>
       <body>{children}</body>
     </html>
   );
