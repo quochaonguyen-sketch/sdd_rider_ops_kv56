@@ -232,23 +232,6 @@ export async function POST(request: Request) {
     );
   }
   const wards = Array.from(new Set(parsed.data.wards));
-  const { data: occupied } = await session.admin
-    .from("morning_delivery_assignments")
-    .select("ward,rider_code")
-    .eq("work_date", parsed.data.work_date)
-    .eq("district", parsed.data.district)
-    .in("ward", wards);
-
-  if ((occupied ?? []).length > 0) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: `Khu vực đã có người nhận: ${(occupied ?? []).map((item) => item.ward).join(", ")}`,
-      },
-      { status: 409 },
-    );
-  }
-
   const rows = wards.map((ward) => ({
     work_date: parsed.data.work_date,
     rider_id: rider.id,

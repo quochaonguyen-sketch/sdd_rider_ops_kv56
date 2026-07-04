@@ -8,8 +8,27 @@ create table if not exists public.morning_delivery_assignments (
   assigned_at timestamptz not null default now(),
   checked_in_at timestamptz,
   created_at timestamptz not null default now(),
-  constraint morning_delivery_assignments_area_key unique (work_date, district, ward)
+  constraint morning_delivery_assignments_rider_area_key unique (work_date, rider_id, district, ward)
 );
+
+-- Một phường có thể có nhiều rider (ví dụ rider thay thế khi rider cố định OFF).
+-- Chỉ chặn việc ghi trùng đúng rider vào đúng phường trong cùng ngày.
+alter table public.morning_delivery_assignments
+  drop constraint if exists morning_delivery_assignments_area_key;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'morning_delivery_assignments_rider_area_key'
+      and conrelid = 'public.morning_delivery_assignments'::regclass
+  ) then
+    alter table public.morning_delivery_assignments
+      add constraint morning_delivery_assignments_rider_area_key
+      unique (work_date, rider_id, district, ward);
+  end if;
+end $$;
 
 do $$
 begin

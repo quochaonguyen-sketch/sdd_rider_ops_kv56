@@ -107,7 +107,7 @@ export function MorningDeliveryView() {
   const [assignmentWard, setAssignmentWard] = useState("all");
   const [assignmentStatus, setAssignmentStatus] = useState("all");
   const [emptyWardQuery, setEmptyWardQuery] = useState("");
-  const [onlyEmptyDistricts, setOnlyEmptyDistricts] = useState(true);
+  const [onlyEmptyDistricts, setOnlyEmptyDistricts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingNoteRiderId, setSavingNoteRiderId] = useState<string | null>(null);
@@ -181,12 +181,17 @@ export function MorningDeliveryView() {
     () => new Set(assignments.map((assignment) => areaKey(assignment.district, assignment.ward))),
     [assignments],
   );
+  const wardAssignmentCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const assignment of assignments) {
+      const key = areaKey(assignment.district, assignment.ward);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [assignments]);
   const availableWards = useMemo(
-    () =>
-      selectedDistrict?.wards.filter(
-        (ward) => !occupiedAreas.has(areaKey(selectedDistrict.name, ward.name)),
-      ) ?? [],
-    [occupiedAreas, selectedDistrict],
+    () => selectedDistrict?.wards ?? [],
+    [selectedDistrict],
   );
   const visibleAvailableWards = useMemo(() => {
     const query = normalize(emptyWardQuery);
@@ -197,21 +202,6 @@ export function MorningDeliveryView() {
     emptyCount: district.wards.filter((ward) => !occupiedAreas.has(areaKey(district.name, ward.name))).length,
   })).filter((district) => !onlyEmptyDistricts || district.emptyCount > 0), [occupiedAreas, onlyEmptyDistricts]);
   const groups = useMemo(() => groupAssignments(assignments), [assignments]);
-  const assignmentDistrictOptions = useMemo(() => Array.from(new Set(groups.map((group) => group.district))).sort((a, b) => a.localeCompare(b, "vi", { numeric: true })), [groups]);
-  const assignmentWardOptions = useMemo(() => Array.from(new Set(groups.filter((group) => assignmentDistrict === "all" || group.district === assignmentDistrict).flatMap((group) => group.wards))).sort((a, b) => a.localeCompare(b, "vi", { numeric: true })), [assignmentDistrict, groups]);
-  const filteredGroups = useMemo(() => {
-    const query = normalize(assignmentQuery);
-    return groups.filter((group) =>
-      (!query || normalize([group.rider_code, group.full_name, group.district, ...group.wards].filter(Boolean).join(" ")).includes(query))
-      && (assignmentDistrict === "all" || group.district === assignmentDistrict)
-      && (assignmentWard === "all" || group.wards.includes(assignmentWard))
-      && (assignmentStatus === "all" || (assignmentStatus === "present" ? Boolean(group.checked_in_at) : !group.checked_in_at)),
-    );
-  }, [assignmentDistrict, assignmentQuery, assignmentStatus, assignmentWard, groups]);
-  const requiredRiders = useMemo(
-    () => riders.filter((rider) => !rider.pickup_district?.trim() && !rider.pickup_ward?.trim()),
-    [riders],
-  );
   const attendanceByRider = useMemo(() => {
     const map = new Map<string, AttendanceRow>();
     for (const log of attendance) {
@@ -220,6 +210,25 @@ export function MorningDeliveryView() {
     }
     return map;
   }, [attendance]);
+  const assignmentDistrictOptions = useMemo(() => Array.from(new Set(groups.map((group) => group.district))).sort((a, b) => a.localeCompare(b, "vi", { numeric: true })), [groups]);
+  const assignmentWardOptions = useMemo(() => Array.from(new Set(groups.filter((group) => assignmentDistrict === "all" || group.district === assignmentDistrict).flatMap((group) => group.wards))).sort((a, b) => a.localeCompare(b, "vi", { numeric: true })), [assignmentDistrict, groups]);
+  const filteredGroups = useMemo(() => {
+    const query = normalize(assignmentQuery);
+    return groups.filter((group) => {
+      const log = attendanceByRider.get(group.rider_id) ?? attendanceByRider.get(normalize(group.rider_code));
+      const off = isOffStatus(log?.status);
+      const matchesStatus = assignmentStatus === "all"
+        || (assignmentStatus === "off" ? off : assignmentStatus === "present" ? Boolean(group.checked_in_at) && !off : !group.checked_in_at && !off);
+      return (!query || normalize([group.rider_code, group.full_name, group.district, ...group.wards].filter(Boolean).join(" ")).includes(query))
+        && (assignmentDistrict === "all" || group.district === assignmentDistrict)
+        && (assignmentWard === "all" || group.wards.includes(assignmentWard))
+        && matchesStatus;
+    });
+  }, [assignmentDistrict, assignmentQuery, assignmentStatus, assignmentWard, attendanceByRider, groups]);
+  const requiredRiders = useMemo(
+    () => riders.filter((rider) => !rider.pickup_district?.trim() && !rider.pickup_ward?.trim()),
+    [riders],
+  );
   const assignedRiderIds = useMemo(
     () => new Set(assignments.filter((assignment) => assignment.checked_in_at).map((assignment) => assignment.rider_id)),
     [assignments],
@@ -236,13 +245,19 @@ export function MorningDeliveryView() {
           rider,
           attendance: attendanceByRider.get(rider.id) ?? attendanceByRider.get(normalize(rider.rider_code)) ?? null,
           realtime10am: realtime10amByRider.get(normalize(rider.rider_code)) ?? null,
-        })),
+        }))
+        .sort((a, b) =>
+          kvSortRank(a.rider.kv) - kvSortRank(b.rider.kv)
+          || absentStatusSortRank(a.attendance?.status) - absentStatusSortRank(b.attendance?.status)
+          || a.rider.rider_code.localeCompare(b.rider.rider_code, "vi", { numeric: true }),
+        ),
     [assignedRiderIds, attendanceByRider, realtime10amByRider, requiredRiders],
   );
   const assignedRiderCount = new Set(
     assignments.filter((assignment) => assignment.checked_in_at).map((assignment) => assignment.rider_id),
   ).size;
   const totalAreaCount = hcmDistricts.reduce((total, district) => total + district.wards.length, 0);
+  const assignedAreaCount = occupiedAreas.size;
   const realtimeByRider = useMemo(
     () => new Map(realtimeDeliveryRiders.map((row) => [normalize(row.driver_id), row])),
     [realtimeDeliveryRiders],
@@ -312,8 +327,7 @@ export function MorningDeliveryView() {
     const defaultDistrict = findDefaultDistrict(rider.delivery_district);
     if (defaultDistrict) {
       setSelectedDistrictId(defaultDistrict.id);
-      const defaultWards = findDefaultWards(defaultDistrict, rider.delivery_ward)
-        .filter((ward) => !occupiedAreas.has(areaKey(defaultDistrict.name, ward.name)));
+      const defaultWards = findDefaultWards(defaultDistrict, rider.delivery_ward);
       setSelectedWards(new Set(defaultWards.map((ward) => ward.name)));
     } else {
       setSelectedWards(new Set());
@@ -449,24 +463,13 @@ export function MorningDeliveryView() {
 
   async function assignDefaultAreas() {
     if (!canEdit || planningDefaults) return;
-    const offPreassignments = groups.filter((group) => {
-      const log = attendanceByRider.get(group.rider_id) ?? attendanceByRider.get(normalize(group.rider_code));
-      return !group.checked_in_at && isOffStatus(log?.status);
-    });
-    const removedKeys = new Set(offPreassignments.map((group) => group.key));
-    const remainingAssignments = assignments.filter(
-      (assignment) => !removedKeys.has(`${assignment.rider_id}|${assignment.district}`),
-    );
-    const occupied = new Set(remainingAssignments.map((assignment) => areaKey(assignment.district, assignment.ward)));
-    const alreadyAssigned = new Set(remainingAssignments.map((assignment) => assignment.rider_id));
+    const alreadyAssigned = new Set(assignments.map((assignment) => assignment.rider_id));
     const candidates = riders.filter((rider) => {
-      const log = attendanceByRider.get(rider.id) ?? attendanceByRider.get(normalize(rider.rider_code));
       const hasPickupRoute = Boolean(rider.pickup_district?.trim() || rider.pickup_ward?.trim());
-      return !hasPickupRoute && !alreadyAssigned.has(rider.id) && !isOffStatus(log?.status);
+      return !hasPickupRoute && !alreadyAssigned.has(rider.id);
     });
     const plans: Array<{ rider: MorningRider; district: DistrictDefinition; wards: WardDefinition[] }> = [];
     let missingDefault = 0;
-    let duplicatedArea = 0;
 
     for (const rider of candidates) {
       const district = findDefaultDistrict(rider.delivery_district);
@@ -475,41 +478,24 @@ export function MorningDeliveryView() {
         missingDefault += 1;
         continue;
       }
-      const availableDefaultWards = defaultWards.filter((ward) => {
-        const key = areaKey(district.name, ward.name);
-        if (occupied.has(key)) {
-          duplicatedArea += 1;
-          return false;
-        }
-        occupied.add(key);
-        return true;
-      });
-      if (availableDefaultWards.length > 0) {
-        plans.push({ rider, district, wards: availableDefaultWards });
-      }
+      plans.push({ rider, district, wards: defaultWards });
     }
 
-    if (plans.length === 0 && offPreassignments.length === 0) {
-      setError(`Không có tuyến mặc định nào có thể xếp. Thiếu mặc định: ${missingDefault}; phường đã có người: ${duplicatedArea}.`);
+    if (plans.length === 0) {
+      setError(`Không có tuyến mặc định mới để xếp. Còn ${missingDefault} rider thiếu tuyến cố định.`);
       return;
     }
-    if (!window.confirm(`Đồng bộ tuyến cố định ngày ${formatDate(date)}: xếp ${plans.length} rider và gỡ ${offPreassignments.length} rider OFF?`)) return;
+    const offPlanCount = plans.filter(({ rider }) => {
+      const log = attendanceByRider.get(rider.id) ?? attendanceByRider.get(normalize(rider.rider_code));
+      return isOffStatus(log?.status);
+    }).length;
+    if (!window.confirm(`Đồng bộ tuyến cố định ngày ${formatDate(date)}: xếp ${plans.length} rider${offPlanCount ? `, trong đó ${offPlanCount} rider OFF sẽ được giữ để cảnh báo cần người thay` : ""}?`)) return;
 
     setPlanningDefaults(true);
     setError(null);
     setSuccess(null);
     let assigned = 0;
-    let removed = 0;
     const failures: string[] = [];
-    for (const group of offPreassignments) {
-      const response = await fetch("/api/morning-delivery", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ work_date: date, rider_id: group.rider_id, district: group.district }),
-      });
-      if (response.ok) removed += 1;
-      else failures.push(group.rider_code);
-    }
     for (const plan of plans) {
       const response = await fetch("/api/morning-delivery", {
         method: "POST",
@@ -528,7 +514,7 @@ export function MorningDeliveryView() {
     await load();
     setPlanningDefaults(false);
     if (failures.length > 0) setError(`Không xếp được ${failures.length} rider: ${failures.join(", ")}.`);
-    setSuccess(`Đã đồng bộ: xếp ${assigned} rider, gỡ ${removed} rider OFF; còn ${missingDefault} rider thiếu tuyến cố định và ${duplicatedArea} rider trùng phường.`);
+    setSuccess(`Đã đồng bộ: xếp ${assigned} rider; giữ rider OFF trên tuyến để điều phối thấy và gán người thay; còn ${missingDefault} rider thiếu tuyến cố định.`);
   }
 
   function updateDefaultRoute(riderId: string, district: string, ward = "") {
@@ -579,9 +565,13 @@ export function MorningDeliveryView() {
     const lines = [
       `PHÂN TUYẾN GIAO SÁNG ${formatDate(date)}`,
       "",
-      ...groups.map((group, index) =>
-        `${index + 1}. ${group.rider_code} - ${group.full_name?.trim() || "Chưa có tên"}: ${routeLabel(group.district, group.wards)} [${group.checked_in_at ? "ĐÃ CÓ MẶT" : "ĐÃ ĐƯỢC CHIA - CHƯA LÊN"}]`,
-      ),
+      ...groups.map((group, index) => {
+        const log = attendanceByRider.get(group.rider_id) ?? attendanceByRider.get(normalize(group.rider_code));
+        const status = isOffStatus(log?.status)
+          ? `${attendanceStatusLabel(log?.status).toUpperCase()} - CẦN RIDER THAY`
+          : group.checked_in_at ? "ĐÃ CÓ MẶT" : "ĐÃ ĐƯỢC CHIA - CHƯA LÊN";
+        return `${index + 1}. ${group.rider_code} - ${group.full_name?.trim() || "Chưa có tên"}: ${routeLabel(group.district, group.wards)} [${status}]`;
+      }),
       "",
       `RIDER OFF (${offRiders.length}): ${offRiders.map((rider) => rider.rider_code).join(", ") || "Không có"}`,
     ];
@@ -615,6 +605,10 @@ export function MorningDeliveryView() {
   }, [defaultRoutesOpen, saving, selectedRider, selectedWards]);
 
   const riderHasPickupRoute = Boolean(selectedRider?.pickup_district?.trim() || selectedRider?.pickup_ward?.trim());
+  const selectedRiderAttendance = selectedRider
+    ? attendanceByRider.get(selectedRider.id) ?? attendanceByRider.get(normalize(selectedRider.rider_code))
+    : null;
+  const selectedRiderIsOff = isOffStatus(selectedRiderAttendance?.status);
   const editingDefaultRider = riders.find((rider) => rider.id === editingDefaultRiderId) ?? null;
   const editingDefaultDistrict = editingDefaultRider ? findDefaultDistrict(editingDefaultRider.delivery_district) : null;
 
@@ -657,8 +651,8 @@ export function MorningDeliveryView() {
         <Metric icon={Users} label="Bắt buộc chưa tuyến pick" value={requiredRiders.length} />
         <Metric icon={UserCheck} label="Rider đã có mặt" value={assignedRiderCount} />
         <Metric icon={Truck} label="Rider có đơn realtime" value={activeDeliveryRiderCount} />
-        <Metric icon={MapPin} label="Phường đã nhận" value={assignments.length} />
-        <Metric icon={ClipboardCheck} label="Phường còn trống" value={Math.max(0, totalAreaCount - assignments.length)} />
+        <Metric icon={MapPin} label="Phường đã nhận" value={assignedAreaCount} />
+        <Metric icon={ClipboardCheck} label="Phường còn trống" value={Math.max(0, totalAreaCount - assignedAreaCount)} />
       </section>
 
       <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)_390px]">
@@ -686,6 +680,11 @@ export function MorningDeliveryView() {
                   </div>
                 </div>
                 <div className="mt-3 border-t border-black/5 pt-3 text-xs text-slate-600">
+                  {selectedRiderIsOff ? (
+                    <p className="mb-3 rounded-lg border border-red-200 bg-red-100 px-3 py-2 text-xs font-black uppercase text-red-800">
+                      {attendanceStatusLabel(selectedRiderAttendance?.status)} — rider này đang OFF, chỉ gán khi đã xác nhận đi thay
+                    </p>
+                  ) : null}
                   <p className="font-bold text-slate-800">
                     Mặc định giao: {[selectedRider.delivery_district, selectedRider.delivery_ward].filter(Boolean).join(" · ") || "Chưa có"}
                   </p>
@@ -722,15 +721,15 @@ export function MorningDeliveryView() {
 
         <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
           <div className="sticky top-0 z-10 border-b border-slate-100 bg-white/95 px-4 py-3 backdrop-blur">
-            <h2 className="font-bold text-slate-950">2. Khu vực còn trống</h2>
-            <p className="mt-0.5 text-xs text-slate-500">Phường đã có rider nhận sẽ tự ẩn khỏi danh sách.</p>
+            <h2 className="font-bold text-slate-950">2. Chọn khu vực giao</h2>
+            <p className="mt-0.5 text-xs text-slate-500">Một phường có thể gán nhiều rider để bổ sung hoặc thay rider OFF.</p>
           </div>
           <div className="border-b border-slate-100 p-3">
             <label className="relative mb-3 block">
               <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <Input ref={emptyWardSearchRef} value={emptyWardQuery} onChange={(event) => setEmptyWardQuery(event.target.value)} placeholder="Tìm phường còn trống" className="pl-9" />
+              <Input ref={emptyWardSearchRef} value={emptyWardQuery} onChange={(event) => setEmptyWardQuery(event.target.value)} placeholder="Tìm phường" className="pl-9" />
             </label>
-            <label className="mb-3 flex items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={onlyEmptyDistricts} onChange={(event) => setOnlyEmptyDistricts(event.target.checked)} className="size-4 accent-blue-600" /> Chỉ hiện quận còn phường trống</label>
+            <label className="mb-3 flex items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={onlyEmptyDistricts} onChange={(event) => setOnlyEmptyDistricts(event.target.checked)} className="size-4 accent-blue-600" /> Chỉ hiện quận còn phường chưa có rider</label>
             <div className="flex gap-2 overflow-x-auto pb-1">
               {districtsWithAvailability.map((district) => (
                 <button
@@ -756,7 +755,7 @@ export function MorningDeliveryView() {
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <h3 className="font-black text-slate-950">{selectedDistrict?.name}</h3>
-                <p className="text-xs text-slate-500">{availableWards.length} phường/xã còn trống</p>
+                <p className="text-xs text-slate-500">{availableWards.length} phường/xã · có thể gán trùng người</p>
               </div>
               {selectedWards.size > 0 ? (
                 <button type="button" onClick={() => setSelectedWards(new Set())} className="text-xs font-bold text-red-600">Bỏ chọn</button>
@@ -765,6 +764,7 @@ export function MorningDeliveryView() {
             <div className="grid max-h-[520px] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">
               {visibleAvailableWards.map((ward) => {
                 const selected = selectedWards.has(ward.name);
+                const assignedCount = wardAssignmentCounts.get(areaKey(selectedDistrict.name, ward.name)) ?? 0;
                 return (
                   <button
                     key={ward.name}
@@ -778,13 +778,13 @@ export function MorningDeliveryView() {
                     )}
                   >
                     <span className="block truncate">{ward.name}</span>
-                    <span className="mt-1 block text-[10px] font-bold uppercase text-slate-400">{selected ? "Đã chọn" : "Còn trống"}</span>
+                    <span className={cn("mt-1 block text-[10px] font-bold uppercase", assignedCount > 0 ? "text-blue-600" : "text-slate-400")}>{selected ? "Đã chọn" : assignedCount > 0 ? `${assignedCount} rider đang nhận` : "Chưa có rider"}</span>
                   </button>
                 );
               })}
             </div>
             {visibleAvailableWards.length === 0 ? (
-              <p className="rounded-md border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">Quận này đã được chia hết.</p>
+              <p className="rounded-md border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">Không tìm thấy phường phù hợp.</p>
             ) : null}
           </div>
         </section>
@@ -802,37 +802,42 @@ export function MorningDeliveryView() {
             <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-1">
               <Select value={assignmentDistrict} onChange={(event) => { setAssignmentDistrict(event.target.value); setAssignmentWard("all"); }}><option value="all">Tất cả quận</option>{assignmentDistrictOptions.map((district) => <option key={district} value={district}>{district}</option>)}</Select>
               <Select value={assignmentWard} onChange={(event) => setAssignmentWard(event.target.value)}><option value="all">Tất cả phường</option>{assignmentWardOptions.map((ward) => <option key={ward} value={ward}>{ward}</option>)}</Select>
-              <Select value={assignmentStatus} onChange={(event) => setAssignmentStatus(event.target.value)}><option value="all">Tất cả trạng thái</option><option value="present">Đã có mặt</option><option value="assigned">Đã được chia</option></Select>
+              <Select value={assignmentStatus} onChange={(event) => setAssignmentStatus(event.target.value)}><option value="all">Tất cả trạng thái</option><option value="off">Rider OFF</option><option value="present">Đã có mặt</option><option value="assigned">Đã được chia</option></Select>
             </div>
           </div>
           <div className="max-h-[620px] divide-y divide-slate-100 overflow-y-auto">
-            {filteredGroups.map((group) => (
-              <article key={group.key} className="px-4 py-3 transition-colors hover:bg-blue-50/60">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-sm font-black text-slate-950">{group.full_name?.trim() || "Chưa có tên"}</h3>
-                    <p className="text-xs font-bold text-slate-500">{group.rider_code}</p>
+            {filteredGroups.map((group) => {
+              const log = attendanceByRider.get(group.rider_id) ?? attendanceByRider.get(normalize(group.rider_code));
+              const off = isOffStatus(log?.status);
+              return (
+                <article key={group.key} className={cn("px-4 py-3 transition-colors hover:bg-blue-50/60", off && "bg-red-50/70 hover:bg-red-50")}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-black text-slate-950">{group.full_name?.trim() || "Chưa có tên"}</h3>
+                      <p className="text-xs font-bold text-slate-500">{group.rider_code}</p>
+                      {off ? <p className="mt-1 text-xs font-black uppercase text-red-700">{attendanceStatusLabel(log?.status)} — cần gán rider thay</p> : null}
+                    </div>
+                    {canEdit ? (
+                      <button type="button" onClick={() => void removeGroup(group)} disabled={saving} className="grid size-8 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Huỷ chia tuyến ${group.rider_code}`}>
+                        <Trash2 size={15} />
+                      </button>
+                    ) : null}
                   </div>
-                  {canEdit ? (
-                    <button type="button" onClick={() => void removeGroup(group)} disabled={saving} className="grid size-8 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Huỷ chia tuyến ${group.rider_code}`}>
-                      <Trash2 size={15} />
-                    </button>
-                  ) : null}
-                </div>
-                <div className="mt-2 rounded-md bg-slate-50 p-2.5">
-                  <p className="text-xs font-bold text-slate-800">{routeLabel(group.district.replace(/^(Quận|Huyện)\s+/i, ""), group.wards)}</p>
-                  <div className="mt-1 flex items-center justify-between gap-2">
-                    <p className="text-[10px] text-slate-400">Chia lúc {formatTime(group.assigned_at)}</p>
-                    <span className={cn(
-                      "rounded px-2 py-0.5 text-[10px] font-black uppercase",
-                      group.checked_in_at ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700",
-                    )}>
-                      {group.checked_in_at ? "Đã có mặt" : "Đã được chia"}
-                    </span>
+                  <div className="mt-2 rounded-md bg-slate-50 p-2.5">
+                    <p className="text-xs font-bold text-slate-800">{routeLabel(group.district.replace(/^(Quận|Huyện)\s+/i, ""), group.wards)}</p>
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <p className="text-[10px] text-slate-400">Chia lúc {formatTime(group.assigned_at)}</p>
+                      <span className={cn(
+                        "rounded px-2 py-0.5 text-[10px] font-black uppercase",
+                        off ? "bg-red-100 text-red-700" : group.checked_in_at ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700",
+                      )}>
+                        {off ? "OFF" : group.checked_in_at ? "Đã có mặt" : "Đã được chia"}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
             {!loading && filteredGroups.length === 0 ? (
               <p className="p-8 text-center text-sm text-slate-500">Chưa có rider được chia khu vực.</p>
             ) : null}
@@ -1191,6 +1196,19 @@ function formatTime(value: string) {
 
 function isOffStatus(status: string | null | undefined) {
   return (status ?? "").toUpperCase().includes("OFF");
+}
+
+function kvSortRank(kv: string | null | undefined) {
+  const match = normalize(kv).match(/^(?:kv|khu vuc)?\s*([56])$/);
+  if (match?.[1] === "5") return 0;
+  if (match?.[1] === "6") return 1;
+  return 2;
+}
+
+function absentStatusSortRank(status: string | null | undefined) {
+  if (!isOffStatus(status)) return 0;
+  if (status === "OFF_APPROVED") return 1;
+  return 2;
 }
 
 function attendanceStatusLabel(status: string | null | undefined) {

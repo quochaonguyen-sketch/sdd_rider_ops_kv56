@@ -109,6 +109,7 @@ export const hcmDistricts: DistrictDefinition[] = [
     shortName: "Quận 3",
     aliases: ["3", "quan 3", "q3", "district 3"],
     wards: [
+      { name: "Phường Võ Thị Sáu", aliases: ["vo thi sau", "vts", "p vo thi sau"] },
       { name: "Phường 1", aliases: ["p1"] },
       { name: "Phường 2", aliases: ["p2"] },
       { name: "Phường 3", aliases: ["p3"] },

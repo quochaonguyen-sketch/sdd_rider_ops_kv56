@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { canonicalDistrictName } from "@/lib/locations/hcm";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -19,6 +20,11 @@ const createRiderSchema = z.object({
 
 function emptyToNull(value: string | null | undefined) {
   return value?.trim() || null;
+}
+
+function normalizeBinhThanhDistrict(value: string | null | undefined) {
+  const trimmed = emptyToNull(value);
+  return canonicalDistrictName(trimmed) === "Quận Bình Thạnh" ? "Quận Bình Thạnh" : trimmed;
 }
 
 async function getSignedInUser() {
@@ -64,15 +70,15 @@ export async function POST(request: Request) {
     .from("riders")
     .insert({
       kv: emptyToNull(rider.kv),
-      home_district: emptyToNull(rider.home_district),
+      home_district: normalizeBinhThanhDistrict(rider.home_district),
       cot: emptyToNull(rider.cot),
       rider_code: rider.rider_code,
       full_name: rider.full_name,
       name: rider.full_name,
-      pickup_district: emptyToNull(rider.pickup_district),
+      pickup_district: normalizeBinhThanhDistrict(rider.pickup_district),
       pickup_ward: emptyToNull(rider.pickup_ward),
       point_name: emptyToNull(rider.point_name),
-      delivery_district: emptyToNull(rider.delivery_district),
+      delivery_district: normalizeBinhThanhDistrict(rider.delivery_district),
       delivery_ward: emptyToNull(rider.delivery_ward),
       status: rider.status,
       raw_data: rider,
@@ -141,15 +147,15 @@ export async function PATCH(request: Request) {
     .from("riders")
     .update({
       kv: emptyToNull(rider.kv),
-      home_district: emptyToNull(rider.home_district),
+      home_district: normalizeBinhThanhDistrict(rider.home_district),
       cot: emptyToNull(rider.cot),
       rider_code: rider.rider_code,
       full_name: rider.full_name,
       name: rider.full_name,
-      pickup_district: emptyToNull(rider.pickup_district),
+      pickup_district: normalizeBinhThanhDistrict(rider.pickup_district),
       pickup_ward: emptyToNull(rider.pickup_ward),
       point_name: emptyToNull(rider.point_name),
-      delivery_district: emptyToNull(rider.delivery_district),
+      delivery_district: normalizeBinhThanhDistrict(rider.delivery_district),
       delivery_ward: emptyToNull(rider.delivery_ward),
       status: rider.status,
       raw_data: rider,
