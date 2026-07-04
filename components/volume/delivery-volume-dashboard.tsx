@@ -317,6 +317,7 @@ function DeliveryTrendCard({
   const comparisonSeriesLabel = comparisonSeries === "cot11" ? "COT 1.1" : comparisonSeries === "cot12" ? "COT 1.2" : comparisonSeries === "cot2" ? "COT 2" : "Tổng";
   const max = Math.max(1, ...trend.map((point) => point.count), ...comparisonTrend.map((point) => point.count));
   const lineMax = Math.max(1, ...trend.map((point) => trendSeriesValue(point, comparisonSeries)), ...comparisonTrend.map((point) => trendSeriesValue(point, comparisonSeries)));
+  const displayMax = comparisonSeries === "total" ? max : lineMax;
   const label = viewMode === "day" ? "Trong ngày đã chọn" : viewMode === "week" ? "7 ngày trong tuần" : "Các ngày trong tháng";
 
   return (
@@ -325,11 +326,10 @@ function DeliveryTrendCard({
         <h2 className="font-bold text-slate-950">Xu hướng sản lượng</h2>
         <p className="mt-0.5 text-xs text-slate-500">{label}</p>
         <div className="mt-2 flex flex-wrap gap-3 text-[10px] font-bold text-slate-500">
-          <Legend color="bg-sky-400" label="COT 1.1" /><Legend color="bg-blue-600" label="COT 1.2" /><Legend color="bg-emerald-500" label="COT 2" />
+          {comparisonSeries === "total" ? <><Legend color="bg-sky-400" label="COT 1.1" /><Legend color="bg-blue-600" label="COT 1.2" /><Legend color="bg-emerald-500" label="COT 2" /></> : <Legend color={trendSeriesColor(comparisonSeries)} label={`${comparisonSeriesLabel} được chọn`} />}
           {viewMode !== "day" ? <><Legend color="bg-slate-900" label={`${comparisonSeriesLabel} hiện tại`} line /><Legend color="bg-slate-400" label={`${comparisonSeriesLabel} kỳ trước`} line dashed /></> : null}
         </div>
-        {viewMode !== "day" ? (
-          <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Chọn COT để so sánh">
+        <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Chọn COT để xem volume">
             {([
               ["total", "Tổng"],
               ["cot11", "COT 1.1"],
@@ -338,8 +338,7 @@ function DeliveryTrendCard({
             ] as const).map(([value, label]) => (
               <button key={value} type="button" onClick={() => setComparisonSeries(value)} className={cn("rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition", comparisonSeries === value ? "border-blue-600 bg-blue-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700")}>{label}</button>
             ))}
-          </div>
-        ) : null}
+        </div>
       </div>
       <div className="overflow-x-auto px-4 pb-4 pt-5 sm:px-5">
         {!loading && trend.length === 0 ? <p className="m-auto text-sm text-slate-500">Chưa có dữ liệu xu hướng.</p> : null}
@@ -348,11 +347,9 @@ function DeliveryTrendCard({
             <div className="absolute inset-x-0 bottom-6 top-5 flex items-end">
               {trend.map((point) => (
                 <div key={point.date} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end">
-                  <span className="mb-1 text-[10px] font-bold text-slate-600">{formatCompact(point.count)}</span>
+                  <span className="mb-1 text-[10px] font-bold text-slate-600">{formatCompact(trendSeriesValue(point, comparisonSeries))}</span>
                   <div className="flex h-28 w-8 flex-col-reverse overflow-hidden rounded-t bg-slate-100 ring-1 ring-slate-200/70">
-                    <TrendSegment value={point.cot11} max={max} className="bg-sky-400" />
-                    <TrendSegment value={point.cot12} max={max} className="bg-blue-600" />
-                    <TrendSegment value={point.cot2} max={max} className="bg-emerald-500" />
+                    {comparisonSeries === "total" ? <><TrendSegment value={point.cot11} max={displayMax} className="bg-sky-400" /><TrendSegment value={point.cot12} max={displayMax} className="bg-blue-600" /><TrendSegment value={point.cot2} max={displayMax} className="bg-emerald-500" /></> : <TrendSegment value={trendSeriesValue(point, comparisonSeries)} max={displayMax} className={trendSeriesColor(comparisonSeries)} />}
                   </div>
                   <span className="mt-2 text-[10px] font-semibold text-slate-400">{formatShortDate(point.date)}</span>
                 </div>
@@ -388,6 +385,13 @@ function trendSeriesValue(point: DeliveryTrendPoint, series: "total" | "cot11" |
   if (series === "cot12") return point.cot12;
   if (series === "cot2") return point.cot2;
   return point.count;
+}
+
+function trendSeriesColor(series: "total" | "cot11" | "cot12" | "cot2") {
+  if (series === "cot11") return "bg-sky-400";
+  if (series === "cot12") return "bg-blue-600";
+  if (series === "cot2") return "bg-emerald-500";
+  return "bg-slate-900";
 }
 
 function DeliveryAreaExplorer({

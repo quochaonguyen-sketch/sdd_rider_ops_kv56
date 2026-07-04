@@ -20,11 +20,14 @@ type RealtimeTable =
 type Options<T extends Record<string, unknown>> = {
   table: RealtimeTable;
   onChange: (payload: RealtimePostgresChangesPayload<T>) => void;
+  /** Coalesce bulk database changes into one UI refresh. */
+  debounceMs?: number;
 };
 
 export function useSupabaseRealtime<T extends Record<string, unknown>>({
   table,
   onChange,
+  debounceMs = 500,
 }: Options<T>) {
   const onChangeRef = useRef(onChange);
 
@@ -34,17 +37,31 @@ export function useSupabaseRealtime<T extends Record<string, unknown>>({
 
   useEffect(() => {
     const supabase = createClient();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let latestPayload: RealtimePostgresChangesPayload<T> | undefined;
     const channel = supabase
       .channel(`realtime:${table}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table },
-        (payload) => onChangeRef.current(payload as RealtimePostgresChangesPayload<T>),
+        (payload: RealtimePostgresChangesPayload<T>) => {
+          const typedPayload = payload;
+          if (debounceMs <= 0) {
+            onChangeRef.current(typedPayload);
+            return;
+          }
+          latestPayload = typedPayload;
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => {
+            if (latestPayload) onChangeRef.current(latestPayload);
+          }, debounceMs);
+        },
       )
       .subscribe();
 
     return () => {
+      if (timer) clearTimeout(timer);
       void supabase.removeChannel(channel);
     };
-  }, [table]);
+  }, [debounceMs, table]);
 }

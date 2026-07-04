@@ -10,7 +10,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Home,
   MapPin,
   Navigation,
   Pencil,
@@ -67,7 +66,7 @@ type LocationsResponse = {
   districts: DistrictDefinition[];
 };
 
-type RiderSortKey = "name" | "status" | "zone" | "shift" | "updated";
+type RiderSortKey = "name" | "status" | "zone" | "cot" | "updated";
 const RIDERS_PER_PAGE = 20;
 
 const emptyRiderForm: RiderFormState = {
@@ -101,7 +100,7 @@ export function RidersView() {
   const [checkedIds, setCheckedIds] = useState<Set<string>>(() => new Set());
   const [selected, setSelected] = useState<Rider | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [showMobileDetail, setShowMobileDetail] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<RiderFormState>(emptyRiderForm);
   const [saving, setSaving] = useState(false);
@@ -154,13 +153,22 @@ export function RidersView() {
   }, []);
 
   useEffect(() => {
-    if (!showAddForm && !showMobileDetail) return;
+    if (!showAddForm && !showDetail) return;
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = originalOverflow;
     };
-  }, [showAddForm, showMobileDetail]);
+  }, [showAddForm, showDetail]);
+
+  useEffect(() => {
+    if (!showDetail) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowDetail(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [showDetail]);
 
   const refresh = useCallback(() => {
     void load();
@@ -169,7 +177,6 @@ export function RidersView() {
   useSupabaseRealtime({ table: "riders", onChange: refresh });
 
   const districtOptions = useMemo(() => districts.map((district) => district.name), [districts]);
-  const kvOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.kv)), [riders]);
   const cotOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.cot)), [riders]);
   const shiftOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.current_shift)), [riders]);
   const zoneOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.delivery_district)), [riders]);
@@ -196,7 +203,7 @@ export function RidersView() {
           rider.kv,
           riderPhone(rider),
         ].some((value) => normalizeLocation(value).includes(normalized));
-      const matchesKv = kv === "all" || rider.kv === kv;
+      const matchesKv = kv === "all" || canonicalKv(rider.kv) === kv;
       const matchesCot = cot === "all" || rider.cot === cot;
       const matchesPickupDistrict = pickupDistrict === "all" || districtMatches(rider.pickup_district, pickupDistrict, districts);
       const matchesPickupWard =
@@ -300,7 +307,7 @@ export function RidersView() {
     setEditingId(null);
     setForm(emptyRiderForm);
     setShowAddForm(true);
-    setShowMobileDetail(false);
+    setShowDetail(false);
     setError(null);
     setSuccess(null);
   }
@@ -325,7 +332,7 @@ export function RidersView() {
       status: rider.status === "inactive" ? "inactive" : "active",
     });
     setShowAddForm(true);
-    setShowMobileDetail(false);
+    setShowDetail(false);
     setError(null);
     setSuccess(null);
   }
@@ -380,7 +387,7 @@ export function RidersView() {
     setRiders((current) => current.filter((item) => item.id !== rider.id));
     setSelected((current) => current?.id === rider.id ? null : current);
     setCheckedIds((current) => { const next = new Set(current); next.delete(rider.id); return next; });
-    setShowMobileDetail(false);
+    setShowDetail(false);
     setSuccess(`Đã xóa rider ${name}.`);
   }
 
@@ -523,8 +530,8 @@ export function RidersView() {
             <Select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }} aria-label="Lọc trạng thái">
               <option value="all">Tất cả trạng thái</option><option value="active">Đang hoạt động</option><option value="inactive">Ngừng hoạt động</option>
             </Select>
-            <Select value={deliveryDistrict} onChange={(event) => { setDeliveryDistrict(event.target.value); setDeliveryWard("all"); setPage(1); }} aria-label="Lọc khu vực">
-              <option value="all">Tất cả khu vực</option><option value="__unassigned__">Chưa gán khu vực</option>{zoneOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+            <Select value={kv} onChange={(event) => { setKv(event.target.value); setPage(1); }} aria-label="Lọc khu vực">
+              <option value="all">Tất cả khu vực</option><option value="KV5">KV5</option><option value="KV6">KV6</option>
             </Select>
             <Select value={shift} onChange={(event) => { setShift(event.target.value); setPage(1); }} aria-label="Lọc ca làm việc">
               <option value="all">Tất cả ca</option><option value="__has__">Có ca hiện tại</option><option value="__none__">Chưa có ca</option>{shiftOptions.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -534,7 +541,7 @@ export function RidersView() {
         <details className="mt-3 border-t border-slate-100 pt-3">
           <summary className="cursor-pointer text-sm font-semibold text-slate-600">Bộ lọc nâng cao</summary>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Select value={kv} onChange={(event) => { setKv(event.target.value); setPage(1); }} aria-label="Lọc KV"><option value="all">Tất cả KV</option>{kvOptions.map((option) => <option key={option} value={option}>{option}</option>)}</Select>
+            <Select value={deliveryDistrict} onChange={(event) => { setDeliveryDistrict(event.target.value); setDeliveryWard("all"); setPage(1); }} aria-label="Lọc quận giao"><option value="all">Tất cả quận giao</option><option value="__unassigned__">Chưa gán quận giao</option>{zoneOptions.map((option) => <option key={option} value={option}>{option}</option>)}</Select>
             <Select value={cot} onChange={(event) => { setCot(event.target.value); setPage(1); }} aria-label="Lọc COT"><option value="all">Tất cả COT</option>{cotOptions.map((option) => <option key={option} value={option}>{option}</option>)}</Select>
             <Select value={pickupDistrict} onChange={(event) => { setPickupDistrict(event.target.value); setPickupWard("all"); setPage(1); }} aria-label="Lọc quận lấy"><option value="all">Tất cả quận lấy</option>{districtOptions.map((option) => <option key={option} value={option}>{districtShortLabel(option, districts)}</option>)}</Select>
             <Select value={pickupWard} onChange={(event) => { setPickupWard(event.target.value); setPage(1); }} disabled={pickupDistrict === "all"} aria-label="Lọc phường lấy"><option value="all">Tất cả phường lấy</option>{pickupWardOptions.map((option) => <option key={option} value={option}>{wardShortLabel(option)}</option>)}</Select>
@@ -556,7 +563,7 @@ export function RidersView() {
       {error ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
       {importIssues.length > 0 ? <ImportIssues issues={importIssues} /> : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div>
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div><h2 className="font-semibold text-slate-950">Danh sách rider</h2><p className="text-xs text-slate-500">{filtered.length} kết quả · Chọn dòng để xem chi tiết</p></div>
@@ -564,17 +571,16 @@ export function RidersView() {
           </div>
           <div className="max-h-[680px] min-h-[480px] overflow-auto">
             <table className="w-full min-w-[860px] table-fixed text-left text-sm">
-              <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-600 shadow-[0_1px_0_#e2e8f0]"><tr><th className="w-12 px-4 py-3"><input type="checkbox" aria-label="Chọn tất cả rider trên trang" checked={paginated.length > 0 && visibleChecked === paginated.length} onChange={toggleVisible} /></th><SortableRiderHeader label="Rider" sortKey="name" current={sort} onSort={changeSort} className="w-[28%]" /><SortableRiderHeader label="Trạng thái" sortKey="status" current={sort} onSort={changeSort} className="w-[16%]" /><SortableRiderHeader label="Khu vực" sortKey="zone" current={sort} onSort={changeSort} /><SortableRiderHeader label="Ca hiện tại" sortKey="shift" current={sort} onSort={changeSort} /><SortableRiderHeader label="Cập nhật" sortKey="updated" current={sort} onSort={changeSort} align="right" /><th className="w-16" /></tr></thead>
-              <tbody className="divide-y divide-slate-100">{loading ? Array.from({ length: 8 }, (_, index) => <tr key={index} className="h-16 animate-pulse"><td colSpan={7} className="px-4"><div className="h-4 rounded bg-slate-100" /></td></tr>) : paginated.map((rider) => <tr key={rider.id} className={cn("h-16 cursor-pointer transition hover:bg-blue-50/50", selected?.id === rider.id && "bg-blue-50", checkedIds.has(rider.id) && "bg-blue-50/70")} onClick={() => { setSelected(rider); if (window.innerWidth < 768) setShowMobileDetail(true); }}><td className="px-4" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Chọn ${rider.full_name ?? rider.rider_code}`} checked={checkedIds.has(rider.id)} onChange={() => toggleChecked(rider.id)} /></td><td className="px-4 py-2"><div className="flex min-w-0 items-center gap-3"><RiderAvatar rider={rider} size="sm" /><div className="min-w-0"><p className="truncate font-semibold text-slate-950">{rider.full_name ?? "Chưa có tên"}</p><p className="truncate font-mono text-xs text-slate-500">{rider.rider_code}{riderPhone(rider) ? ` · ${riderPhone(rider)}` : ""}</p></div></div></td><td className="px-4"><RiderStatusBadge status={rider.status} /></td><td className="px-4"><p className="truncate font-medium text-slate-800">{rider.delivery_district ?? "Chưa gán"}</p><p className="truncate text-xs text-slate-500">{rider.delivery_ward ?? rider.kv ?? "—"}</p></td><td className="px-4"><p className="truncate font-medium text-slate-700">{rider.current_shift ?? "Chưa có ca"}</p><p className="truncate text-xs text-slate-500">{rider.cot ?? "—"}</p></td><td className="px-4 text-right"><p className="text-sm tabular-nums text-slate-700">{formatRelativeTime(rider.updated_at)}</p><p className="text-xs tabular-nums text-slate-400">{formatShortDate(rider.updated_at)}</p></td><td className="pr-3 text-right"><Button type="button" variant="ghost" aria-label={`Sửa ${rider.full_name ?? rider.rider_code}`} className="size-9 p-0" onClick={(event) => { event.stopPropagation(); beginEdit(rider); }}><Pencil size={15} /></Button></td></tr>)}{!loading && paginated.length === 0 ? <tr><td colSpan={7} className="h-80 text-center text-sm text-slate-500">Không có rider nào khớp bộ lọc hiện tại.</td></tr> : null}</tbody>
+              <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-600 shadow-[0_1px_0_#e2e8f0]"><tr><th className="w-12 px-4 py-3"><input type="checkbox" aria-label="Chọn tất cả rider trên trang" checked={paginated.length > 0 && visibleChecked === paginated.length} onChange={toggleVisible} /></th><SortableRiderHeader label="Rider" sortKey="name" current={sort} onSort={changeSort} className="w-[30%]" /><SortableRiderHeader label="Trạng thái" sortKey="status" current={sort} onSort={changeSort} className="w-[14%]" /><SortableRiderHeader label="Khu vực" sortKey="zone" current={sort} onSort={changeSort} /><SortableRiderHeader label="COT" sortKey="cot" current={sort} onSort={changeSort} /><SortableRiderHeader label="Cập nhật" sortKey="updated" current={sort} onSort={changeSort} align="right" /><th className="w-16" /></tr></thead>
+              <tbody className="divide-y divide-slate-100">{loading ? Array.from({ length: 8 }, (_, index) => <tr key={index} className="h-16 animate-pulse"><td colSpan={7} className="px-4"><div className="h-4 rounded bg-slate-100" /></td></tr>) : paginated.map((rider) => <tr key={rider.id} className={cn("h-16 cursor-pointer transition hover:bg-blue-50/50", checkedIds.has(rider.id) && "bg-blue-50/70")} onClick={() => { setSelected(rider); setShowDetail(true); }}><td className="px-4" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Chọn ${rider.full_name ?? rider.rider_code}`} checked={checkedIds.has(rider.id)} onChange={() => toggleChecked(rider.id)} /></td><td className="px-4 py-2"><div className="flex min-w-0 items-center gap-3"><RiderAvatar rider={rider} size="sm" /><div className="min-w-0"><p className="truncate font-semibold text-slate-950">{rider.full_name ?? "Chưa có tên"}</p><p className="truncate font-mono text-xs text-slate-500">{rider.rider_code}{riderPhone(rider) ? ` · ${riderPhone(rider)}` : ""}</p></div></div></td><td className="px-4"><RiderStatusBadge status={rider.status} /></td><td className="px-4"><p className="truncate font-medium text-slate-800">{rider.delivery_district ?? "Chưa gán"}</p><p className="truncate text-xs text-slate-500">{rider.delivery_ward ?? rider.kv ?? "—"}</p></td><td className="px-4 font-semibold text-slate-700">{rider.cot ?? "—"}</td><td className="px-4 text-right"><p className="text-sm tabular-nums text-slate-700">{formatRelativeTime(rider.updated_at)}</p><p className="text-xs tabular-nums text-slate-400">{formatShortDate(rider.updated_at)}</p></td><td className="pr-3 text-right"><Button type="button" variant="ghost" aria-label={`Sửa ${rider.full_name ?? rider.rider_code}`} className="size-9 p-0" onClick={(event) => { event.stopPropagation(); beginEdit(rider); }}><Pencil size={15} /></Button></td></tr>)}{!loading && paginated.length === 0 ? <tr><td colSpan={7} className="h-80 text-center text-sm text-slate-500">Không có rider nào khớp bộ lọc hiện tại.</td></tr> : null}</tbody>
             </table>
           </div>
           <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3"><p className="text-sm text-slate-500">Trang <strong className="text-slate-700">{safePage}/{pageCount}</strong></p><div className="flex gap-2"><Button type="button" variant="secondary" className="size-9 p-0" aria-label="Trang trước" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}><ChevronLeft size={16} /></Button><Button type="button" variant="secondary" className="size-9 p-0" aria-label="Trang sau" disabled={safePage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}><ChevronRight size={16} /></Button></div></div>
         </section>
-        <RiderDetailPanel selected={selected} deleting={selected?.id === deletingId} onEdit={beginEdit} onDelete={deleteRider} onUpdated={updateRiderInView} />
       </div>
 
-      {selected && showMobileDetail ? (
-        <MobileDetail selected={selected} deleting={selected.id === deletingId} onClose={() => setShowMobileDetail(false)} onEdit={beginEdit} onDelete={deleteRider} onUpdated={updateRiderInView} />
+      {selected && showDetail ? (
+        <RiderDetailModal selected={selected} deleting={selected.id === deletingId} onClose={() => setShowDetail(false)} onEdit={beginEdit} onDelete={deleteRider} onUpdated={updateRiderInView} />
       ) : null}
     </div>
   );
@@ -601,7 +607,7 @@ function StatCard({ icon, label, value, helper, tone, active, onClick, className
 
 function RiderStatusBadge({ status }: { status: string | null }) {
   const inactive = status === "inactive" || status === "suspended";
-  return <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset", inactive ? "bg-slate-100 text-slate-700 ring-slate-500/20" : "bg-emerald-50 text-emerald-700 ring-emerald-600/20")}><span className={cn("size-1.5 rounded-full", inactive ? "bg-slate-400" : "bg-emerald-500")} />{inactive ? "Ngừng hoạt động" : "Đang hoạt động"}</span>;
+  return <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset", inactive ? "bg-slate-100 text-slate-700 ring-slate-500/20" : "bg-emerald-50 text-emerald-700 ring-emerald-600/20")}><span className={cn("size-1.5 rounded-full", inactive ? "bg-slate-400" : "bg-emerald-500")} />{inactive ? "inactive" : "active"}</span>;
 }
 
 function SortableRiderHeader({ label, sortKey, current, onSort, align, className }: { label: string; sortKey: RiderSortKey; current: { key: RiderSortKey; direction: "asc" | "desc" }; onSort: (key: RiderSortKey) => void; align?: "right"; className?: string }) {
@@ -617,7 +623,7 @@ function compareRiders(a: Rider, b: Rider, key: RiderSortKey) {
   if (key === "name") return (a.full_name ?? a.rider_code).localeCompare(b.full_name ?? b.rider_code, "vi", { numeric: true });
   if (key === "status") return (a.status ?? "active").localeCompare(b.status ?? "active");
   if (key === "zone") return (a.delivery_district ?? "").localeCompare(b.delivery_district ?? "", "vi", { numeric: true });
-  if (key === "shift") return (a.current_shift ?? "").localeCompare(b.current_shift ?? "", "vi", { numeric: true });
+  if (key === "cot") return (a.cot ?? "").localeCompare(b.cot ?? "", "vi", { numeric: true });
   return new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
 }
 
@@ -643,70 +649,18 @@ function riderPhone(rider: Rider) {
   return typeof phone === "string" || typeof phone === "number" ? String(phone) : "";
 }
 
-function RiderDetailPanel({ selected, deleting, onEdit, onDelete, onUpdated }: { selected: Rider | null; deleting: boolean; onEdit: (rider: Rider) => void; onDelete: (rider: Rider) => void; onUpdated: (rider: Rider) => void }) {
+function RiderDetailModal({ selected, deleting, onClose, onEdit, onDelete, onUpdated }: { selected: Rider; deleting: boolean; onClose: () => void; onEdit: (rider: Rider) => void; onDelete: (rider: Rider) => void; onUpdated: (rider: Rider) => void }) {
   return (
-    <Card className="hidden h-fit md:block xl:sticky xl:top-20">
-      {selected ? (
-        <div className="space-y-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex min-w-0 gap-3">
-              <RiderAvatar rider={selected} size="lg" />
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="truncate text-lg font-semibold text-slate-950">{selected.full_name ?? selected.rider_code}</h2>
-                  <Badge tone={selected.status === "inactive" ? "red" : "green"}>{selected.status ?? "active"}</Badge>
-                </div>
-                <p className="mt-1 font-mono text-sm text-slate-500">ID {selected.rider_code}</p>
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <Button type="button" variant="secondary" className="h-9 px-3" onClick={() => onEdit(selected)}>
-                <Pencil size={15} />
-                Sửa
-              </Button>
-              <Button type="button" variant="ghost" className="h-9 px-3 text-red-700 hover:bg-red-50 hover:text-red-800" disabled={deleting} onClick={() => void onDelete(selected)}>
-                <Trash2 size={15} />
-                {deleting ? "Đang xóa..." : "Xóa"}
-              </Button>
-            </div>
-          </div>
-
-          <RiderAvatarEditor rider={selected} onUpdated={onUpdated} />
-
-          <div className="grid grid-cols-3 gap-2">
-            <SummaryChip label="KV" value={selected.kv ?? "-"} tone="blue" />
-            <SummaryChip label="COT" value={selected.cot ?? "-"} tone="amber" />
-            <SummaryChip label="Quận ở" value={selected.home_district ?? "-"} tone="slate" />
-          </div>
-
-          <div className="relative space-y-3 before:absolute before:bottom-8 before:left-[19px] before:top-8 before:w-px before:bg-slate-200">
-            <RouteStep icon={<Home size={17} />} label="Nơi ở" title={selected.home_district} tone="slate" />
-            <RouteStep icon={<MapPin size={17} />} label="Khu vực lấy" title={selected.pickup_district} subtitle={joinLocation(selected.pickup_ward, selected.point_name)} tone="blue" />
-            <RouteStep icon={<Navigation size={17} />} label="Khu vực giao" title={selected.delivery_district} subtitle={selected.delivery_ward} tone="emerald" />
-          </div>
-        </div>
-      ) : (
-        <>
-          <h2 className="text-base font-semibold text-slate-950">Chi tiết rider</h2>
-          <p className="mt-4 rounded-md border border-dashed border-slate-200 p-4 text-sm text-slate-500">Chọn một rider để xem nhanh khu vực ở, lấy và giao.</p>
-        </>
-      )}
-    </Card>
-  );
-}
-
-function MobileDetail({ selected, deleting, onClose, onEdit, onDelete, onUpdated }: { selected: Rider; deleting: boolean; onClose: () => void; onEdit: (rider: Rider) => void; onDelete: (rider: Rider) => void; onUpdated: (rider: Rider) => void }) {
-  return (
-    <div className="fixed inset-0 z-50 md:hidden">
+    <div role="dialog" aria-modal="true" aria-labelledby="rider-detail-title" className="fixed inset-0 z-50 grid items-end md:place-items-center md:p-6">
       <button type="button" aria-label="Đóng chi tiết rider" className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" onClick={onClose} />
-      <Card className="absolute inset-x-0 bottom-0 z-10 max-h-[90vh] overflow-y-auto rounded-b-none rounded-t-3xl border-0 p-4 pb-8 shadow-2xl">
-        <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-300" />
+      <Card className="relative z-10 max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-b-none rounded-t-3xl border-0 p-5 pb-8 shadow-2xl md:rounded-2xl md:p-6">
+        <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-300 md:hidden" />
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <RiderAvatar rider={selected} size="lg" />
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="truncate text-lg font-bold text-slate-950">{selected.full_name ?? selected.rider_code}</h2>
+                <h2 id="rider-detail-title" className="truncate text-lg font-bold text-slate-950">{selected.full_name ?? selected.rider_code}</h2>
                 <Badge tone={selected.status === "inactive" ? "red" : "green"}>{selected.status ?? "active"}</Badge>
               </div>
               <p className="mt-1 font-mono text-sm text-slate-500">ID {selected.rider_code}</p>
@@ -910,6 +864,11 @@ function RouteStep({ icon, label, title, subtitle, tone }: { icon: React.ReactNo
 
 function uniqueOptions(values: Array<string | null>) {
   return mergeOptions([], values);
+}
+
+function canonicalKv(value: string | null) {
+  const match = normalizeLocation(value).match(/^(?:kv|khu vuc)?\s*([56])$/);
+  return match ? `KV${match[1]}` : value?.trim().toUpperCase() ?? "";
 }
 
 function mergeOptions(primary: Array<string | null | undefined>, extra: Array<string | null | undefined>) {

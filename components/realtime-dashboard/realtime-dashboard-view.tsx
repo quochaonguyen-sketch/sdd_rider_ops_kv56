@@ -50,21 +50,27 @@ export function RealtimeDashboardView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const loadProfiles = useCallback(async () => {
+    const supabase = createClient();
+    const result = await supabase.from("riders").select("rider_code,full_name,kv,delivery_district,delivery_ward").eq("status", "active");
+    if (result.error) {
+      setError(result.error.message);
+      return;
+    }
+    setProfiles((result.data ?? []) as RiderProfile[]);
+  }, []);
+
+  const loadRealtime = useCallback(async () => {
     const supabase = createClient();
     setLoading(true);
     setError(null);
-    const [latest, riderResult] = await Promise.all([
-      supabase.from("realtime_delivery_riders").select("snapshot_id,snapshot_at").eq("work_date", date).order("snapshot_at", { ascending: false }).limit(1).maybeSingle(),
-      supabase.from("riders").select("rider_code,full_name,kv,delivery_district,delivery_ward").eq("status", "active"),
-    ]);
-    if (latest.error || riderResult.error) {
-      setError(latest.error?.message ?? riderResult.error?.message ?? "Không thể tải dữ liệu");
+    const latest = await supabase.from("realtime_delivery_riders").select("snapshot_id,snapshot_at").eq("work_date", date).order("snapshot_at", { ascending: false }).limit(1).maybeSingle();
+    if (latest.error) {
+      setError(latest.error.message);
       setRows([]);
       setLoading(false);
       return;
     }
-    setProfiles((riderResult.data ?? []) as RiderProfile[]);
     if (!latest.data) {
       setRows([]);
       setSnapshotAt(null);
@@ -78,13 +84,17 @@ export function RealtimeDashboardView() {
     setLoading(false);
   }, [date]);
 
+  const load = useCallback(() => {
+    void Promise.all([loadProfiles(), loadRealtime()]);
+  }, [loadProfiles, loadRealtime]);
+
   useEffect(() => {
     // The client-side Supabase snapshot is intentionally loaded when the date changes.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
+    load();
   }, [load]);
-  useSupabaseRealtime({ table: "realtime_delivery_riders", onChange: load });
-  useSupabaseRealtime({ table: "riders", onChange: load });
+  useSupabaseRealtime({ table: "realtime_delivery_riders", onChange: loadRealtime });
+  useSupabaseRealtime({ table: "riders", onChange: loadProfiles });
 
   const riders = useMemo(() => {
     const profileMap = new Map(profiles.map((profile) => [normalize(profile.rider_code), profile]));
