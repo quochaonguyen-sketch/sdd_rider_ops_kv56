@@ -10,26 +10,28 @@ import {
   CalendarDays,
   ClipboardCheck,
   ChevronDown,
-  Database,
   ListChecks,
+  ListTodo,
   LogOut,
   MapPinned,
   Menu,
   PackageOpen,
   PackagePlus,
   PencilRuler,
-  Settings,
   Truck,
   Upload,
+  UsersRound,
   X,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/utils/cn";
+import { AppBrand, AppCopyright } from "@/components/layout/app-brand";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { href: "/realtime-dashboard", label: "Realtime Dashboard", icon: Activity },
+  { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/riders", label: "Riders", icon: Bike },
   { href: "/attendance", label: "Attendance", icon: CalendarDays },
   { href: "/morning-delivery", label: "Morning Dispatch", icon: ClipboardCheck },
@@ -37,7 +39,7 @@ const navItems = [
   { href: "/zone-builder", label: "Zone Builder", icon: PencilRuler },
   { href: "/pickup-management", label: "Pickup Management", icon: ListChecks },
   { href: "/imports", label: "Imports", icon: Upload },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/settings", label: "Thành viên", icon: UsersRound },
 ];
 
 const mobileNavItems = navItems.slice(0, 4);
@@ -73,18 +75,12 @@ export function AppShell({
 
   return (
     <div className="min-h-screen bg-slate-50/80">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-slate-200/80 bg-white md:block">
-        <div className="flex h-16 items-center gap-3 border-b border-slate-100 px-5">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-200">
-            <Database size={20} />
-          </div>
-          <div>
-            <p className="text-sm font-bold leading-5 text-slate-950">Rider Ops</p>
-            <p className="text-xs leading-4 text-slate-500">Realtime workforce</p>
-          </div>
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200/80 bg-white md:flex">
+        <div className="flex h-[76px] items-center border-b border-slate-100 px-5">
+          <AppBrand />
         </div>
-        <nav className="space-y-1 p-3">
-          {navItems.slice(0, 6).map((item) => {
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+          {navItems.slice(0, 7).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return (
@@ -169,7 +165,7 @@ export function AppShell({
               })}
             </div> : null}
           </div>
-          {navItems.slice(8).map((item) => {
+          {navItems.slice(9).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return (
@@ -188,15 +184,11 @@ export function AppShell({
           })}
         </nav>
       </aside>
-      <div className="md:pl-64">
+      <div className="flex min-h-screen flex-col md:pl-64">
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 shadow-[0_1px_3px_rgba(15,23,42,0.03)] backdrop-blur-xl md:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white md:hidden">
-              <Database size={18} />
-            </div>
+            <AppBrand compact className="md:hidden" />
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-950 md:hidden">Rider Ops</p>
-              <p className="truncate text-xs text-slate-500 md:hidden">{user.fullName ?? user.email}</p>
               <p className="hidden text-sm font-semibold text-slate-950 md:block">{user.fullName ?? user.email}</p>
               <p className="hidden text-xs uppercase tracking-wide text-slate-500 md:block">{user.role}</p>
             </div>
@@ -207,7 +199,10 @@ export function AppShell({
             Sign out
           </Button>
         </header>
-        <main className="px-3 py-4 pb-28 sm:px-4 md:px-6 md:py-6 md:pb-6">{children}</main>
+        <main className="flex-1 px-3 py-4 pb-28 sm:px-4 md:px-6 md:py-6 md:pb-6">{children}</main>
+        <footer className="border-t border-slate-200/70 bg-white/60 px-6 pb-28 pt-4 md:py-4">
+          <AppCopyright />
+        </footer>
       </div>
 
       {moreOpen ? (

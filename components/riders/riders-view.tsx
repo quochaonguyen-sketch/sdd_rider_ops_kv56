@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowDown,
   ArrowUp,
@@ -20,6 +21,7 @@ import {
   Upload,
   UserRound,
   X,
+  ZoomIn,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
@@ -814,11 +816,73 @@ function SectionTitle({ icon, title }: { icon: React.ReactNode; title: string })
 }
 
 function RiderAvatar({ rider, size }: { rider: Rider; size: "sm" | "lg" }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
   const dimension = size === "lg" ? "size-16" : "size-11";
   const iconSize = size === "lg" ? 26 : 18;
 
+  useEffect(() => {
+    if (!previewOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPreviewOpen(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [previewOpen]);
+
   if (rider.avatar_url) {
-    return <span role="img" aria-label={`Avatar ${rider.full_name ?? rider.rider_code}`} className={`${dimension} shrink-0 rounded-full border-2 border-white bg-cover bg-center shadow-sm ring-1 ring-slate-200`} style={{ backgroundImage: `url("${rider.avatar_url}")` }} />;
+    const riderName = rider.full_name ?? rider.rider_code;
+    return (
+      <>
+        <button
+          type="button"
+          aria-label={`Xem ảnh lớn của ${riderName}`}
+          title="Bấm để xem ảnh lớn"
+          className={cn(
+            dimension,
+            "group relative shrink-0 cursor-zoom-in overflow-hidden rounded-full border-2 border-white bg-cover bg-center shadow-sm ring-1 ring-slate-200 transition hover:scale-105 hover:ring-2 hover:ring-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500",
+          )}
+          style={{ backgroundImage: `url("${rider.avatar_url}")` }}
+          onClick={(event) => {
+            event.stopPropagation();
+            setPreviewOpen(true);
+          }}
+        >
+          <span className="absolute inset-0 grid place-items-center bg-slate-950/0 text-white opacity-0 transition group-hover:bg-slate-950/35 group-hover:opacity-100 group-focus:bg-slate-950/35 group-focus:opacity-100">
+            <ZoomIn size={size === "lg" ? 20 : 16} />
+          </span>
+        </button>
+        {previewOpen
+          ? createPortal(
+              <div className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Ảnh rider ${riderName}`}>
+                <button type="button" aria-label="Đóng ảnh lớn" className="absolute inset-0 cursor-zoom-out" onClick={() => setPreviewOpen(false)} />
+                <div className="relative z-10 w-full max-w-xl">
+                  <button
+                    type="button"
+                    aria-label="Đóng"
+                    className="absolute -right-2 -top-12 grid size-10 place-items-center rounded-full bg-white/15 text-white backdrop-blur transition hover:bg-white/25 sm:right-0"
+                    onClick={() => setPreviewOpen(false)}
+                  >
+                    <X size={22} />
+                  </button>
+                  <div className="overflow-hidden rounded-3xl bg-white p-2 shadow-2xl">
+                    <div className="aspect-square w-full rounded-[1.15rem] bg-slate-100 bg-cover bg-center" style={{ backgroundImage: `url("${rider.avatar_url}")` }} role="img" aria-label={`Avatar ${riderName}`} />
+                  </div>
+                  <div className="mt-4 text-center text-white">
+                    <p className="text-lg font-bold">{riderName}</p>
+                    <p className="mt-0.5 font-mono text-sm text-white/65">ID {rider.rider_code}</p>
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )
+          : null}
+      </>
+    );
   }
 
   return (

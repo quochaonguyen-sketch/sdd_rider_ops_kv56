@@ -18,6 +18,7 @@ type VolumeGrouping = "week" | "month";
 type VolumeRow = { report_date: string | null; district: string | null; total_orders: number | null };
 type DailyVolumeRecord = { date: string; volume: number; type: "delivery" | "pickup" };
 type RealtimeRow = { driver_id: string; total_assigned: number; delivered: number; delivering: number; failed: number; idle_delivery_seconds: number; snapshot_id: string; snapshot_at: string };
+type AttendanceScheduleResponse = { success: boolean; logs?: AttendanceLog[]; error?: string };
 type DashboardState = { riders: Rider[]; zones: Zone[]; attendance: AttendanceLog[]; activity: ActivityLog[]; delivery: VolumeRow[]; pickup: VolumeRow[]; realtime: RealtimeRow[] };
 const emptyState: DashboardState = { riders: [], zones: [], attendance: [], activity: [], delivery: [], pickup: [], realtime: [] };
 
@@ -37,22 +38,22 @@ export function DashboardView() {
     setLoading(true);
     setError(null);
     const historyStart = monthStartOffset(dateRange.end, -11);
-    const [riders, zones, attendance, activity, delivery, pickup, realtime] = await Promise.all([
+    const [riders, zones, attendanceResponse, activity, delivery, pickup, realtime] = await Promise.all([
       supabase.from("riders").select("*, zones(id,name,area,hub)").order("updated_at", { ascending: false }),
       supabase.from("zones").select("*").order("name"),
-      supabase.from("attendance_logs").select("*, riders(id,full_name,rider_code,zone_id,zones(id,name))").gte("work_date", shiftDateValue(dateRange.end, -59)).lte("work_date", dateRange.end).order("work_date"),
+      fetch(`/api/attendance/schedule?month=${dateRange.end.slice(0, 7)}`, { cache: "no-store" }).then(async (response) => ({ response, body: (await response.json().catch(() => null)) as AttendanceScheduleResponse | null })),
       supabase.from("activity_logs").select("*").order("created_at", { ascending: false }).limit(10),
       supabase.from("delivery_order").select("report_date,district,total_orders").gte("report_date", historyStart).lte("report_date", dateRange.end).limit(5000),
       supabase.from("pickup_volume").select("report_date,district,total_orders").gte("report_date", historyStart).lte("report_date", dateRange.end).limit(5000),
       supabase.from("realtime_delivery_riders").select("driver_id,total_assigned,delivered,delivering,failed,idle_delivery_seconds,snapshot_id,snapshot_at").eq("work_date", dateRange.end).order("snapshot_at", { ascending: false }).limit(2000),
     ]);
-    const results = [riders, zones, attendance, activity, delivery, pickup, realtime];
+    const results = [riders, zones, activity, delivery, pickup, realtime];
     const firstError = results.find((result) => result.error)?.error;
-    if (firstError) setError(firstError.message);
+    if (firstError || !attendanceResponse.response.ok || !attendanceResponse.body?.success) setError(firstError?.message ?? attendanceResponse.body?.error ?? "Không thể tải dữ liệu chấm công");
     else {
       const realtimeRows = (realtime.data ?? []) as RealtimeRow[];
       const latestSnapshot = realtimeRows[0]?.snapshot_id;
-      setState({ riders: (riders.data ?? []) as Rider[], zones: (zones.data ?? []) as Zone[], attendance: (attendance.data ?? []) as AttendanceLog[], activity: (activity.data ?? []) as ActivityLog[], delivery: (delivery.data ?? []) as VolumeRow[], pickup: (pickup.data ?? []) as VolumeRow[], realtime: realtimeRows.filter((row) => row.snapshot_id === latestSnapshot) });
+      setState({ riders: (riders.data ?? []) as Rider[], zones: (zones.data ?? []) as Zone[], attendance: attendanceResponse.body.logs ?? [], activity: (activity.data ?? []) as ActivityLog[], delivery: (delivery.data ?? []) as VolumeRow[], pickup: (pickup.data ?? []) as VolumeRow[], realtime: realtimeRows.filter((row) => row.snapshot_id === latestSnapshot) });
       setLastUpdated(new Date());
     }
     setLoading(false);
@@ -85,10 +86,10 @@ export function DashboardView() {
 
     <section aria-labelledby="current-state" className="space-y-4"><div><h2 id="current-state" className="font-semibold text-slate-950">Vận hành hiện tại</h2><p className="text-sm text-slate-500">Các tín hiệu quan trọng nhất trong phạm vi đã chọn.</p></div><div className="grid grid-cols-12 gap-4">
       <KpiCard className="col-span-6 xl:col-span-2" href="/realtime-dashboard" icon={Activity} label="Đơn đang giao" value={summary.delivering} context={`${summary.assigned.toLocaleString("vi-VN")} đơn được phân`} tone="blue" loading={loading} />
-      <KpiCard className="col-span-6 xl:col-span-2" href="/volume/delivery" icon={Truck} label="Tổng volume" value={summary.totalVolume} context={`${summary.deliveryVolume.toLocaleString("vi-VN")} delivery`} tone="blue" loading={loading} />
+      <KpiCard className="col-span-6 xl:col-span-2" href="/volume/delivery" icon={Truck} label="Tổng volume" value={volumeAnalytics.current} context={volumeComparisonLabel(volumeAnalytics.current, volumeAnalytics.previous)} tone="blue" loading={loading} />
       <KpiCard className="col-span-6 xl:col-span-2" href="/realtime-dashboard" icon={PackageCheck} label="Đã giao" value={summary.delivered} context={`Tiến độ ${summary.deliveryRate}%`} tone="green" loading={loading} />
       <KpiCard className="col-span-6 xl:col-span-2" href="/riders" icon={Bike} label="Rider active" value={`${summary.activeRiders}/${state.riders.length}`} context={`${summary.unassignedRiders} chưa gán zone`} tone="slate" loading={loading} />
-      <KpiCard className="col-span-6 xl:col-span-2" href="/attendance" icon={CalendarCheck2} label="Tỷ lệ đi làm" value={`${summary.attendanceRate}%`} context={`${summary.present}/${summary.scheduled} rider`} tone="green" loading={loading} />
+      <KpiCard className="col-span-6 xl:col-span-2" href="/attendance" icon={CalendarCheck2} label="Tỷ lệ đi làm" value={summary.hasAttendanceData ? `${summary.attendanceRate}%` : "—"} context={summary.hasAttendanceData ? `${summary.present} đi làm · ${summary.leave} nghỉ · ${summary.absent} vắng` : "Chưa có dữ liệu chấm công"} tone="green" loading={loading} />
       <KpiCard className="col-span-6 xl:col-span-2" href="#alerts" icon={CircleAlert} label="Cảnh báo" value={alerts.length} context={`${summary.failed} đơn giao lỗi`} tone={alerts.length ? "red" : "green"} loading={loading} />
     </div></section>
 
@@ -96,7 +97,7 @@ export function DashboardView() {
 
     <section aria-label="Tóm tắt vận hành" className="grid grid-cols-12 gap-4">
       <SectionCard className="col-span-12 lg:col-span-4" title="Quân số rider" description="Mức sẵn sàng và phân bổ rider" href="/riders" linkLabel="Xem riders"><SummaryRow label="Đang hoạt động" value={summary.activeRiders} tone="green" /><SummaryRow label="Chưa gán khu vực" value={summary.unassignedRiders} tone={summary.unassignedRiders ? "amber" : "slate"} /><SummaryRow label="Chờ trên 1 giờ" value={summary.idleRiders} tone={summary.idleRiders ? "red" : "slate"} /></SectionCard>
-      <SectionCard className="col-span-12 lg:col-span-4" title="Chấm công hôm nay" description="Có mặt, nghỉ và vắng đột xuất" href="/attendance" linkLabel="Xem chấm công"><DistributionBar values={[{ label: "Có mặt", value: summary.present, color: "bg-emerald-500" }, { label: "Nghỉ phép", value: summary.leave, color: "bg-blue-500" }, { label: "Vắng", value: summary.absent, color: "bg-red-500" }]} /><p className="mt-4 text-sm text-slate-500">Tỷ lệ có mặt <strong className="text-slate-900">{summary.attendanceRate}%</strong></p></SectionCard>
+      <SectionCard className="col-span-12 lg:col-span-4" title="Chấm công hôm nay" description="Có mặt, nghỉ và vắng đột xuất" href="/attendance" linkLabel="Xem chấm công"><DistributionBar values={[{ label: "Có mặt", value: summary.present, color: "bg-emerald-500" }, { label: "Nghỉ phép", value: summary.leave, color: "bg-blue-500" }, { label: "Vắng", value: summary.absent, color: "bg-red-500" }]} /><p className="mt-4 text-sm text-slate-500">Tỷ lệ có mặt <strong className="text-slate-900">{summary.hasAttendanceData ? `${summary.attendanceRate}% (${summary.present}/${summary.scheduled})` : "Chưa có dữ liệu"}</strong></p></SectionCard>
       <SectionCard className="col-span-12 lg:col-span-4" title="Phân bổ khu vực" description="Các zone theo số rider active" href="/zones" linkLabel="Xem zones"><div className="space-y-3">{summary.zoneRows.slice(0, 4).map((zone) => <div key={zone.name} className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-medium text-slate-800">{zone.name}</p><p className="text-xs text-slate-500">{zone.total} rider</p></div><span className="text-sm font-bold tabular-nums text-slate-900">{zone.active} active</span></div>)}{summary.zoneRows.length === 0 ? <Empty text="Chưa có dữ liệu zone." /> : null}</div></SectionCard>
     </section>
 
@@ -158,7 +159,34 @@ function SummaryRow({ label, value, tone }: { label: string; value: number; tone
 function DistributionBar({ values }: { values: Array<{ label: string; value: number; color: string }> }) { const total = values.reduce((sum, item) => sum + item.value, 0); return <><div className="flex h-3 overflow-hidden rounded-full bg-slate-100">{values.map((item) => <div key={item.label} className={item.color} style={{ width: `${total ? item.value / total * 100 : 0}%` }} />)}</div><div className="mt-3 flex flex-wrap gap-3">{values.map((item) => <span key={item.label} className="flex items-center gap-1.5 text-xs text-slate-600"><span className={cn("size-2 rounded-full", item.color)} />{item.label} {item.value}</span>)}</div></>; }
 function Empty({ text }: { text: string }) { return <p className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">{text}</p>; }
 
-function buildSummary(state: DashboardState, range: { start: string; end: string }) { const activeRiders = state.riders.filter((rider) => rider.status === "active"); const attendance = state.attendance.filter((log) => log.work_date === range.end); const present = attendance.filter((log) => isPresent(log.status)).length; const leave = attendance.filter((log) => /OFF_WEEKLY|OFF_APPROVED/i.test(log.status)).length; const absent = attendance.filter((log) => /OFF_UNEXPECTED/i.test(log.status)).length; const realtime = state.realtime.reduce((sum, row) => ({ assigned: sum.assigned + row.total_assigned, delivered: sum.delivered + row.delivered, delivering: sum.delivering + row.delivering, failed: sum.failed + row.failed }), { assigned: 0, delivered: 0, delivering: 0, failed: 0 }); const volumeTotal = (rows: VolumeRow[]) => rows.filter((row) => { const date = row.report_date?.slice(0, 10); return date && date >= range.start && date <= range.end; }).reduce((sum, row) => sum + (row.total_orders ?? 1), 0); const zoneRows = state.zones.map((zone) => { const riders = state.riders.filter((rider) => rider.zone_id === zone.id); return { name: zone.name, total: riders.length, active: riders.filter((rider) => rider.status === "active").length }; }).sort((a, b) => b.active - a.active); return { ...realtime, deliveryRate: realtime.assigned ? Math.round(realtime.delivered / realtime.assigned * 100) : 0, activeRiders: activeRiders.length, unassignedRiders: activeRiders.filter((rider) => !rider.zone_id && !rider.delivery_district).length, idleRiders: state.realtime.filter((row) => row.delivering > 0 && row.idle_delivery_seconds > 3600).length, scheduled: attendance.length, present, leave, absent, attendanceRate: attendance.length ? Math.round(present / attendance.length * 100) : 0, deliveryVolume: volumeTotal(state.delivery), pickupVolume: volumeTotal(state.pickup), totalVolume: volumeTotal(state.delivery) + volumeTotal(state.pickup), zoneRows }; }
+function buildSummary(state: DashboardState, range: { start: string; end: string }) {
+  const activeRiders = state.riders.filter((rider) => rider.status === "active");
+  const attendance = state.attendance.filter((log) => log.work_date.slice(0, 10) === range.end);
+  const attendanceByRiderId = new Map(attendance.filter((log) => log.rider_id).map((log) => [log.rider_id!, log]));
+  const attendanceByRiderCode = new Map(attendance.map((log) => [normalizeRiderCode(log.rider_code), log]));
+  let present = 0;
+  let leave = 0;
+  let absent = 0;
+
+  // Attendance logs store schedule exceptions. As in the Attendance screen,
+  // an active rider without an exception for the day is considered ON.
+  for (const rider of activeRiders) {
+    const log = attendanceByRiderId.get(rider.id) ?? attendanceByRiderCode.get(normalizeRiderCode(rider.rider_code));
+    const status = normalizeAttendanceStatus(log?.status);
+    if (status === "OFF_UNEXPECTED") absent += 1;
+    else if (status === "OFF_WEEKLY" || status === "OFF_APPROVED") leave += 1;
+    else present += 1;
+  }
+
+  const riderByCode = new Map(state.riders.map((rider) => [normalizeRiderCode(rider.rider_code), rider]));
+  const kv56Realtime = state.realtime.filter((row) => isKv56(riderByCode.get(normalizeRiderCode(row.driver_id))?.kv));
+  const realtime = kv56Realtime.reduce((sum, row) => ({ assigned: sum.assigned + row.total_assigned, delivered: sum.delivered + row.delivered, delivering: sum.delivering + row.delivering, failed: sum.failed + row.failed }), { assigned: 0, delivered: 0, delivering: 0, failed: 0 });
+  const volumeTotal = (rows: VolumeRow[]) => rows.filter((row) => { const date = row.report_date?.slice(0, 10); return date && date >= range.start && date <= range.end; }).reduce((sum, row) => sum + (row.total_orders ?? 1), 0);
+  const zoneRows = state.zones.map((zone) => { const riders = state.riders.filter((rider) => rider.zone_id === zone.id); return { name: zone.name, total: riders.length, active: riders.filter((rider) => rider.status === "active").length }; }).sort((a, b) => b.active - a.active);
+  const scheduled = activeRiders.length;
+
+  return { ...realtime, deliveryRate: realtime.assigned ? Math.round(realtime.delivered / realtime.assigned * 100) : 0, activeRiders: activeRiders.length, unassignedRiders: activeRiders.filter((rider) => !rider.zone_id && !rider.delivery_district).length, idleRiders: kv56Realtime.filter((row) => row.delivering > 0 && row.idle_delivery_seconds > 3600).length, scheduled, present, leave, absent, hasAttendanceData: attendance.length > 0, attendanceRate: scheduled ? Math.round(present / scheduled * 100) : 0, deliveryVolume: volumeTotal(state.delivery), pickupVolume: volumeTotal(state.pickup), totalVolume: volumeTotal(state.delivery) + volumeTotal(state.pickup), zoneRows };
+}
 // Retained as the daily trend shape consumed by the exported compact chart component.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function buildVolumeTrend(delivery: VolumeRow[], pickup: VolumeRow[], range: { start: string; end: string }) { const dates = dateSequence(range.start, range.end); const sumByDate = (rows: VolumeRow[]) => { const map = new Map<string, number>(); for (const row of rows) { const date = row.report_date?.slice(0, 10); if (date) map.set(date, (map.get(date) ?? 0) + (row.total_orders ?? 1)); } return map; }; const deliveryMap = sumByDate(delivery); const pickupMap = sumByDate(pickup); return dates.map((date) => ({ date, delivery: deliveryMap.get(date) ?? 0, pickup: pickupMap.get(date) ?? 0 })); }
@@ -168,12 +196,26 @@ function aggregateDailyWeeks(data: DailyVolumeRecord[], weeksRange: number) { co
 function buildAlerts(state: DashboardState, summary: ReturnType<typeof buildSummary>) { const alerts: Array<{ title: string; description: string; severity: "critical" | "warning"; href: string }> = []; if (summary.failed > 0) alerts.push({ title: `${summary.failed} đơn giao lỗi`, description: "Kiểm tra rider và khu vực có đơn lỗi trong snapshot mới nhất.", severity: "critical", href: "/realtime-dashboard" }); if (summary.idleRiders > 0) alerts.push({ title: `${summary.idleRiders} rider chờ trên 1 giờ`, description: "Rider vẫn còn đơn đang giao nhưng không có tiến triển.", severity: "critical", href: "/realtime-dashboard" }); if (summary.unassignedRiders > 0) alerts.push({ title: `${summary.unassignedRiders} rider chưa gán khu vực`, description: "Rider active chưa có zone hoặc quận giao.", severity: "warning", href: "/riders" }); if (summary.absent > 0) alerts.push({ title: `${summary.absent} ca nghỉ đột xuất`, description: "Rà soát ảnh hưởng quân số và kế hoạch phân tuyến.", severity: "warning", href: "/attendance" }); if (state.zones.length === 0) alerts.push({ title: "Chưa có cấu hình zone", description: "Thiết lập zone để theo dõi phân bổ rider.", severity: "warning", href: "/zones" }); return alerts; }
 function buildViolationEvents(state: DashboardState): RiderViolation[] { const riderByCode = new Map(state.riders.map((rider) => [rider.rider_code, rider])); const events: RiderViolation[] = []; for (const log of state.attendance) { const rider = riderByCode.get(log.rider_code); const status = log.status?.toUpperCase() ?? ""; const late = log.raw_data?.late === true || log.raw_data?.is_late === true || status.includes("LATE"); if (status.includes("OFF_UNEXPECTED")) events.push({ id: `no-show-${log.id}`, riderId: rider?.id ?? log.rider_id ?? log.rider_code, riderCode: log.rider_code, riderName: rider?.full_name ?? log.riders?.full_name ?? log.rider_code, violationType: "NO_SHOW", severity: "HIGH", zone: rider?.delivery_district ?? log.riders?.zones?.name ?? "Chưa xác định", occurredAt: `${log.work_date}T08:00:00+07:00`, note: log.note ?? "Nghỉ đột xuất / không có mặt trong ca" }); if (late) events.push({ id: `late-${log.id}`, riderId: rider?.id ?? log.rider_id ?? log.rider_code, riderCode: log.rider_code, riderName: rider?.full_name ?? log.riders?.full_name ?? log.rider_code, violationType: "LATE_CHECKIN", severity: "MEDIUM", zone: rider?.delivery_district ?? log.riders?.zones?.name ?? "Chưa xác định", occurredAt: attendanceTimestamp(log) ?? `${log.work_date}T08:00:00+07:00`, note: log.note ?? "Check-in muộn" }); } for (const row of state.realtime) { const rider = riderByCode.get(row.driver_id); if (row.failed > 0) { const failureRate = row.total_assigned ? row.failed / row.total_assigned : 0; events.push({ id: `sla-failed-${row.snapshot_id}-${row.driver_id}`, riderId: rider?.id ?? row.driver_id, riderCode: row.driver_id, riderName: rider?.full_name ?? row.driver_id, violationType: "SLA_BREACH", severity: failureRate >= 0.2 ? "HIGH" : "MEDIUM", zone: rider?.delivery_district ?? "Chưa xác định", occurredAt: row.snapshot_at, note: `${row.failed}/${row.total_assigned} đơn giao lỗi` }); } if (row.delivering > 0 && row.idle_delivery_seconds > 3600) events.push({ id: `sla-idle-${row.snapshot_id}-${row.driver_id}`, riderId: rider?.id ?? row.driver_id, riderCode: row.driver_id, riderName: rider?.full_name ?? row.driver_id, violationType: "SLA_BREACH", severity: row.idle_delivery_seconds > 7200 ? "HIGH" : "MEDIUM", zone: rider?.delivery_district ?? "Chưa xác định", occurredAt: row.snapshot_at, note: `Còn ${row.delivering} đơn, chờ ${Math.floor(row.idle_delivery_seconds / 60)} phút` }); } return events; }
 function attendanceTimestamp(log: AttendanceLog) { const value = log.raw_data?.check_in ?? log.raw_data?.check_in_time; return typeof value === "string" && value ? value : null; }
-function isPresent(status: string | null) { const value = status?.toUpperCase() ?? ""; return !value || value === "ON" || value === "WORKING_REST_DAY" || value === "NO_PICKUP"; }
+function normalizeAttendanceStatus(status: string | null | undefined) {
+  const value = status?.trim().toUpperCase() ?? "";
+  if (value.includes("UNEXPECTED") || value.includes("ĐỘT") || value.includes("DOT")) return "OFF_UNEXPECTED";
+  if (value.includes("APPROVED") || value.includes("PHÉP") || value.includes("PHEP")) return "OFF_APPROVED";
+  if (value.includes("OFF")) return "OFF_WEEKLY";
+  return "ON";
+}
+function normalizeRiderCode(value: string) { return value.trim().toUpperCase(); }
+function isKv56(value: string | null | undefined) { return /^(?:kv|khu vuc)?\s*[56]$/i.test(normalizeText(value ?? "")); }
+function normalizeText(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim(); }
+function volumeComparisonLabel(current: number, previous: number) {
+  if (!previous) return current ? "Chưa có dữ liệu kỳ trước" : "Chưa có dữ liệu kỳ hiện tại";
+  const change = (current - previous) / previous * 100;
+  const direction = change >= 0 ? "Tăng" : "Giảm";
+  return `${direction} ${Math.abs(change).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}% so với kỳ trước`;
+}
 function getDateRange(range: RangeKey) { const today = new Date(); if (range === "yesterday") { const date = format(subDays(today, 1), "yyyy-MM-dd"); return { start: date, end: date }; } if (range === "7d") return { start: format(subDays(today, 6), "yyyy-MM-dd"), end: format(today, "yyyy-MM-dd") }; const date = format(today, "yyyy-MM-dd"); return { start: date, end: date }; }
 function dateSequence(start: string, end: string) { const dates: string[] = []; const current = new Date(`${start}T00:00:00Z`); const last = new Date(`${end}T00:00:00Z`); while (current <= last) { dates.push(current.toISOString().slice(0, 10)); current.setUTCDate(current.getUTCDate() + 1); } return dates; }
 function rangeLabel(range: RangeKey) { return range === "today" ? "Hôm nay" : range === "yesterday" ? "Hôm qua" : "7 ngày gần nhất"; }
 function formatDate(value: string) { return new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit" }).format(new Date(`${value}T00:00:00`)); }
-function shiftDateValue(value: string, days: number) { const date = new Date(`${value}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); }
 function formatFullDate(value: string) { return new Intl.DateTimeFormat("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(`${value}T00:00:00`)); }
 function compactVolume(value: number) { return new Intl.NumberFormat("vi-VN", { notation: "compact", maximumFractionDigits: 1 }).format(value); }
 function monthStartOffset(value: string, months: number) { const date = new Date(`${value.slice(0, 7)}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + months); return date.toISOString().slice(0, 10); }
