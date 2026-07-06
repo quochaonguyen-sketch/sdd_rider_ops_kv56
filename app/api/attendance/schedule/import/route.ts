@@ -10,7 +10,8 @@ type ScheduleStatus =
   | "OFF_APPROVED"
   | "OFF_UNEXPECTED"
   | "WORKING_REST_DAY"
-  | "NO_PICKUP";
+  | "NO_PICKUP"
+  | "NO_DELIVERY";
 
 type DateColumn = {
   column: number;
@@ -66,6 +67,7 @@ function normalizeStatus(value: unknown): ScheduleStatus | null {
     return "WORKING_REST_DAY";
   }
   if (["khong di pick", "khong pick", "no pickup", "no pick"].includes(normalized)) return "NO_PICKUP";
+  if (["khong di giao", "khong giao", "no delivery"].includes(normalized)) return "NO_DELIVERY";
   if (["xoa", "clear", "chua xep", "chua co lich"].includes(normalized)) return "";
   return null;
 }

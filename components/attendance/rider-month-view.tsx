@@ -38,7 +38,8 @@ type ScheduleStatus =
   | "OFF_APPROVED"
   | "OFF_UNEXPECTED"
   | "WORKING_REST_DAY"
-  | "NO_PICKUP";
+  | "NO_PICKUP"
+  | "NO_DELIVERY";
 
 type RiderMonthResponse = {
   success: boolean;
@@ -62,6 +63,7 @@ const statusOptions: Array<{ value: ScheduleStatus; label: string }> = [
   { value: "OFF_UNEXPECTED", label: "OFF đột xuất" },
   { value: "WORKING_REST_DAY", label: "OFF nhưng không OFF" },
   { value: "NO_PICKUP", label: "Không đi pick" },
+  { value: "NO_DELIVERY", label: "Không đi giao" },
 ];
 
 const weekdayLabels = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "CN"];
@@ -438,6 +440,7 @@ function normalizeStatus(status: string | null | undefined): ScheduleStatus {
   if (normalized === "ON") return "ON";
   if (normalized === "WORKING_REST_DAY") return "WORKING_REST_DAY";
   if (normalized === "NO_PICKUP") return "NO_PICKUP";
+  if (normalized === "NO_DELIVERY") return "NO_DELIVERY";
   if (normalized.includes("UNEXPECTED") || normalized.includes("ĐỘT") || normalized.includes("DOT")) {
     return "OFF_UNEXPECTED";
   }
@@ -459,6 +462,7 @@ function statusLabel(status: ScheduleStatus) {
   if (status === "OFF_UNEXPECTED") return "Đột xuất";
   if (status === "WORKING_REST_DAY") return "Đi làm ngày OFF";
   if (status === "NO_PICKUP") return "Không đi pick";
+  if (status === "NO_DELIVERY") return "Không đi giao";
   return "ON";
 }
 
@@ -469,5 +473,6 @@ function statusClasses(status: ScheduleStatus) {
   if (status === "OFF_UNEXPECTED") return "border-red-200 bg-red-50 text-red-700";
   if (status === "WORKING_REST_DAY") return "border-cyan-200 bg-cyan-50 text-cyan-700";
   if (status === "NO_PICKUP") return "border-slate-200 bg-slate-100 text-slate-700";
+  if (status === "NO_DELIVERY") return "border-violet-200 bg-violet-50 text-violet-700";
   return "border-slate-200 bg-slate-50 text-slate-400";
 }

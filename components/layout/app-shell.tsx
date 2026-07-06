@@ -27,6 +27,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/utils/cn";
 import { AppBrand, AppCopyright } from "@/components/layout/app-brand";
+import { RouteReveal } from "@/components/layout/route-reveal";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
@@ -199,7 +200,7 @@ export function AppShell({
             Sign out
           </Button>
         </header>
-        <main className="flex-1 px-3 py-4 pb-28 sm:px-4 md:px-6 md:py-6 md:pb-6">{children}</main>
+        <main className="flex-1 px-3 py-4 pb-28 sm:px-4 md:px-6 md:py-6 md:pb-6"><RouteReveal key={pathname}>{children}</RouteReveal></main>
         <footer className="border-t border-slate-200/70 bg-white/60 px-6 pb-28 pt-4 md:py-4">
           <AppCopyright />
         </footer>

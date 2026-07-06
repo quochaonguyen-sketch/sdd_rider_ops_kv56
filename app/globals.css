@@ -26,6 +26,77 @@ textarea {
   font: inherit;
 }
 
+.rider-loader-track {
+  mask-image: linear-gradient(to right, transparent, black 9%, black 91%, transparent);
+}
+
+.rider-loader-bike {
+  animation: rider-travel 2s ease-in-out infinite;
+  left: -8rem;
+  opacity: 0.86;
+}
+
+.rider-loader-body {
+  animation: rider-bob 0.55s ease-in-out infinite alternate;
+  transform-origin: center;
+}
+
+.rider-loader-wheel {
+  animation: rider-wheel-spin 0.72s linear infinite;
+}
+
+.rider-loader-road {
+  animation: rider-road-slide 1.8s ease-in-out infinite;
+}
+
+.route-reveal-content {
+  animation: route-content-reveal 0.28s ease-out both;
+}
+
+.route-content-loading {
+  opacity: 0.18;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+  user-select: none;
+}
+
+@keyframes rider-travel {
+  0% { left: -8rem; }
+  85%, 100% { left: 100%; }
+}
+
+@keyframes rider-bob {
+  from { transform: translateY(0) rotate(-0.5deg); }
+  to { transform: translateY(-2px) rotate(0.5deg); }
+}
+
+@keyframes rider-wheel-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes rider-road-slide {
+  0% { opacity: 0; transform: translateX(-110%); }
+  20%, 80% { opacity: 0.8; }
+  100% { opacity: 0; transform: translateX(300%); }
+}
+
+@keyframes route-content-reveal {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rider-loader-bike,
+  .rider-loader-body,
+  .rider-loader-wheel,
+  .rider-loader-road {
+    animation: none;
+  }
+  .rider-loader-bike { left: calc(50% - 4rem); opacity: 0.86; }
+  .route-reveal-content { animation: none; }
+  .route-content-loading { opacity: 0.35; }
+}
+
 pre {
   white-space: pre-wrap;
   word-break: break-word;

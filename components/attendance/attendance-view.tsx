@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Clock3,
   Download,
+  FileSpreadsheet,
   Palmtree,
   Pencil,
   RefreshCcw,
@@ -45,7 +46,8 @@ type ScheduleStatus =
   | "OFF_APPROVED"
   | "OFF_UNEXPECTED"
   | "WORKING_REST_DAY"
-  | "NO_PICKUP";
+  | "NO_PICKUP"
+  | "NO_DELIVERY";
 
 type ScheduleResponse = {
   success: boolean;
@@ -88,6 +90,7 @@ const statusOptions: Array<{ value: ScheduleStatus; label: string }> = [
   { value: "OFF_UNEXPECTED", label: "OFF đột xuất" },
   { value: "WORKING_REST_DAY", label: "OFF nhưng không OFF" },
   { value: "NO_PICKUP", label: "Không đi pick" },
+  { value: "NO_DELIVERY", label: "Không đi giao" },
 ];
 
 const riderPageSizes = [25, 50, 100];
@@ -112,6 +115,11 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [syncingSheet, setSyncingSheet] = useState(false);
+  const [showSheetSync, setShowSheetSync] = useState(false);
+  const [sheetUrl, setSheetUrl] = useState("");
+  const [serviceAccountEmail, setServiceAccountEmail] = useState<string | null>(null);
+  const [sheetSyncRange, setSheetSyncRange] = useState<"week" | "month">("week");
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [importIssues, setImportIssues] = useState<ImportIssue[]>([]);
   const [issuesImportedPartially, setIssuesImportedPartially] = useState(false);
@@ -124,6 +132,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   const [success, setSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const realtimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sheetSyncAbortRef = useRef<AbortController | null>(null);
   const busyRef = useRef(false);
   const deferredQuery = useDeferredValue(query);
 
@@ -447,6 +456,67 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
     busyRef.current = savingCells.size > 0;
   }
 
+  async function syncGoogleSheet(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSyncingSheet(true);
+    setError(null);
+    setSuccess(null);
+    setImportIssues([]);
+    const controller = new AbortController();
+    sheetSyncAbortRef.current = controller;
+    let response: Response;
+    try {
+      response = await fetch("/api/attendance/schedule/google-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sheet_url: sheetUrl, range_mode: sheetSyncRange, anchor_date: sheetSyncRange === "month" ? `${month}-01` : selectedDate }),
+        signal: controller.signal,
+      });
+    } catch (caught) {
+      setSyncingSheet(false);
+      sheetSyncAbortRef.current = null;
+      if (controller.signal.aborted) setSuccess("Đã dừng đồng bộ Google Sheet.");
+      else setError(caught instanceof Error ? caught.message : "Không thể kết nối máy chủ");
+      return;
+    }
+    const result = await response.json().catch(() => null) as {
+      success?: boolean;
+      error?: string;
+      imported?: number;
+      removed?: number;
+      skipped?: number;
+      errors?: ImportIssue[];
+      missing_rider_codes?: string[];
+    } | null;
+    setSyncingSheet(false);
+    sheetSyncAbortRef.current = null;
+    if (!response.ok || !result?.success) {
+      setError(`${result?.error ?? "Không thể đồng bộ Google Sheet"}${result?.missing_rider_codes?.length ? `: ${result.missing_rider_codes.join(", ")}` : ""}`);
+      setImportIssues(result?.errors ?? []);
+      return;
+    }
+    window.localStorage.setItem("rider-ops-off-sheet-url", sheetUrl);
+    setShowSheetSync(false);
+    setSuccess(`Đã đồng bộ ${result.imported ?? 0} dòng từ sheet OFF${result.removed ? `, xóa ${result.removed} dòng cũ` : ""}${result.skipped ? `, bỏ qua ${result.skipped} dòng lỗi` : ""}.`);
+    setImportIssues(result.errors ?? []);
+    setIssuesImportedPartially(Boolean(result.errors?.length));
+    await load();
+  }
+
+  async function openSheetSync() {
+    setError(null);
+    const response = await fetch("/api/attendance/schedule/google-sheet", { cache: "no-store" });
+    const result = await response.json().catch(() => null) as { success?: boolean; configured?: boolean; service_account_email?: string | null; error?: string } | null;
+    if (!response.ok || !result?.success || !result.configured) {
+      setError(result?.error ?? "Máy chủ chưa cấu hình Google Service Account");
+      return;
+    }
+    setServiceAccountEmail(result.service_account_email ?? null);
+    setSheetSyncRange("week");
+    setSheetUrl(window.localStorage.getItem("rider-ops-off-sheet-url") ?? "");
+    setShowSheetSync(true);
+  }
+
   return (
     <div className="mx-auto max-w-[1600px] space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -467,6 +537,15 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
               if (file) void importExcel(file);
             }}
           />
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!canEdit || syncingSheet}
+            onClick={() => void openSheetSync()}
+          >
+            <FileSpreadsheet size={16} />
+            {syncingSheet ? "Đang đồng bộ..." : "Đồng bộ Sheet OFF"}
+          </Button>
           <Button
             type="button"
             variant="secondary"
@@ -514,6 +593,22 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
           </Button>
         </div>
       </div>
+
+      {showSheetSync ? (
+        <div className="fixed inset-0 z-50 grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
+          <button type="button" aria-label="Đóng" className="absolute inset-0" onClick={() => setShowSheetSync(false)} />
+          <form onSubmit={syncGoogleSheet} className="relative z-10 w-full max-w-lg space-y-4 rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div><h2 className="text-lg font-bold text-slate-950">Đồng bộ Google Sheet</h2><p className="mt-1 text-sm text-slate-500">Web đọc các cột A–D trong tab OFF và cập nhật lịch.</p></div>
+              <Button type="button" variant="ghost" className="size-9 p-0" onClick={() => setShowSheetSync(false)}><X size={18} /></Button>
+            </div>
+            <label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Link Google Sheet</span><Input required type="url" value={sheetUrl} onChange={(event) => setSheetUrl(event.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." /></label>
+            <div className="grid gap-3 sm:grid-cols-2"><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Phạm vi</span><Select value={sheetSyncRange} onChange={(event) => setSheetSyncRange(event.target.value as "week" | "month")}><option value="week">1 tuần chứa ngày đã chọn</option><option value="month">Toàn bộ tháng đang xem</option></Select></label><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Khoảng sẽ đồng bộ</span><Input readOnly value={sheetSyncRange === "week" ? `Tuần chứa ${formatSelectedDate(selectedDate)}` : `Tháng ${month}`} /></label></div>
+            <p className="rounded-xl bg-blue-50 p-3 text-xs leading-5 text-blue-800">Sheet vẫn để <strong>Private</strong>. Chỉ chia sẻ quyền Viewer cho Service Account: <strong className="break-all">{serviceAccountEmail}</strong>. Hệ thống chỉ đọc tab <strong>OFF</strong>.</p>
+            <div className="flex justify-end gap-2">{syncingSheet ? <Button type="button" variant="secondary" onClick={() => sheetSyncAbortRef.current?.abort()}>Dừng đồng bộ</Button> : <Button type="button" variant="secondary" onClick={() => setShowSheetSync(false)}>Hủy</Button>}<Button type="submit" disabled={syncingSheet || !sheetUrl}>{syncingSheet ? <RefreshCcw className="animate-spin" size={16} /> : <FileSpreadsheet size={16} />}{syncingSheet ? "Đang đồng bộ..." : "Đồng bộ ngay"}</Button></div>
+          </form>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-12 gap-4">
         <AttendanceKpi className="col-span-6 xl:col-span-3" label="Có mặt" value={selectedAllSummary.present} helper={formatSelectedDate(selectedDate)} tone="green" icon={<CheckCircle2 size={18} />} active={attendanceStatus === "present"} onClick={() => { setAttendanceStatus("present"); setRiderPage(1); }} />
@@ -1111,6 +1206,7 @@ function normalizeStatus(status: string | null | undefined): ScheduleStatus {
   if (normalized === "ON") return "ON";
   if (normalized === "WORKING_REST_DAY") return "WORKING_REST_DAY";
   if (normalized === "NO_PICKUP") return "NO_PICKUP";
+  if (normalized === "NO_DELIVERY") return "NO_DELIVERY";
   if (normalized.includes("UNEXPECTED") || normalized.includes("ĐỘT") || normalized.includes("DOT")) {
     return "OFF_UNEXPECTED";
   }
@@ -1136,6 +1232,7 @@ function statusShortLabel(status: ScheduleStatus) {
   if (status === "OFF_UNEXPECTED") return "Đột xuất";
   if (status === "WORKING_REST_DAY") return "Đi làm OFF";
   if (status === "NO_PICKUP") return "Không pick";
+  if (status === "NO_DELIVERY") return "Không giao";
   return "-";
 }
 
@@ -1146,6 +1243,7 @@ function statusChipClasses(status: ScheduleStatus) {
   if (status === "OFF_UNEXPECTED") return "border-red-200 bg-red-50 text-red-700";
   if (status === "WORKING_REST_DAY") return "border-cyan-200 bg-cyan-50 text-cyan-700";
   if (status === "NO_PICKUP") return "border-slate-300 bg-slate-100 text-slate-700";
+  if (status === "NO_DELIVERY") return "border-violet-200 bg-violet-50 text-violet-700";
   return "border-slate-200 bg-white text-slate-300";
 }
 
@@ -1156,11 +1254,12 @@ function statusClasses(status: ScheduleStatus) {
   if (status === "OFF_UNEXPECTED") return "border-red-200 bg-red-100 text-red-800";
   if (status === "WORKING_REST_DAY") return "border-cyan-200 bg-cyan-100 text-cyan-800";
   if (status === "NO_PICKUP") return "border-slate-300 bg-slate-200 text-slate-800";
+  if (status === "NO_DELIVERY") return "border-violet-200 bg-violet-100 text-violet-800";
   return "border-slate-200 bg-slate-100 text-slate-500";
 }
 
 function isWorkingStatus(status: ScheduleStatus) {
-  return status === "ON" || status === "WORKING_REST_DAY" || status === "NO_PICKUP";
+  return status === "ON" || status === "WORKING_REST_DAY" || status === "NO_PICKUP" || status === "NO_DELIVERY";
 }
 
 function cellKey(riderId: string, date: string) {

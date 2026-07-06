@@ -13,6 +13,7 @@ const scheduleStatusSchema = z.enum([
   "OFF_UNEXPECTED",
   "WORKING_REST_DAY",
   "NO_PICKUP",
+  "NO_DELIVERY",
 ]);
 
 const updateSchema = z.object({
