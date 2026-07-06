@@ -309,7 +309,7 @@ export function RiderMonthView({ riderId, initialMonth }: { riderId: string; ini
       ) : null}
 
       {editor && rider ? (
-        <div className="fixed inset-0 z-50 grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
           <button type="button" aria-label="Đóng form lịch" className="absolute inset-0" onClick={() => setEditor(null)} />
           <Card className="relative z-10 w-full max-w-lg rounded-b-none shadow-2xl sm:rounded-xl">
             <form className="space-y-4" onSubmit={saveDay}>

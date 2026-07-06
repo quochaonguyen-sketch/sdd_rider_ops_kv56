@@ -443,7 +443,7 @@ export function RidersView() {
       </div>
 
       {showAddForm ? (
-        <div className="fixed inset-0 z-50 flex items-end bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-end bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-4">
           <button type="button" aria-label="Đóng form rider" className="absolute inset-0 cursor-default" onClick={closeForm} />
           <Card className={cn("relative z-10 max-h-[92vh] w-full overflow-y-auto rounded-b-none shadow-2xl sm:mx-auto sm:max-w-6xl sm:rounded-xl", editingId && "border-blue-200 bg-blue-50")}>
             <form onSubmit={saveRider} className="space-y-5">

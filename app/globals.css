@@ -8,6 +8,15 @@
   box-sizing: border-box;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
+body:has([aria-modal="true"]),
+body:has(.fixed.inset-0.z-50) {
+  overflow: hidden;
+}
+
 body {
   margin: 0;
   font-family:
@@ -91,7 +100,7 @@ textarea {
 }
 
 .route-reveal-content {
-  animation: route-content-reveal 0.28s ease-out both;
+  animation: route-content-reveal 0.28s ease-out;
 }
 
 .route-content-loading {

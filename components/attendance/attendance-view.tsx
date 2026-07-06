@@ -595,7 +595,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
       </div>
 
       {showSheetSync ? (
-        <div className="fixed inset-0 z-50 grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
           <button type="button" aria-label="Đóng" className="absolute inset-0" onClick={() => setShowSheetSync(false)} />
           <form onSubmit={syncGoogleSheet} className="relative z-10 w-full max-w-lg space-y-4 rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-2xl">
             <div className="flex items-start justify-between gap-3">
@@ -877,7 +877,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
       </div>
 
       {editor ? (
-        <div className="fixed inset-0 z-50 grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
           <button
             type="button"
             aria-label="Đóng chi tiết lịch"

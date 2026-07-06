@@ -172,7 +172,7 @@ export function RiderAvatarEditor({
       {error ? <p className="text-xs text-red-600">{error}</p> : null}
 
       {cameraOpen ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/70 p-4">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-slate-950/70 p-4">
           <div className="w-full max-w-xl rounded-xl bg-white p-4 shadow-2xl">
             <div className="flex items-center justify-between gap-3">
               <div>

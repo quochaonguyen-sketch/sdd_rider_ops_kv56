@@ -847,7 +847,7 @@ export function MorningDeliveryView() {
       </div>
 
       {defaultRoutesOpen && typeof document !== "undefined" ? createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-end justify-center overflow-y-auto bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-[9999] flex items-end justify-center overflow-y-auto bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-4">
           <button type="button" aria-label="Đóng sửa tuyến mặc định" className="absolute inset-0" onClick={() => setDefaultRoutesOpen(false)} />
           <section className="relative z-10 flex max-h-[92dvh] w-full max-w-6xl flex-col overflow-hidden rounded-t-3xl border border-slate-200/80 bg-white shadow-2xl sm:rounded-3xl">
             <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -949,7 +949,7 @@ export function MorningDeliveryView() {
       ) : null}
 
       {editingDefaultRider && editingDefaultDistrict ? (
-        <div className="fixed inset-0 z-[60] grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-[60] grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
           <button type="button" aria-label="Đóng chọn phường" className="absolute inset-0" onClick={() => setEditingDefaultRiderId(null)} />
           <section className="relative z-10 max-h-[88vh] w-full max-w-2xl overflow-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl">
             <div className="flex items-start justify-between gap-4">
