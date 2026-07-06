@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/select";
 import { hcmDistricts, type DistrictDefinition, type WardDefinition } from "@/lib/locations/hcm";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
 import { cn } from "@/utils/cn";
+import {createPortal} from "react-dom"
 
 type MorningRider = {
   id: string;
@@ -845,10 +846,10 @@ export function MorningDeliveryView() {
         </section>
       </div>
 
-      {defaultRoutesOpen ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+      {defaultRoutesOpen && typeof document !== "undefined" ? createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-end justify-center overflow-y-auto bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-4">
           <button type="button" aria-label="Đóng sửa tuyến mặc định" className="absolute inset-0" onClick={() => setDefaultRoutesOpen(false)} />
-          <section className="relative z-10 flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-t-3xl border border-slate-200/80 bg-white shadow-2xl sm:rounded-3xl">
+          <section className="relative z-10 flex max-h-[92dvh] w-full max-w-6xl flex-col overflow-hidden rounded-t-3xl border border-slate-200/80 bg-white shadow-2xl sm:rounded-3xl">
             <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-lg font-bold leading-6 text-slate-950">Sửa tuyến giao mặc định</h2>
@@ -876,7 +877,7 @@ export function MorningDeliveryView() {
                 <option value="rider">Sắp xếp Rider ID</option>
               </Select>
             </div>
-            <div className="overflow-auto">
+            <div className="overflow-auto min-h-0 flex-1">
           <table className="w-full min-w-[920px] text-left text-sm leading-5">
             <thead className="sticky top-0 z-10 bg-slate-100/95 text-[11px] font-bold uppercase tracking-wide text-slate-500 backdrop-blur">
               <tr>
@@ -944,7 +945,7 @@ export function MorningDeliveryView() {
           </table>
             </div>
           </section>
-        </div>
+        </div>,document.body,
       ) : null}
 
       {editingDefaultRider && editingDefaultDistrict ? (
