@@ -31,21 +31,22 @@ export function PickupReplacementView() {
   const [riders, setRiders] = useState<Rider[]>([]);
   const [attendance, setAttendance] = useState<AttendanceLog[]>([]);
   const [replacements, setReplacements] = useState<Replacement[]>([]);
-  const [weekStart, setWeekStart] = useState(startOfWeek(today()));
+  const [rangeStart, setRangeStart] = useState(today());
   const [query, setQuery] = useState("");
   const [cot, setCot] = useState("all");
   const [district, setDistrict] = useState("all");
   const [offOnly, setOffOnly] = useState(true);
+  const [offFilterDate, setOffFilterDate] = useState(today());
   const [page, setPage] = useState(1);
   const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const days = useMemo(
-    () => Array.from({ length: 7 }, (_, index) => shiftDate(weekStart, index)),
-    [weekStart],
+    () => Array.from({ length: 7 }, (_, index) => shiftDate(rangeStart, index)),
+    [rangeStart],
   );
-  const weekEnd = days[6]!;
+  const rangeEnd = days[6]!;
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -60,9 +61,9 @@ export function PickupReplacementView() {
       client
         .from("attendance_logs")
         .select("*")
-        .gte("work_date", weekStart)
-        .lte("work_date", weekEnd),
-      fetch(`/api/pickup-replacements?start=${weekStart}&end=${weekEnd}`, {
+        .gte("work_date", rangeStart)
+        .lte("work_date", rangeEnd),
+      fetch(`/api/pickup-replacements?start=${rangeStart}&end=${rangeEnd}`, {
         cache: "no-store",
       }),
     ]);
@@ -81,7 +82,7 @@ export function PickupReplacementView() {
       setCanEdit(Boolean(result.can_edit));
     }
     setLoading(false);
-  }, [weekEnd, weekStart]);
+  }, [rangeEnd, rangeStart]);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
@@ -116,22 +117,25 @@ export function PickupReplacementView() {
   );
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return riders.filter(
-      (rider) =>
+    return riders
+      .filter((rider) =>
         (!q ||
           `${rider.rider_code} ${rider.full_name} ${rider.pickup_district} ${rider.pickup_ward} ${rider.point_name}`
             .toLowerCase()
             .includes(q)) &&
         (cot === "all" || rider.cot === cot) &&
         (district === "all" || rider.pickup_district === district) &&
-        (!offOnly ||
-          days.some((day) =>
-            isPickupOff(
-              attendanceMap.get(`${normalize(rider.rider_code)}:${day}`),
-            ),
-          )),
-    );
-  }, [attendanceMap, cot, days, district, offOnly, query, riders]);
+        (!offOnly || isPickupOff(
+          attendanceMap.get(`${normalize(rider.rider_code)}:${offFilterDate}`),
+        )))
+      .sort((a, b) =>
+        (a.cot ?? "").localeCompare(b.cot ?? "", "vi", { numeric: true })
+        || (a.pickup_district ?? "").localeCompare(b.pickup_district ?? "", "vi", { numeric: true })
+        || (a.pickup_ward ?? "").localeCompare(b.pickup_ward ?? "", "vi", { numeric: true })
+        || (a.point_name ?? "").localeCompare(b.point_name ?? "", "vi", { numeric: true })
+        || a.rider_code.localeCompare(b.rider_code, "vi", { numeric: true }),
+      );
+  }, [attendanceMap, cot, district, offFilterDate, offOnly, query, riders]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / 30));
   const safePage = Math.min(page, pageCount);
   const visibleRiders = filtered.slice((safePage - 1) * 30, safePage * 30);
@@ -187,20 +191,43 @@ export function PickupReplacementView() {
             type="button"
             variant="secondary"
             className="size-10 p-0"
-            onClick={() => setWeekStart(shiftDate(weekStart, -7))}
+            onClick={() => {
+              const next = shiftDate(rangeStart, -7);
+              setRangeStart(next);
+              setOffFilterDate(next);
+              setPage(1);
+            }}
           >
             <ChevronLeft size={16} />
           </Button>
           <div className="min-w-44 rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-sm font-semibold">
-            {formatDate(weekStart)} – {formatDate(weekEnd)}
+            {formatDate(rangeStart)} – {formatDate(rangeEnd)}
           </div>
           <Button
             type="button"
             variant="secondary"
             className="size-10 p-0"
-            onClick={() => setWeekStart(shiftDate(weekStart, 7))}
+            onClick={() => {
+              const next = shiftDate(rangeStart, 7);
+              setRangeStart(next);
+              setOffFilterDate(next);
+              setPage(1);
+            }}
           >
             <ChevronRight size={16} />
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={rangeStart === today()}
+            onClick={() => {
+              const currentDate = today();
+              setRangeStart(currentDate);
+              setOffFilterDate(currentDate);
+              setPage(1);
+            }}
+          >
+            Hôm nay
           </Button>
           <Button
             type="button"
@@ -218,7 +245,7 @@ export function PickupReplacementView() {
       {error ? (
         <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>
       ) : null}
-      <section className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-2 xl:grid-cols-[1fr_160px_220px_190px]">
+      <section className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-2 xl:grid-cols-[1fr_150px_180px_210px_190px]">
         <label className="relative">
           <Search
             size={17}
@@ -246,6 +273,26 @@ export function PickupReplacementView() {
             <option key={item}>{item}</option>
           ))}
         </Select>
+        <Select
+          aria-label="Ngày lọc rider OFF"
+          value={offFilterDate}
+          onChange={(event) => {
+            setOffFilterDate(event.target.value);
+            setPage(1);
+          }}
+        >
+          {days.map((day, index) => (
+            <option key={day} value={day}>
+              {day === today()
+                ? "Hôm nay"
+                : rangeStart === today() && index === 1
+                  ? "Ngày mai"
+                  : rangeStart === today() && index === 2
+                    ? "Ngày mốt"
+                    : formatWeekdayDate(day)}
+            </option>
+          ))}
+        </Select>
         <button
           type="button"
           aria-pressed={offOnly}
@@ -260,7 +307,7 @@ export function PickupReplacementView() {
               : "border-slate-200 bg-white text-slate-600",
           )}
         >
-          {offOnly ? "Chỉ rider đang OFF" : "Tất cả rider có tuyến"}
+          {offOnly ? `OFF ngày ${formatShortDate(offFilterDate)}` : "Tất cả rider có tuyến"}
         </button>
         <Select
           value={district}
@@ -276,18 +323,18 @@ export function PickupReplacementView() {
         </Select>
       </section>
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <div className="max-h-[680px] overflow-auto">
-          <table className="w-[2200px] table-fixed border-separate border-spacing-0 text-left text-sm">
+        <div className="max-h-[calc(100vh-330px)] min-h-[480px] overflow-auto">
+          <table className="w-[1940px] min-w-full table-fixed border-separate border-spacing-0 text-left text-sm">
             <colgroup>
+              <col className="w-[72px]" />
               <col className="w-[88px]" />
-              <col className="w-[112px]" />
-              <col className="w-[220px]" />
-              <col className="w-[150px]" />
-              <col className="w-[150px]" />
-              <col className="w-[280px]" />
-              <col className="w-[110px]" />
+              <col className="w-[180px]" />
+              <col className="w-[120px]" />
+              <col className="w-[100px]" />
+              <col className="w-[180px]" />
+              <col className="w-[80px]" />
               {days.map((day) => (
-                <col key={day} className="w-[180px]" />
+                <col key={day} className="w-[160px]" />
               ))}
             </colgroup>
             <thead className="sticky top-0 z-30">
@@ -295,10 +342,10 @@ export function PickupReplacementView() {
                 <th className="sticky left-0 z-40 border-b border-r border-blue-200 bg-blue-100 px-3 py-3 whitespace-nowrap">
                   COT
                 </th>
-                <th className="sticky left-[88px] z-40 border-b border-r border-blue-200 bg-blue-100 px-3 py-3 whitespace-nowrap">
+                <th className="sticky left-[72px] z-40 border-b border-r border-blue-200 bg-blue-100 px-3 py-3 whitespace-nowrap">
                   ID
                 </th>
-                <th className="sticky left-[200px] z-40 border-b border-r border-blue-200 bg-blue-100 px-3 py-3 whitespace-nowrap">
+                <th className="sticky left-[160px] z-40 border-b border-r border-blue-200 bg-blue-100 px-3 py-3 whitespace-nowrap shadow-[4px_0_8px_-6px_rgba(15,23,42,0.45)]">
                   Driver Name
                 </th>
                 <th className="border-b border-r border-blue-200 px-3 py-3 whitespace-nowrap">
@@ -316,9 +363,12 @@ export function PickupReplacementView() {
                 {days.map((day) => (
                   <th
                     key={day}
-                    className="border-b border-r border-blue-200 px-3 py-3 text-center whitespace-nowrap"
+                    className={cn(
+                      "border-b border-r border-blue-200 px-3 py-3 text-center whitespace-nowrap",
+                      day === today() && "bg-emerald-100 text-emerald-800",
+                    )}
                   >
-                    {formatDate(day)}
+                    {formatDate(day)}{day === today() ? " · Hôm nay" : ""}
                   </th>
                 ))}
               </tr>
@@ -332,10 +382,10 @@ export function PickupReplacementView() {
                   <td className="sticky left-0 z-20 border-b border-r border-slate-200 bg-inherit px-3 py-2 font-semibold whitespace-nowrap">
                     {rider.cot ?? "—"}
                   </td>
-                  <td className="sticky left-[88px] z-20 border-b border-r border-slate-200 bg-inherit px-3 py-2 font-mono tabular-nums whitespace-nowrap">
+                  <td className="sticky left-[72px] z-20 border-b border-r border-slate-200 bg-inherit px-3 py-2 font-mono tabular-nums whitespace-nowrap">
                     {rider.rider_code}
                   </td>
-                  <td className="sticky left-[200px] z-20 border-b border-r border-slate-200 bg-inherit px-3 py-2 font-semibold">
+                  <td className="sticky left-[160px] z-20 border-b border-r border-slate-200 bg-inherit px-3 py-2 font-semibold shadow-[4px_0_8px_-6px_rgba(15,23,42,0.4)]">
                     <p className="truncate" title={rider.full_name ?? ""}>
                       {rider.full_name ?? "—"}
                     </p>
@@ -366,6 +416,13 @@ export function PickupReplacementView() {
                     const item = map.get(key);
                     const offLog = attendanceMap.get(`${normalize(rider.rider_code)}:${day}`);
                     const off = isPickupOff(offLog);
+                    const replacementCandidates = riders.filter(
+                      (candidate) =>
+                        candidate.id !== rider.id &&
+                        !isPickupOff(
+                          attendanceMap.get(`${normalize(candidate.rider_code)}:${day}`),
+                        ),
+                    );
                     return (
                       <td
                         key={day}
@@ -389,41 +446,15 @@ export function PickupReplacementView() {
                             <p className="truncate px-1 text-[10px] font-bold uppercase text-amber-700" title={pickupOffLabel(offLog)}>
                               {pickupOffLabel(offLog)}
                             </p>
-                            <Select
-                          className={cn(
-                            "h-9 w-full border-slate-200 bg-white px-2 text-xs shadow-none focus:ring-2",
-                            item?.status === "ASSIGNED" &&
-                              "border-blue-200 bg-blue-50 font-bold text-blue-800",
-                            item?.status === "MISSING" &&
-                              "border-red-200 bg-red-50 font-semibold text-red-700",
-                          )}
-                          disabled={!canEdit || savingKey === key}
-                          value={
-                            item?.status === "MISSING"
-                              ? "__missing__"
-                              : (item?.replacement_rider_id ?? "")
-                          }
-                          onChange={(event) =>
-                            void update(rider, day, event.target.value)
-                          }
-                        >
-                          <option value="">—</option>
-                          <option value="__missing__">Chưa có pick thay</option>
-                          {riders
-                            .filter(
-                              (candidate) =>
-                                candidate.id !== rider.id &&
-                                !isPickupOff(
-                                  attendanceMap.get(`${normalize(candidate.rider_code)}:${day}`),
-                                ),
-                            )
-                            .map((candidate) => (
-                              <option key={candidate.id} value={candidate.id}>
-                                {candidate.rider_code} ·{" "}
-                                {candidate.full_name ?? ""}
-                              </option>
-                            ))}
-                            </Select>
+                            <ReplacementRiderInput
+                              key={`${item?.status ?? "empty"}-${item?.replacement_rider_id ?? "none"}`}
+                              id={`replacement-${rider.id}-${day}`}
+                              candidates={replacementCandidates}
+                              disabled={!canEdit || savingKey === key}
+                              status={item?.status}
+                              selectedRiderId={item?.replacement_rider_id ?? null}
+                              onSelect={(value) => void update(rider, day, value)}
+                            />
                           </div>
                         )}
                       </td>
@@ -472,6 +503,83 @@ export function PickupReplacementView() {
   );
 }
 
+function ReplacementRiderInput({
+  id,
+  candidates,
+  disabled,
+  status,
+  selectedRiderId,
+  onSelect,
+}: {
+  id: string;
+  candidates: Rider[];
+  disabled: boolean;
+  status: Replacement["status"] | undefined;
+  selectedRiderId: string | null;
+  onSelect: (value: string) => void;
+}) {
+  const selected = candidates.find((rider) => rider.id === selectedRiderId);
+  const selectedLabel = status === "MISSING"
+    ? "Chưa có pick thay"
+    : selected ? replacementRiderLabel(selected) : "";
+  const [value, setValue] = useState(selectedLabel);
+
+  function resolve(input: string) {
+    const normalized = normalize(input);
+    if (!normalized) return;
+    if (normalized === normalize("Chưa có pick thay")) {
+      onSelect("__missing__");
+      return;
+    }
+    const match = candidates.find((rider) =>
+      normalize(rider.rider_code) === normalized
+      || normalize(replacementRiderLabel(rider)) === normalized,
+    );
+    if (match) onSelect(match.id);
+  }
+
+  return (
+    <>
+      <input
+        type="text"
+        list={`${id}-options`}
+        value={value}
+        disabled={disabled}
+        placeholder="Tìm ID / tên"
+        className={cn(
+          "h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60",
+          status === "ASSIGNED" && "border-blue-200 bg-blue-50 font-bold text-blue-800",
+          status === "MISSING" && "border-red-200 bg-red-50 font-semibold text-red-700",
+        )}
+        onChange={(event) => {
+          const next = event.target.value;
+          setValue(next);
+          resolve(next);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            resolve(value);
+          }
+        }}
+        onBlur={() => {
+          if (value && value !== selectedLabel) resolve(value);
+        }}
+      />
+      <datalist id={`${id}-options`}>
+        <option value="Chưa có pick thay" />
+        {candidates.map((rider) => (
+          <option key={rider.id} value={replacementRiderLabel(rider)} />
+        ))}
+      </datalist>
+    </>
+  );
+}
+
+function replacementRiderLabel(rider: Rider) {
+  return `${rider.rider_code} · ${rider.full_name?.trim() || "Chưa có tên"}`;
+}
+
 function unique(values: Array<string | null>) {
   return Array.from(
     new Set(values.filter((value): value is string => Boolean(value))),
@@ -510,12 +618,6 @@ function today() {
     day: "2-digit",
   }).format(new Date());
 }
-function startOfWeek(value: string) {
-  const date = new Date(`${value}T00:00:00Z`);
-  const day = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() - day + 1);
-  return date.toISOString().slice(0, 10);
-}
 function shiftDate(value: string, days: number) {
   const date = new Date(`${value}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
@@ -526,5 +628,18 @@ function formatDate(value: string) {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
+  }).format(new Date(`${value}T00:00:00`));
+}
+function formatShortDate(value: string) {
+  return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+  }).format(new Date(`${value}T00:00:00`));
+}
+function formatWeekdayDate(value: string) {
+  return new Intl.DateTimeFormat("vi-VN", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
   }).format(new Date(`${value}T00:00:00`));
 }

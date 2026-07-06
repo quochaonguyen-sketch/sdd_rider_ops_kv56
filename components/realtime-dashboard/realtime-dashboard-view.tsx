@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Activity,
   ArrowDown,
@@ -242,7 +243,41 @@ function PerformanceChart({ totals, className }: { totals: { assigned: number; d
 }
 
 function RiderDetails({ rider, onClose }: { rider: DisplayRider; onClose: () => void }) {
-  return <><button type="button" aria-label="Đóng chi tiết rider" className="fixed inset-0 z-40 bg-slate-950/20" onClick={onClose} /><aside role="dialog" aria-modal="true" aria-labelledby="rider-details-title" className="fixed inset-y-0 right-0 z-50 w-full max-w-md overflow-y-auto border-l border-slate-200 bg-white p-6 shadow-xl"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-wider text-blue-700">Chi tiết rider</p><h2 id="rider-details-title" className="mt-1 text-xl font-bold text-slate-950">{rider.name}</h2><p className="text-sm text-slate-500">{rider.driver_id} · {rider.kv}</p></div><Button type="button" variant="secondary" aria-label="Đóng" className="size-9 px-0" onClick={onClose}><X size={17} /></Button></div><div className="mt-6"><StatusBadge status={rider.status} /></div><dl className="mt-6 divide-y divide-slate-100 border-y border-slate-100">{[["Khu vực", `${rider.ward}, ${rider.district}`], ["Đơn được phân", rider.total_assigned], ["Đã giao", rider.delivered], ["Đang giao", rider.delivering], ["Giao lỗi", rider.failed], ["Tỷ lệ giao lỗi", formatFailureRate(rider)], ["Tiến độ", `${rider.progress}%`], ["Thời gian chờ", formatDuration(rider.idle_delivery_seconds)], ["Giao đầu tiên", formatDateTime(rider.first_delivery_at)]].map(([label, value]) => <div key={label} className="flex items-center justify-between gap-4 py-3"><dt className="text-sm text-slate-500">{label}</dt><dd className="text-right text-sm font-semibold text-slate-900">{value}</dd></div>)}</dl></aside></>;
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <>
+      <button type="button" aria-label="Đóng chi tiết rider" className="fixed inset-0 z-40 bg-slate-950/20" onClick={onClose} />
+      <aside role="dialog" aria-modal="true" aria-labelledby="rider-details-title" className="fixed inset-y-0 right-0 z-50 flex h-dvh w-full max-w-md flex-col overflow-hidden border-l border-slate-200 bg-white shadow-xl">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 p-6">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Chi tiết rider</p>
+            <h2 id="rider-details-title" className="mt-1 text-xl font-bold text-slate-950">{rider.name}</h2>
+            <p className="text-sm text-slate-500">{rider.driver_id} · {rider.kv}</p>
+          </div>
+          <Button type="button" variant="secondary" aria-label="Đóng" className="size-9 shrink-0 px-0" onClick={onClose}><X size={17} /></Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-scroll p-6 [scrollbar-gutter:stable]">
+          <StatusBadge status={rider.status} />
+          <dl className="mt-6 divide-y divide-slate-100 border-y border-slate-100">{[["Khu vực", `${rider.ward}, ${rider.district}`], ["Đơn được phân", rider.total_assigned], ["Đã giao", rider.delivered], ["Đang giao", rider.delivering], ["Giao lỗi", rider.failed], ["Tỷ lệ giao lỗi", formatFailureRate(rider)], ["Tiến độ", `${rider.progress}%`], ["Thời gian chờ", formatDuration(rider.idle_delivery_seconds)], ["Giao đầu tiên", formatDateTime(rider.first_delivery_at)]].map(([label, value]) => <div key={label} className="flex items-center justify-between gap-4 py-3"><dt className="text-sm text-slate-500">{label}</dt><dd className="text-right text-sm font-semibold text-slate-900">{value}</dd></div>)}</dl>
+        </div>
+      </aside>
+    </>,
+    document.body,
+  );
 }
 
 function SortableHeader({ label, sortKey, current, onSort, align, className }: { label: string; sortKey: SortKey; current: { key: SortKey; direction: "asc" | "desc" }; onSort: (key: SortKey) => void; align?: "right"; className?: string }) { const Icon = current.key !== sortKey ? ArrowUpDown : current.direction === "asc" ? ArrowUp : ArrowDown; return <th className={cn("px-4 py-3", className)}><button type="button" onClick={() => onSort(sortKey)} className={cn("flex items-center gap-1 font-semibold hover:text-slate-950", align === "right" && "ml-auto")}><span>{label}</span><Icon size={13} /></button></th>; }

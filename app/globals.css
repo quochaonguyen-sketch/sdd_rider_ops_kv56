@@ -19,6 +19,47 @@ body {
   line-height: 1.5;
 }
 
+.aurora-background {
+  background: #f8fafc;
+}
+
+.aurora-background__lights {
+  animation: aurora-drift 36s linear infinite;
+  background:
+    repeating-linear-gradient(
+      104deg,
+      transparent 0%,
+      rgb(219 234 254 / 62%) 8%,
+      rgb(224 231 255 / 54%) 15%,
+      rgb(237 233 254 / 48%) 22%,
+      rgb(207 250 254 / 44%) 30%,
+      transparent 39%,
+      transparent 50%
+    );
+  filter: blur(28px);
+  inset: -5rem auto 20% 0;
+  mask-image: linear-gradient(to bottom, black 0%, rgb(0 0 0 / 82%) 48%, transparent 100%);
+  opacity: 0.58;
+  transform: translateX(0);
+  width: 200%;
+  will-change: transform;
+}
+
+.aurora-background__lights::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 38% 10%, rgb(191 219 254 / 45%), transparent 29%),
+    radial-gradient(ellipse at 72% 14%, rgb(221 214 254 / 40%), transparent 31%);
+  mix-blend-mode: screen;
+}
+
+@keyframes aurora-drift {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
 button,
 input,
 select,
@@ -86,6 +127,9 @@ textarea {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .aurora-background__lights {
+    animation: none;
+  }
   .rider-loader-bike,
   .rider-loader-body,
   .rider-loader-wheel,

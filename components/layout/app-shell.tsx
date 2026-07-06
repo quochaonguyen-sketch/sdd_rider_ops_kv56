@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
+import { AuroraBackground } from "@/components/ui/aurora-background";
 import { cn } from "@/utils/cn";
 import { AppBrand, AppCopyright } from "@/components/layout/app-brand";
 import { RouteReveal } from "@/components/layout/route-reveal";
@@ -75,7 +76,8 @@ export function AppShell({
   }
 
   return (
-    <div className="min-h-screen bg-slate-50/80">
+    <div className="relative isolate min-h-screen overflow-hidden bg-slate-50/80">
+      <AuroraBackground className="fixed" />
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200/80 bg-white md:flex">
         <div className="flex h-[76px] items-center border-b border-slate-100 px-5">
           <AppBrand />
@@ -185,7 +187,7 @@ export function AppShell({
           })}
         </nav>
       </aside>
-      <div className="flex min-h-screen flex-col md:pl-64">
+      <div className="relative z-10 flex min-h-screen flex-col md:pl-64">
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 shadow-[0_1px_3px_rgba(15,23,42,0.03)] backdrop-blur-xl md:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <AppBrand compact className="md:hidden" />
