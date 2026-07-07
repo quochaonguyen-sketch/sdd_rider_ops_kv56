@@ -173,7 +173,7 @@ export function RiderAvatarEditor({
 
       {cameraOpen ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/70 p-4">
-          <div className="w-full max-w-xl rounded-xl bg-white p-4 shadow-2xl">
+          <div className="app-modal-panel w-full max-w-xl rounded-xl bg-white p-4 shadow-2xl">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="font-semibold text-slate-950">Quét khuôn mặt rider</h3>
