@@ -38,6 +38,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { WeeklyAttendanceDashboard } from "@/components/attendance/weekly-attendance-dashboard";
+import { canonicalDistrictShortName, districtMatches } from "@/lib/locations/hcm";
 
 type ScheduleStatus =
   | ""
@@ -107,9 +109,10 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   const [kv, setKv] = useState("all");
   const [cot, setCot] = useState("all");
   const [deliveryDistrict, setDeliveryDistrict] = useState("all");
-  const [rosterStatus, setRosterStatus] = useState("active");
+  const [rosterStatus, setRosterStatus] = useState("all");
   const [attendanceStatus, setAttendanceStatus] = useState<AttendanceCategory | "all">("all");
   const [shiftFilter, setShiftFilter] = useState("all");
+  const [onlyWeeklyExceptions, setOnlyWeeklyExceptions] = useState(false);
   const [attendanceSort, setAttendanceSort] = useState<{ key: AttendanceSortKey; direction: "asc" | "desc" }>({ key: "name", direction: "asc" });
   const [bulkStatus, setBulkStatus] = useState<ScheduleStatus>("ON");
   const [canEdit, setCanEdit] = useState(false);
@@ -139,15 +142,22 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const response = await fetch(`/api/attendance/schedule?month=${month}`, { cache: "no-store" });
-    const result = (await response.json().catch(() => null)) as ScheduleResponse | null;
+    const anchor = parseISO(`${month}-01`);
+    const requestedMonths = [subMonths(anchor, 1), anchor, addMonths(anchor, 1)].map((date) => format(date, "yyyy-MM"));
+    const responses = await Promise.all(requestedMonths.map(async (requestedMonth) => {
+      const response = await fetch(`/api/attendance/schedule?month=${requestedMonth}`, { cache: "no-store" });
+      const result = (await response.json().catch(() => null)) as ScheduleResponse | null;
+      return { response, result, requestedMonth };
+    }));
+    const current = responses.find((item) => item.requestedMonth === month) ?? responses[1];
+    const failed = responses.find((item) => !item.response.ok || !item.result?.success);
 
-    if (!response.ok || !result?.success) {
-      setError(result?.error ?? "Không thể tải lịch rider");
+    if (failed || !current.result?.success) {
+      setError(failed?.result?.error ?? current.result?.error ?? "Không thể tải lịch rider");
     } else {
-      setRiders(result.riders ?? []);
-      setLogs(result.logs ?? []);
-      setCanEdit(Boolean(result.can_edit));
+      setRiders(current.result.riders ?? []);
+      setLogs(responses.flatMap((item) => item.result?.logs ?? []));
+      setCanEdit(Boolean(current.result.can_edit));
     }
     setLoading(false);
   }, [month]);
@@ -186,7 +196,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
 
   const kvOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.kv)), [riders]);
   const deliveryDistrictOptions = useMemo(
-    () => uniqueOptions(riders.map((rider) => rider.delivery_district)),
+    () => sortKv5Districts(uniqueOptions(riders.map((rider) => canonicalDistrictShortName(rider.delivery_district)))),
     [riders],
   );
   const shiftOptions = useMemo(() => uniqueOptions(logs.map((log) => log.shift)), [logs]);
@@ -203,11 +213,10 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
         matchesQuery &&
         (kv === "all" || rider.kv === kv) &&
         (cot === "all" || rider.cot === cot) &&
-        (deliveryDistrict === "all" || rider.delivery_district === deliveryDistrict) &&
-        (rosterStatus === "all" || rider.status === rosterStatus)
+        (deliveryDistrict === "all" || districtMatches(rider.delivery_district, deliveryDistrict))
       );
     });
-  }, [cot, deferredQuery, deliveryDistrict, kv, riders, rosterStatus]);
+  }, [cot, deferredQuery, deliveryDistrict, kv, riders]);
 
   const logMap = useMemo(() => {
     const riderIdByCode = new Map(riders.map((rider) => [rider.rider_code, rider.id]));
@@ -517,6 +526,74 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
     setShowSheetSync(true);
   }
 
+  function changeWeek(nextDate: string) {
+    const nextMonth = nextDate.slice(0, 7);
+    if (nextMonth !== month) setMonth(nextMonth);
+    setSelectedDate(nextDate);
+    setRiderPage(1);
+    setImportIssues([]);
+    setIssuesImportedPartially(false);
+  }
+
+  if (!showSheetSync && !editor) {
+    return (
+      <>
+        <WeeklyAttendanceDashboard
+          riders={filteredRiders}
+          logs={logs}
+          selectedDate={selectedDate}
+          loading={loading}
+          canEdit={canEdit}
+          savingCells={savingCells}
+          query={query}
+          area={deliveryDistrict}
+          team={cot}
+          attendanceFilter={rosterStatus}
+          onlyExceptions={onlyWeeklyExceptions}
+          areaOptions={deliveryDistrictOptions}
+          teamOptions={uniqueOptions(riders.map((rider) => rider.cot))}
+          onQueryChange={(value) => { setQuery(value); setRiderPage(1); }}
+          onAreaChange={(value) => { setDeliveryDistrict(value); setRiderPage(1); }}
+          onTeamChange={(value) => { setCot(value); setRiderPage(1); }}
+          onAttendanceFilterChange={(value) => { setRosterStatus(value); setRiderPage(1); }}
+          onOnlyExceptionsChange={setOnlyWeeklyExceptions}
+          onSelectDate={setSelectedDate}
+          onChangeWeek={changeWeek}
+          onEditCell={openEditor}
+          actions={(
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={(event) => { const file = event.target.files?.[0]; if (file) void importExcel(file); }}
+              />
+              <Button type="button" variant="secondary" disabled={!canEdit || syncingSheet} onClick={() => void openSheetSync()}>
+                <FileSpreadsheet size={16} />
+                <span className="hidden sm:inline">Đồng bộ Sheet OFF</span>
+              </Button>
+              <Button type="button" variant="secondary" disabled={!canEdit || downloadingTemplate} onClick={() => void downloadTemplate()}>
+                <Download size={16} />
+                <span className="hidden sm:inline">File mẫu</span>
+              </Button>
+              <Button type="button" disabled={!canEdit || importing} onClick={() => fileInputRef.current?.click()}>
+                <Upload size={16} />
+                {importing ? "Đang nhập…" : "Nhập Excel"}
+              </Button>
+              <Button type="button" variant="secondary" className="size-10 p-0" onClick={() => void load()} aria-label="Tải lại chấm công">
+                <RefreshCcw className={loading ? "animate-spin" : ""} size={16} />
+              </Button>
+            </>
+          )}
+        />
+        {success ? <p className="mx-auto mt-4 max-w-[1600px] rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{success}</p> : null}
+        {error ? <p className="mx-auto mt-4 max-w-[1600px] rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
+        {!canEdit && !loading ? <p className="mx-auto mt-4 max-w-[1600px] rounded-xl bg-amber-50 p-3 text-sm text-amber-800">Tài khoản chỉ được xem lịch tuần. Cần quyền Admin hoặc Leader để chỉnh sửa.</p> : null}
+      </>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-[1600px] space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -597,7 +674,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
       {showSheetSync ? (
         <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
           <button type="button" aria-label="Đóng" className="absolute inset-0" onClick={() => setShowSheetSync(false)} />
-          <form onSubmit={syncGoogleSheet} className="relative z-10 w-full max-w-lg space-y-4 rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-2xl">
+          <form onSubmit={syncGoogleSheet} className="app-modal-panel relative z-10 w-full max-w-lg space-y-4 rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-2xl">
             <div className="flex items-start justify-between gap-3">
               <div><h2 className="text-lg font-bold text-slate-950">Đồng bộ Google Sheet</h2><p className="mt-1 text-sm text-slate-500">Web đọc các cột A–D trong tab OFF và cập nhật lịch.</p></div>
               <Button type="button" variant="ghost" className="size-9 p-0" onClick={() => setShowSheetSync(false)}><X size={18} /></Button>
@@ -884,7 +961,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
             className="absolute inset-0"
             onClick={() => setEditor(null)}
           />
-          <Card className="relative z-10 w-full max-w-lg rounded-b-none shadow-2xl sm:rounded-xl">
+          <Card className="app-modal-panel relative z-10 w-full max-w-lg rounded-b-none shadow-2xl sm:rounded-xl">
             <form className="space-y-4" onSubmit={saveEditor}>
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -1270,4 +1347,13 @@ function uniqueOptions(values: Array<string | null>) {
   return Array.from(new Set(values.filter((value): value is string => Boolean(value)))).sort((a, b) =>
     a.localeCompare(b, "vi"),
   );
+}
+
+function sortKv5Districts(values: string[]) {
+  const order = ["Quận 2", "Quận 9", "Bình Thạnh", "Quận 3", "Hóc Môn", "Quận 12", "Gò Vấp"];
+  return [...values].sort((a, b) => {
+    const aIndex = order.indexOf(a);
+    const bIndex = order.indexOf(b);
+    return (aIndex === -1 ? order.length : aIndex) - (bIndex === -1 ? order.length : bIndex) || a.localeCompare(b, "vi");
+  });
 }

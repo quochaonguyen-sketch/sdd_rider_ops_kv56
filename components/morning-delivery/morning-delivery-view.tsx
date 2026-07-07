@@ -849,7 +849,7 @@ export function MorningDeliveryView() {
       {defaultRoutesOpen && typeof document !== "undefined" ? createPortal(
         <div role="dialog" aria-modal="true" className="fixed inset-0 z-[9999] flex items-end justify-center overflow-y-auto bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-4">
           <button type="button" aria-label="Đóng sửa tuyến mặc định" className="absolute inset-0" onClick={() => setDefaultRoutesOpen(false)} />
-          <section className="relative z-10 flex max-h-[92dvh] w-full max-w-6xl flex-col overflow-hidden rounded-t-3xl border border-slate-200/80 bg-white shadow-2xl sm:rounded-3xl">
+          <section className="app-modal-panel relative z-10 flex w-full max-w-6xl flex-col overflow-hidden rounded-t-3xl border border-slate-200/80 bg-white shadow-2xl sm:rounded-3xl">
             <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-lg font-bold leading-6 text-slate-950">Sửa tuyến giao mặc định</h2>
@@ -951,7 +951,7 @@ export function MorningDeliveryView() {
       {editingDefaultRider && editingDefaultDistrict ? (
         <div role="dialog" aria-modal="true" className="fixed inset-0 z-[60] grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
           <button type="button" aria-label="Đóng chọn phường" className="absolute inset-0" onClick={() => setEditingDefaultRiderId(null)} />
-          <section className="relative z-10 max-h-[88vh] w-full max-w-2xl overflow-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl">
+          <section className="app-modal-panel relative z-10 w-full max-w-2xl rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl">
             <div className="flex items-start justify-between gap-4">
               <div><p className="text-xs font-bold uppercase tracking-wide text-blue-600">Chọn phường cố định</p><h3 className="mt-1 text-lg font-bold text-slate-950">{editingDefaultRider.full_name || editingDefaultRider.rider_code}</h3><p className="text-sm text-slate-500">{editingDefaultDistrict.name}</p></div>
               <Button type="button" variant="ghost" className="size-10 p-0" onClick={() => setEditingDefaultRiderId(null)}><X size={18} /></Button>

@@ -200,6 +200,13 @@ export function canonicalDistrictName(
   return districtDefinitionFor(value, districts)?.name ?? "";
 }
 
+export function canonicalDistrictShortName(
+  value: string | null | undefined,
+  districts: DistrictDefinition[] = hcmDistricts,
+) {
+  return districtDefinitionFor(value, districts)?.shortName ?? value?.trim() ?? "";
+}
+
 export function canonicalWardNames(
   districtValue: string | null | undefined,
   rawWardValue: string | null | undefined,

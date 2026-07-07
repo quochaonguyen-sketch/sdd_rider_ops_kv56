@@ -103,6 +103,18 @@ textarea {
   animation: route-content-reveal 0.28s ease-out;
 }
 
+/* Shared, predictable height for viewport-centered modal panels. */
+:where(.app-modal-panel, .fixed.inset-0 > form.relative.z-10) {
+  height: calc(100dvh - 0.5rem);
+  overflow-y: auto;
+}
+
+@media (min-width: 640px) {
+  :where(.app-modal-panel, .fixed.inset-0 > form.relative.z-10) {
+    height: min(42rem, calc(100dvh - 2rem));
+  }
+}
+
 .route-content-loading {
   opacity: 0.18;
   pointer-events: none;
@@ -131,8 +143,10 @@ textarea {
 }
 
 @keyframes route-content-reveal {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  /* Never animate transform here: an animated transform makes this wrapper
+     the containing block for every position:fixed modal below it. */
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {

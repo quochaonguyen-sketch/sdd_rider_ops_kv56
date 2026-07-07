@@ -36,6 +36,7 @@ import { cn } from "@/utils/cn";
 import {
   canonicalDistrictName,
   canonicalWardNames,
+  districtDefinitionFor,
   districtMatches,
   hcmDistricts,
   normalizeLocation,
@@ -181,7 +182,10 @@ export function RidersView() {
   const districtOptions = useMemo(() => districts.map((district) => district.name), [districts]);
   const cotOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.cot)), [riders]);
   const shiftOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.current_shift)), [riders]);
-  const zoneOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.delivery_district)), [riders]);
+  const zoneOptions = useMemo(
+    () => uniqueOptions(riders.map((rider) => districtDisplayName(rider.delivery_district, districts))),
+    [districts, riders],
+  );
   const pickupWardOptions = useMemo(
     () => (pickupDistrict === "all" ? [] : wardNamesForDistrict(pickupDistrict, districts)),
     [districts, pickupDistrict],
@@ -445,7 +449,7 @@ export function RidersView() {
       {showAddForm ? (
         <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-end bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-4">
           <button type="button" aria-label="Đóng form rider" className="absolute inset-0 cursor-default" onClick={closeForm} />
-          <Card className={cn("relative z-10 max-h-[92vh] w-full overflow-y-auto rounded-b-none shadow-2xl sm:mx-auto sm:max-w-6xl sm:rounded-xl", editingId && "border-blue-200 bg-blue-50")}>
+          <Card className={cn("app-modal-panel relative z-10 w-full rounded-b-none shadow-2xl sm:mx-auto sm:max-w-6xl sm:rounded-xl", editingId && "border-blue-200 bg-blue-50")}>
             <form onSubmit={saveRider} className="space-y-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -574,7 +578,7 @@ export function RidersView() {
           <div className="max-h-[680px] min-h-[480px] overflow-auto">
             <table className="w-full min-w-[860px] table-fixed text-left text-sm">
               <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-600 shadow-[0_1px_0_#e2e8f0]"><tr><th className="w-12 px-4 py-3"><input type="checkbox" aria-label="Chọn tất cả rider trên trang" checked={paginated.length > 0 && visibleChecked === paginated.length} onChange={toggleVisible} /></th><SortableRiderHeader label="Rider" sortKey="name" current={sort} onSort={changeSort} className="w-[30%]" /><SortableRiderHeader label="Trạng thái" sortKey="status" current={sort} onSort={changeSort} className="w-[14%]" /><SortableRiderHeader label="Khu vực" sortKey="zone" current={sort} onSort={changeSort} /><SortableRiderHeader label="COT" sortKey="cot" current={sort} onSort={changeSort} /><SortableRiderHeader label="Cập nhật" sortKey="updated" current={sort} onSort={changeSort} align="right" /><th className="w-16" /></tr></thead>
-              <tbody className="divide-y divide-slate-100">{loading ? Array.from({ length: 8 }, (_, index) => <tr key={index} className="h-16 animate-pulse"><td colSpan={7} className="px-4"><div className="h-4 rounded bg-slate-100" /></td></tr>) : paginated.map((rider) => <tr key={rider.id} className={cn("h-16 cursor-pointer transition hover:bg-blue-50/50", checkedIds.has(rider.id) && "bg-blue-50/70")} onClick={() => { setSelected(rider); setShowDetail(true); }}><td className="px-4" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Chọn ${rider.full_name ?? rider.rider_code}`} checked={checkedIds.has(rider.id)} onChange={() => toggleChecked(rider.id)} /></td><td className="px-4 py-2"><div className="flex min-w-0 items-center gap-3"><RiderAvatar rider={rider} size="sm" /><div className="min-w-0"><p className="truncate font-semibold text-slate-950">{rider.full_name ?? "Chưa có tên"}</p><p className="truncate font-mono text-xs text-slate-500">{rider.rider_code}{riderPhone(rider) ? ` · ${riderPhone(rider)}` : ""}</p></div></div></td><td className="px-4"><RiderStatusBadge status={rider.status} /></td><td className="px-4"><p className="truncate font-medium text-slate-800">{rider.delivery_district ?? "Chưa gán"}</p><p className="truncate text-xs text-slate-500">{rider.delivery_ward ?? rider.kv ?? "—"}</p></td><td className="px-4 font-semibold text-slate-700">{rider.cot ?? "—"}</td><td className="px-4 text-right"><p className="text-sm tabular-nums text-slate-700">{formatRelativeTime(rider.updated_at)}</p><p className="text-xs tabular-nums text-slate-400">{formatShortDate(rider.updated_at)}</p></td><td className="pr-3 text-right"><Button type="button" variant="ghost" aria-label={`Sửa ${rider.full_name ?? rider.rider_code}`} className="size-9 p-0" onClick={(event) => { event.stopPropagation(); beginEdit(rider); }}><Pencil size={15} /></Button></td></tr>)}{!loading && paginated.length === 0 ? <tr><td colSpan={7} className="h-80 text-center text-sm text-slate-500">Không có rider nào khớp bộ lọc hiện tại.</td></tr> : null}</tbody>
+              <tbody className="divide-y divide-slate-100">{loading ? Array.from({ length: 8 }, (_, index) => <tr key={index} className="h-16 animate-pulse"><td colSpan={7} className="px-4"><div className="h-4 rounded bg-slate-100" /></td></tr>) : paginated.map((rider) => <tr key={rider.id} className={cn("h-16 cursor-pointer transition hover:bg-blue-50/50", checkedIds.has(rider.id) && "bg-blue-50/70")} onClick={() => { setSelected(rider); setShowDetail(true); }}><td className="px-4" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Chọn ${rider.full_name ?? rider.rider_code}`} checked={checkedIds.has(rider.id)} onChange={() => toggleChecked(rider.id)} /></td><td className="px-4 py-2"><div className="flex min-w-0 items-center gap-3"><RiderAvatar rider={rider} size="sm" /><div className="min-w-0"><p className="truncate font-semibold text-slate-950">{rider.full_name ?? "Chưa có tên"}</p><p className="truncate font-mono text-xs text-slate-500">{rider.rider_code}{riderPhone(rider) ? ` · ${riderPhone(rider)}` : ""}</p></div></div></td><td className="px-4"><RiderStatusBadge status={rider.status} /></td><td className="px-4"><p className="truncate font-medium text-slate-800">{districtDisplayName(rider.delivery_district, districts) || "Chưa gán"}</p><p className="truncate text-xs text-slate-500">{rider.delivery_ward ?? rider.kv ?? "—"}</p></td><td className="px-4 font-semibold text-slate-700">{rider.cot ?? "—"}</td><td className="px-4 text-right"><p className="text-sm tabular-nums text-slate-700">{formatRelativeTime(rider.updated_at)}</p><p className="text-xs tabular-nums text-slate-400">{formatShortDate(rider.updated_at)}</p></td><td className="pr-3 text-right"><Button type="button" variant="ghost" aria-label={`Sửa ${rider.full_name ?? rider.rider_code}`} className="size-9 p-0" onClick={(event) => { event.stopPropagation(); beginEdit(rider); }}><Pencil size={15} /></Button></td></tr>)}{!loading && paginated.length === 0 ? <tr><td colSpan={7} className="h-80 text-center text-sm text-slate-500">Không có rider nào khớp bộ lọc hiện tại.</td></tr> : null}</tbody>
             </table>
           </div>
           <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3"><p className="text-sm text-slate-500">Trang <strong className="text-slate-700">{safePage}/{pageCount}</strong></p><div className="flex gap-2"><Button type="button" variant="secondary" className="size-9 p-0" aria-label="Trang trước" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}><ChevronLeft size={16} /></Button><Button type="button" variant="secondary" className="size-9 p-0" aria-label="Trang sau" disabled={safePage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}><ChevronRight size={16} /></Button></div></div>
@@ -655,7 +659,7 @@ function RiderDetailModal({ selected, deleting, onClose, onEdit, onDelete, onUpd
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="rider-detail-title" className="fixed inset-0 z-50 grid items-end md:place-items-center md:p-6">
       <button type="button" aria-label="Đóng chi tiết rider" className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" onClick={onClose} />
-      <Card className="relative z-10 max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-b-none rounded-t-3xl border-0 p-5 pb-8 shadow-2xl md:rounded-2xl md:p-6">
+      <Card className="app-modal-panel relative z-10 w-full max-w-xl rounded-b-none rounded-t-3xl border-0 p-5 pb-8 shadow-2xl md:rounded-2xl md:p-6">
         <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-300 md:hidden" />
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -683,12 +687,12 @@ function RiderDetailModal({ selected, deleting, onClose, onEdit, onDelete, onUpd
         <div className="mt-4 grid grid-cols-3 gap-2">
           <SummaryChip label="KV" value={selected.kv ?? "-"} tone="blue" />
           <SummaryChip label="COT" value={selected.cot ?? "-"} tone="amber" />
-          <SummaryChip label="Quận ở" value={selected.home_district ?? "-"} tone="slate" />
+          <SummaryChip label="Quận ở" value={districtDisplayName(selected.home_district) || "-"} tone="slate" />
         </div>
 
         <div className="relative mt-4 space-y-3 before:absolute before:bottom-8 before:left-[19px] before:top-8 before:w-px before:bg-slate-200">
-          <RouteStep icon={<MapPin size={17} />} label="Khu vực lấy" title={selected.pickup_district} subtitle={joinLocation(selected.pickup_ward, selected.point_name)} tone="blue" />
-          <RouteStep icon={<Navigation size={17} />} label="Khu vực giao" title={selected.delivery_district} subtitle={selected.delivery_ward} tone="emerald" />
+          <RouteStep icon={<MapPin size={17} />} label="Khu vực lấy" title={districtDisplayName(selected.pickup_district)} subtitle={joinLocation(selected.pickup_ward, selected.point_name)} tone="blue" />
+          <RouteStep icon={<Navigation size={17} />} label="Khu vực giao" title={districtDisplayName(selected.delivery_district)} subtitle={selected.delivery_ward} tone="emerald" />
         </div>
 
         <Button type="button" className="mt-4 w-full" onClick={() => onEdit(selected)}>
@@ -947,6 +951,10 @@ function mergeOptions(primary: Array<string | null | undefined>, extra: Array<st
 
 function districtShortLabel(value: string, districts: DistrictDefinition[]) {
   return districts.find((district) => district.name === value)?.shortName ?? value;
+}
+
+function districtDisplayName(value: string | null | undefined, districts: DistrictDefinition[] = hcmDistricts) {
+  return districtDefinitionFor(value, districts)?.shortName ?? value?.trim() ?? "";
 }
 
 function wardShortLabel(value: string) {
