@@ -948,10 +948,10 @@ export function MorningDeliveryView() {
         </div>,document.body,
       ) : null}
 
-      {editingDefaultRider && editingDefaultDistrict ? (
-        <div role="dialog" aria-modal="true" className="fixed inset-0 z-[60] grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
+      {editingDefaultRider && editingDefaultDistrict && typeof document !== "undefined" ? createPortal(
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-[10000] grid place-items-end bg-slate-950/45 backdrop-blur-sm sm:place-items-center sm:p-4">
           <button type="button" aria-label="Đóng chọn phường" className="absolute inset-0" onClick={() => setEditingDefaultRiderId(null)} />
-          <section className="app-modal-panel relative z-10 w-full max-w-2xl rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl">
+          <section className="app-modal-panel relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl">
             <div className="flex items-start justify-between gap-4">
               <div><p className="text-xs font-bold uppercase tracking-wide text-blue-600">Chọn phường cố định</p><h3 className="mt-1 text-lg font-bold text-slate-950">{editingDefaultRider.full_name || editingDefaultRider.rider_code}</h3><p className="text-sm text-slate-500">{editingDefaultDistrict.name}</p></div>
               <Button type="button" variant="ghost" className="size-10 p-0" onClick={() => setEditingDefaultRiderId(null)}><X size={18} /></Button>
@@ -965,7 +965,7 @@ export function MorningDeliveryView() {
             </div>
             <div className="mt-6 flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setEditingDefaultRiderId(null)}>Hủy</Button><Button type="button" disabled={savingDefaultRiderId === editingDefaultRider.id} onClick={async () => { await saveDefaultRoute(editingDefaultRider); setEditingDefaultRiderId(null); }}><Save size={16} /> Lưu phường</Button></div>
           </section>
-        </div>
+        </div>, document.body,
       ) : null}
 
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">

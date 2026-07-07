@@ -43,8 +43,8 @@ export function DashboardView() {
       supabase.from("zones").select("*").order("name"),
       fetch(`/api/attendance/schedule?month=${dateRange.end.slice(0, 7)}`, { cache: "no-store" }).then(async (response) => ({ response, body: (await response.json().catch(() => null)) as AttendanceScheduleResponse | null })),
       supabase.from("activity_logs").select("*").order("created_at", { ascending: false }).limit(10),
-      supabase.from("delivery_order").select("report_date,district,total_orders").gte("report_date", historyStart).lte("report_date", dateRange.end).limit(5000),
-      supabase.from("pickup_volume").select("report_date,district,total_orders").gte("report_date", historyStart).lte("report_date", dateRange.end).limit(5000),
+      fetchVolumeRows(supabase, "delivery_order", historyStart, dateRange.end),
+      fetchVolumeRows(supabase, "pickup_volume", historyStart, dateRange.end),
       supabase.from("realtime_delivery_riders").select("driver_id,total_assigned,delivered,delivering,failed,idle_delivery_seconds,snapshot_id,snapshot_at").eq("work_date", dateRange.end).order("snapshot_at", { ascending: false }).limit(2000),
     ]);
     const results = [riders, zones, activity, delivery, pickup, realtime];
@@ -104,6 +104,34 @@ export function DashboardView() {
     <WeeklyRiderViolationsCard violations={violations} defaultRange="LAST_7_DAYS" />
     <section id="alerts" className="grid grid-cols-12 gap-4"><AlertsList className="col-span-12 xl:col-span-7" alerts={alerts} /><SectionCard className="col-span-12 xl:col-span-5" title="Lối tắt vận hành" description="Đi nhanh đến các màn hình chuyên sâu" href="/realtime-dashboard" linkLabel="Mở realtime"><div className="grid grid-cols-2 gap-2">{[["Morning Dispatch", "/morning-delivery"], ["Delivery Volume", "/volume/delivery"], ["Pickup Volume", "/volume/pickup"], ["Zone Builder", "/zone-builder"]].map(([label, href]) => <Link key={href} href={href} className="rounded-lg border border-slate-200 px-3 py-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700">{label}</Link>)}</div><div className="mt-4 border-t border-slate-100 pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Cập nhật gần đây</p>{state.activity.slice(0, 3).map((item) => <p key={item.id} className="mt-2 line-clamp-1 text-sm text-slate-600">{item.message}</p>)}</div></SectionCard></section>
   </div>;
+}
+
+async function fetchVolumeRows(
+  supabase: ReturnType<typeof createClient>,
+  table: "delivery_order" | "pickup_volume",
+  startDate: string,
+  endDate: string,
+) {
+  const pageSize = 1000;
+  const rows: VolumeRow[] = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from(table)
+      .select("report_date,district,total_orders")
+      .gte("report_date", startDate)
+      .lte("report_date", endDate)
+      .order("report_date", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) return { data: null, error };
+
+    const page = (data ?? []) as VolumeRow[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  return { data: rows, error: null };
 }
 
 export const KpiCard = memo(function KpiCard({ href, icon: Icon, label, value, context, tone, loading, className }: { href: string; icon: typeof Activity; label: string; value: number | string; context: string; tone: "blue" | "green" | "red" | "slate"; loading: boolean; className?: string }) { const colors = { blue: "bg-blue-50 text-blue-700", green: "bg-emerald-50 text-emerald-700", red: "bg-red-50 text-red-700", slate: "bg-slate-100 text-slate-700" }; return <Link href={href} className={cn("group min-h-36 rounded-xl border border-slate-200 bg-white p-4 transition hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500", className)}><div className="flex items-start justify-between gap-2"><p className="text-sm font-medium text-slate-600">{label}</p><span className={cn("grid size-9 place-items-center rounded-lg", colors[tone])}><Icon size={18} /></span></div><p className="mt-2 text-2xl font-bold tabular-nums text-slate-950">{loading ? "—" : typeof value === "number" ? value.toLocaleString("vi-VN") : value}</p><p className="mt-4 text-xs text-slate-500">{context}</p></Link>; });
