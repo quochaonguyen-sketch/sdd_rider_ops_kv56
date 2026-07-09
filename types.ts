@@ -32,6 +32,21 @@ export type Rider = {
   zones?: Pick<Zone, "id" | "name" | "area" | "hub"> | null;
 };
 
+export type DriverPerformanceDaily = {
+  performance_id: string;
+  report_date: string;
+  driver_id: string;
+  driver_name: string | null;
+  contract_type_name: string | null;
+  delivery_assigned: number | null;
+  delivery_delivered: number | null;
+  pickup_assigned: number | null;
+  pickup_picked: number | null;
+  delivery_success_rate: number | null;
+  pickup_success_rate: number | null;
+  fetched_at: string;
+};
+
 export type AttendanceLog = {
   id: string;
   rider_id: string | null;

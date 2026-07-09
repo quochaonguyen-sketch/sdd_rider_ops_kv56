@@ -6,6 +6,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  BarChart3,
   Bike,
   CheckCircle2,
   ChevronLeft,
@@ -25,7 +26,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
-import type { Rider } from "@/types";
+import type { DriverPerformanceDaily, Rider } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -67,6 +68,13 @@ type ImportIssue = {
 
 type LocationsResponse = {
   districts: DistrictDefinition[];
+};
+
+type RiderPerformanceResponse = {
+  success: boolean;
+  days?: number;
+  performance?: DriverPerformanceDaily[];
+  error?: string;
 };
 
 type RiderSortKey = "name" | "status" | "zone" | "cot" | "updated";
@@ -650,60 +658,218 @@ function formatShortDate(value: string) {
   return new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Ho_Chi_Minh" }).format(date);
 }
 
+function formatReportDate(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  if (!Number.isFinite(date.getTime())) return value;
+  return new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Ho_Chi_Minh" }).format(date);
+}
+
+function formatNumber(value: number | null | undefined) {
+  return new Intl.NumberFormat("vi-VN").format(value ?? 0);
+}
+
+function formatRate(value: number | null | undefined) {
+  if (value === null || value === undefined) return "—";
+  const normalized = value <= 1 ? value * 100 : value;
+  return `${new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 }).format(normalized)}%`;
+}
+
 function riderPhone(rider: Rider) {
   const phone = rider.raw_data?.phone ?? rider.raw_data?.phone_number ?? rider.raw_data?.mobile;
   return typeof phone === "string" || typeof phone === "number" ? String(phone) : "";
 }
 
 function RiderDetailModal({ selected, deleting, onClose, onEdit, onDelete, onUpdated }: { selected: Rider; deleting: boolean; onClose: () => void; onEdit: (rider: Rider) => void; onDelete: (rider: Rider) => void; onUpdated: (rider: Rider) => void }) {
+  const [performance, setPerformance] = useState<DriverPerformanceDaily[]>([]);
+  const [performanceLoading, setPerformanceLoading] = useState(false);
+  const [performanceError, setPerformanceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      await Promise.resolve();
+      if (!active) return;
+      setPerformanceLoading(true);
+      setPerformanceError(null);
+      setPerformance([]);
+
+      fetch(`/api/riders/${selected.id}/performance?days=45`)
+        .then((response) => response.json() as Promise<RiderPerformanceResponse>)
+        .then((result) => {
+          if (!active) return;
+          if (!result.success) {
+            setPerformanceError(result.error ?? "Không thể tải lượng deli/pick");
+            return;
+          }
+          setPerformance(result.performance ?? []);
+        })
+        .catch((error: unknown) => {
+          if (active) setPerformanceError(error instanceof Error ? error.message : "Không thể tải lượng deli/pick");
+        })
+        .finally(() => {
+          if (active) setPerformanceLoading(false);
+        });
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [selected.id]);
+
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="rider-detail-title" className="fixed inset-0 z-50 grid items-end md:place-items-center md:p-6">
       <button type="button" aria-label="Đóng chi tiết rider" className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" onClick={onClose} />
-      <Card className="app-modal-panel relative z-10 w-full max-w-xl rounded-b-none rounded-t-3xl border-0 p-5 pb-8 shadow-2xl md:rounded-2xl md:p-6">
-        <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-300 md:hidden" />
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <RiderAvatar rider={selected} size="lg" />
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 id="rider-detail-title" className="truncate text-lg font-bold text-slate-950">{selected.full_name ?? selected.rider_code}</h2>
-                <Badge tone={selected.status === "inactive" ? "red" : "green"}>{selected.status ?? "active"}</Badge>
+      <Card className="app-modal-panel relative z-10 flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden rounded-b-none rounded-t-3xl border-0 p-0 shadow-2xl md:rounded-2xl">
+        <div className="shrink-0 border-b border-slate-100 p-5 pb-4 md:p-6">
+          <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-300 md:hidden" />
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <RiderAvatar rider={selected} size="lg" />
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 id="rider-detail-title" className="truncate text-lg font-bold text-slate-950">{selected.full_name ?? selected.rider_code}</h2>
+                  <Badge tone={selected.status === "inactive" ? "red" : "green"}>{selected.status ?? "active"}</Badge>
+                </div>
+                <p className="mt-1 font-mono text-sm text-slate-500">ID {selected.rider_code}</p>
               </div>
-              <p className="mt-1 font-mono text-sm text-slate-500">ID {selected.rider_code}</p>
             </div>
-          </div>
-          <Button type="button" variant="ghost" className="size-10 shrink-0 p-0" onClick={onClose}>
-            <X size={20} />
-          </Button>
-        </div>
-
-        <div className="mt-5 rounded-lg border border-blue-100 bg-blue-50 p-4">
-          <p className="font-semibold text-blue-950">Cập nhật avatar rider</p>
-          <div className="mt-3">
-            <RiderAvatarEditor rider={selected} onUpdated={onUpdated} />
+            <Button type="button" variant="ghost" className="size-10 shrink-0 p-0" onClick={onClose}>
+              <X size={20} />
+            </Button>
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          <SummaryChip label="KV" value={selected.kv ?? "-"} tone="blue" />
-          <SummaryChip label="COT" value={selected.cot ?? "-"} tone="amber" />
-          <SummaryChip label="Quận ở" value={districtDisplayName(selected.home_district) || "-"} tone="slate" />
+        <div className="min-h-0 flex-1 overflow-y-auto p-5 [scrollbar-gutter:stable] md:p-6">
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+            <div className="min-w-0">
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
+                <p className="font-semibold text-blue-950">Cập nhật avatar rider</p>
+                <div className="mt-3">
+                  <RiderAvatarEditor rider={selected} onUpdated={onUpdated} />
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                <SummaryChip label="KV" value={selected.kv ?? "-"} tone="blue" />
+                <SummaryChip label="COT" value={selected.cot ?? "-"} tone="amber" />
+                <SummaryChip label="Quận ở" value={districtDisplayName(selected.home_district) || "-"} tone="slate" />
+              </div>
+
+              <div className="relative mt-4 space-y-3 before:absolute before:bottom-8 before:left-[19px] before:top-8 before:w-px before:bg-slate-200">
+                <RouteStep icon={<MapPin size={17} />} label="Khu vực lấy" title={districtDisplayName(selected.pickup_district)} subtitle={joinLocation(selected.pickup_ward, selected.point_name)} tone="blue" />
+                <RouteStep icon={<Navigation size={17} />} label="Khu vực giao" title={districtDisplayName(selected.delivery_district)} subtitle={selected.delivery_ward} tone="emerald" />
+              </div>
+            </div>
+
+            <RiderPerformancePanel performance={performance} loading={performanceLoading} error={performanceError} />
+          </div>
         </div>
 
-        <div className="relative mt-4 space-y-3 before:absolute before:bottom-8 before:left-[19px] before:top-8 before:w-px before:bg-slate-200">
-          <RouteStep icon={<MapPin size={17} />} label="Khu vực lấy" title={districtDisplayName(selected.pickup_district)} subtitle={joinLocation(selected.pickup_ward, selected.point_name)} tone="blue" />
-          <RouteStep icon={<Navigation size={17} />} label="Khu vực giao" title={districtDisplayName(selected.delivery_district)} subtitle={selected.delivery_ward} tone="emerald" />
+        <div className="shrink-0 border-t border-slate-100 bg-white p-5 pt-4 md:p-6">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button type="button" className="w-full" onClick={() => onEdit(selected)}>
+              <Pencil size={16} />
+              Chỉnh sửa thông tin rider
+            </Button>
+            <Button type="button" variant="ghost" className="w-full text-red-700 hover:bg-red-50" disabled={deleting} onClick={() => void onDelete(selected)}>
+              <Trash2 size={16} />
+              {deleting ? "Đang xóa..." : "Xóa rider"}
+            </Button>
+          </div>
         </div>
-
-        <Button type="button" className="mt-4 w-full" onClick={() => onEdit(selected)}>
-          <Pencil size={16} />
-          Chỉnh sửa thông tin rider
-        </Button>
-        <Button type="button" variant="ghost" className="mt-2 w-full text-red-700 hover:bg-red-50" disabled={deleting} onClick={() => void onDelete(selected)}>
-          <Trash2 size={16} />
-          {deleting ? "Đang xóa..." : "Xóa rider"}
-        </Button>
       </Card>
+    </div>
+  );
+}
+
+function RiderPerformancePanel({ performance, loading, error }: { performance: DriverPerformanceDaily[]; loading: boolean; error: string | null }) {
+  const totals = useMemo(
+    () =>
+      performance.reduce(
+        (acc, item) => ({
+          deliveryAssigned: acc.deliveryAssigned + (item.delivery_assigned ?? 0),
+          deliveryDelivered: acc.deliveryDelivered + (item.delivery_delivered ?? 0),
+          pickupAssigned: acc.pickupAssigned + (item.pickup_assigned ?? 0),
+          pickupPicked: acc.pickupPicked + (item.pickup_picked ?? 0),
+        }),
+        { deliveryAssigned: 0, deliveryDelivered: 0, pickupAssigned: 0, pickupPicked: 0 },
+      ),
+    [performance],
+  );
+
+  return (
+    <section className="min-w-0 rounded-xl border border-slate-200 bg-white">
+      <div className="border-b border-slate-100 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="grid size-8 place-items-center rounded-lg bg-blue-50 text-blue-700">
+                <BarChart3 size={17} />
+              </span>
+              <h3 className="font-semibold text-slate-950">Lượng deli / pick từng ngày</h3>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">Dữ liệu 45 ngày gần nhất từ bảng driver_performance_daily.</p>
+          </div>
+          <Badge tone="blue">{performance.length} ngày</Badge>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <SummaryMetric label="Deli giao / phân" value={`${formatNumber(totals.deliveryDelivered)} / ${formatNumber(totals.deliveryAssigned)}`} />
+          <SummaryMetric label="Pick lấy / phân" value={`${formatNumber(totals.pickupPicked)} / ${formatNumber(totals.pickupAssigned)}`} />
+        </div>
+      </div>
+
+      <div className="max-h-[23rem] overflow-y-auto [scrollbar-gutter:stable]">
+        {loading ? (
+          <div className="space-y-2 p-4">
+            {Array.from({ length: 5 }, (_, index) => (
+              <div key={index} className="h-12 animate-pulse rounded-lg bg-slate-100" />
+            ))}
+          </div>
+        ) : error ? (
+          <div className="p-4 text-sm text-red-700">{error}</div>
+        ) : performance.length === 0 ? (
+          <div className="p-4 text-sm text-slate-500">Chưa có dữ liệu deli/pick cho rider này.</div>
+        ) : (
+          <table className="w-full text-left text-sm">
+            <thead className="sticky top-0 bg-white text-xs uppercase tracking-wide text-slate-400 shadow-[0_1px_0_#e2e8f0]">
+              <tr>
+                <th className="px-4 py-3">Ngày</th>
+                <th className="px-3 py-3 text-right">Deli</th>
+                <th className="px-3 py-3 text-right">Pick</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {performance.map((item) => (
+                <tr key={item.performance_id}>
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-slate-900">{formatReportDate(item.report_date)}</p>
+                    <p className="text-xs text-slate-400">{item.contract_type_name ?? "Không có loại hợp đồng"}</p>
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    <p className="font-semibold text-slate-900">{formatNumber(item.delivery_delivered)} / {formatNumber(item.delivery_assigned)}</p>
+                    <p className="text-xs text-slate-400">{formatRate(item.delivery_success_rate)}</p>
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    <p className="font-semibold text-slate-900">{formatNumber(item.pickup_picked)} / {formatNumber(item.pickup_assigned)}</p>
+                    <p className="text-xs text-slate-400">{formatRate(item.pickup_success_rate)}</p>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function SummaryMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-slate-50 p-3">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-1 text-sm font-bold text-slate-950">{value}</p>
     </div>
   );
 }
