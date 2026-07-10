@@ -35,6 +35,7 @@ const navItems = [
   { href: "/realtime-dashboard", label: "Realtime Dashboard", icon: Activity },
   { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/riders", label: "Riders", icon: Bike },
+  { href: "/performance", label: "Performance", icon: BarChart3 },
   { href: "/attendance", label: "Attendance", icon: CalendarDays },
   { href: "/morning-delivery", label: "Morning Dispatch", icon: ClipboardCheck },
   { href: "/zones", label: "Zones", icon: MapPinned },
@@ -83,7 +84,7 @@ export function AppShell({
           <AppBrand />
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-          {navItems.slice(0, 7).map((item) => {
+          {navItems.slice(0, 8).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return (
@@ -168,7 +169,7 @@ export function AppShell({
               })}
             </div> : null}
           </div>
-          {navItems.slice(9).map((item) => {
+          {navItems.slice(10).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return (
@@ -275,7 +276,7 @@ export function AppShell({
             onClick={() => setMoreOpen((current) => !current)}
               className={cn(
                 "flex flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-medium",
-              moreOpen || ["/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"].some((path) => pathname.startsWith(path))
+              moreOpen || ["/performance", "/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"].some((path) => pathname.startsWith(path))
                 ? "text-slate-950"
                 : "text-slate-400",
             )}
@@ -283,7 +284,7 @@ export function AppShell({
             <span
               className={cn(
                 "grid size-9 place-items-center rounded-xl",
-                (moreOpen || ["/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"].some((path) => pathname.startsWith(path))) &&
+                (moreOpen || ["/performance", "/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"].some((path) => pathname.startsWith(path))) &&
                   "bg-slate-950 text-white",
               )}
             >
