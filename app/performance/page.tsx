@@ -33,6 +33,9 @@ async function PerformanceContent({
   const loadedKey = [
     filters.date,
     filters.q,
+    filters.kv,
+    filters.district,
+    filters.cot,
     filters.sort,
     filters.dir,
     filters.page,

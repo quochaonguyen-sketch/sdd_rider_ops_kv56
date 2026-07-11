@@ -76,6 +76,19 @@ type AbsenceNoteRow = {
 
 type AbsenceNoteDraft = Pick<AbsenceNoteRow, "reason" | "is_excused">;
 
+type RequiredAbsentRiderRowProps = {
+  rider: MorningRider;
+  attendance: AttendanceRow | null;
+  draft: AbsenceNoteDraft;
+  status: string;
+  hasRealtimeOrders: boolean;
+  realtimeOrderCount: number;
+  canEdit: boolean;
+  saving: boolean;
+  onDraftChange: (riderId: string, patch: Partial<AbsenceNoteDraft>) => void;
+  onSave: (rider: MorningRider) => void | Promise<void>;
+};
+
 type ApiResponse = {
   success: boolean;
   error?: string;
@@ -1003,66 +1016,22 @@ export function MorningDeliveryView() {
               <tbody className="divide-y divide-slate-100">
                 {requiredAbsentRiders.map(({ rider, attendance: log, realtime10am }) => {
                   const off = isOffStatus(log?.status);
-                  const deliveredWithoutCheckIn = (realtime10am?.total_assigned ?? 0) > 0;
-                  const draft = absenceNoteDrafts[rider.id] ?? { reason: "", is_excused: false };
+                  const status = off ? attendanceStatusLabel(log?.status) : "Chưa điểm danh";
+                  const realtimeOrderCount = realtime10am?.total_assigned ?? 0;
                   return (
-                    <tr key={rider.id} className="transition hover:bg-slate-50">
-                      <td className="px-4 py-3 font-black text-slate-950">{rider.rider_code}</td>
-                      <td className="px-4 py-3 font-semibold text-slate-700">{rider.full_name?.trim() || "Chưa có tên"}</td>
-                      <td className="px-4 py-3">
-                        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
-                          {rider.kv?.trim() || "-"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={cn(
-                          "inline-flex rounded-md px-2 py-1 text-[11px] font-bold",
-                          off ? offStatusClass(log?.status) : "bg-red-50 text-red-700",
-                        )}>
-                          {off ? attendanceStatusLabel(log?.status) : "Chưa điểm danh"}
-                        </span>
-                      </td>
-                      <td className="max-w-[440px] px-4 py-3 text-slate-600">
-                        {deliveredWithoutCheckIn ? (
-                          <p className="font-bold text-red-700">
-                            Có đi giao nhưng không điểm danh ({realtime10am?.total_assigned} đơn tính đến 10:00)
-                          </p>
-                        ) : null}
-                        {off ? <p className={deliveredWithoutCheckIn ? "mt-1" : undefined}>{log?.note?.trim() || "Có lịch OFF, chưa có ghi chú."}</p> : !deliveredWithoutCheckIn ? "-" : null}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Input
-                          value={draft.reason}
-                          disabled={!canEdit || savingNoteRiderId === rider.id}
-                          onChange={(event) => updateAbsenceNoteDraft(rider.id, { reason: event.target.value })}
-                          placeholder="Nhập lý do vắng"
-                          maxLength={500}
-                          className="min-w-64"
-                        />
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <input
-                          type="checkbox"
-                          checked={draft.is_excused}
-                          disabled={!canEdit || savingNoteRiderId === rider.id}
-                          onChange={(event) => updateAbsenceNoteDraft(rider.id, { is_excused: event.target.checked })}
-                          aria-label={`Đánh dấu ${rider.rider_code} vắng có phép`}
-                          className="size-5 rounded border-slate-300 accent-emerald-600"
-                        />
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="size-10 p-0"
-                          disabled={!canEdit || savingNoteRiderId === rider.id}
-                          onClick={() => void saveAbsenceNote(rider)}
-                          aria-label={`Lưu lý do vắng của ${rider.rider_code}`}
-                        >
-                          <Save size={16} className={savingNoteRiderId === rider.id ? "animate-pulse" : undefined} />
-                        </Button>
-                      </td>
-                    </tr>
+                    <RequiredAbsentRiderRow
+                      key={rider.id}
+                      rider={rider}
+                      attendance={log}
+                      draft={absenceNoteDrafts[rider.id] ?? { reason: "", is_excused: false }}
+                      status={status}
+                      hasRealtimeOrders={realtimeOrderCount > 0}
+                      realtimeOrderCount={realtimeOrderCount}
+                      canEdit={canEdit}
+                      saving={savingNoteRiderId === rider.id}
+                      onDraftChange={updateAbsenceNoteDraft}
+                      onSave={saveAbsenceNote}
+                    />
                   );
                 })}
               </tbody>
@@ -1079,6 +1048,89 @@ export function MorningDeliveryView() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function RequiredAbsentRiderRow({
+  rider,
+  attendance,
+  draft,
+  status,
+  hasRealtimeOrders,
+  realtimeOrderCount,
+  canEdit,
+  saving,
+  onDraftChange,
+  onSave,
+}: RequiredAbsentRiderRowProps) {
+  const off = isOffStatus(attendance?.status);
+  const statusNote = renderStatusNote(status, hasRealtimeOrders, realtimeOrderCount);
+
+  return (
+    <tr className="transition hover:bg-slate-50">
+      <td className="px-4 py-3 font-black text-slate-950">{rider.rider_code}</td>
+      <td className="px-4 py-3 font-semibold text-slate-700">{rider.full_name?.trim() || "Chưa có tên"}</td>
+      <td className="px-4 py-3">
+        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
+          {rider.kv?.trim() || "-"}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        <span className={cn(
+          "inline-flex rounded-md px-2 py-1 text-[11px] font-bold",
+          off ? offStatusClass(attendance?.status) : "bg-red-50 text-red-700",
+        )}>
+          {status}
+        </span>
+      </td>
+      <td className="max-w-[440px] px-4 py-3 text-slate-600">
+        {off ? attendance?.note?.trim() || "Có lịch OFF, chưa có ghi chú." : "-"}
+      </td>
+      <td className="px-4 py-3">
+        {statusNote}
+        <Input
+          value={draft.reason}
+          disabled={!canEdit || saving}
+          onChange={(event) => onDraftChange(rider.id, { reason: event.target.value })}
+          placeholder="Nhập lý do vắng"
+          maxLength={500}
+          className={cn("min-w-64", statusNote && "mt-2")}
+        />
+      </td>
+      <td className="px-4 py-3 text-center">
+        <input
+          type="checkbox"
+          checked={draft.is_excused}
+          disabled={!canEdit || saving}
+          onChange={(event) => onDraftChange(rider.id, { is_excused: event.target.checked })}
+          aria-label={`Đánh dấu ${rider.rider_code} vắng có phép`}
+          className="size-5 rounded border-slate-300 accent-emerald-600"
+        />
+      </td>
+      <td className="px-4 py-3 text-right">
+        <Button
+          type="button"
+          variant="secondary"
+          className="size-10 p-0"
+          disabled={!canEdit || saving}
+          onClick={() => void onSave(rider)}
+          aria-label={`Lưu lý do vắng của ${rider.rider_code}`}
+        >
+          <Save size={16} className={saving ? "animate-pulse" : undefined} />
+        </Button>
+      </td>
+    </tr>
+  );
+}
+
+function renderStatusNote(status: string, hasRealtimeOrders: boolean, realtimeOrderCount: number) {
+  if (status !== "Chưa điểm danh" || !hasRealtimeOrders) return null;
+
+  return (
+    <p className="text-sm font-semibold text-orange-500">
+      Có lấy hàng nhưng không điểm danh
+      {realtimeOrderCount > 0 ? <span className="font-medium"> ({realtimeOrderCount} đơn realtime)</span> : null}
+    </p>
   );
 }
 

@@ -3,15 +3,20 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma/client";
 
-export const performanceSortSchema = z.enum(["rider", "delivery", "pickup", "deliveryRate", "pickupRate"]);
+export const performanceSortSchema = z.enum(["area", "rider", "delivery", "pickup", "deliveryRate", "pickupRate"]);
 export const performanceDirectionSchema = z.enum(["asc", "desc"]);
+export const performanceKvSchema = z.enum(["all", "KV5", "KV6"]);
 
 export type PerformanceSortKey = z.infer<typeof performanceSortSchema>;
 export type PerformanceDirection = z.infer<typeof performanceDirectionSchema>;
+export type PerformanceKvFilter = z.infer<typeof performanceKvSchema>;
 
 export type PerformanceFilters = {
   date: string;
   q: string;
+  kv: PerformanceKvFilter;
+  district: string;
+  cot: string;
   sort: PerformanceSortKey;
   dir: PerformanceDirection;
   page: number;
@@ -48,6 +53,10 @@ export type PerformanceResult = {
   filters: PerformanceFilters;
   rows: PerformanceRow[];
   summary: PerformanceSummary;
+  options: {
+    districts: string[];
+    cots: string[];
+  };
 };
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -81,30 +90,46 @@ export function parsePerformanceFilters(params: SearchParamsLike): PerformanceFi
   return {
     date: parsedDate.success ? parsedDate.data : todayString(),
     q: (getParam(params, "q") ?? "").trim().slice(0, 80),
-    sort: performanceSortSchema.catch("delivery").parse(getParam(params, "sort")),
-    dir: performanceDirectionSchema.catch("desc").parse(getParam(params, "dir")),
+    kv: performanceKvSchema.catch("all").parse(getParam(params, "kv")),
+    district: (getParam(params, "district") ?? "all").trim().slice(0, 80) || "all",
+    cot: (getParam(params, "cot") ?? "all").trim().slice(0, 40) || "all",
+    sort: performanceSortSchema.catch("area").parse(getParam(params, "sort")),
+    dir: performanceDirectionSchema.catch("asc").parse(getParam(params, "dir")),
     page: Math.max(1, Number.isFinite(rawPage) ? Math.trunc(rawPage) : 1),
     pageSize: Math.min(200, Math.max(25, Number.isFinite(rawPageSize) ? Math.trunc(rawPageSize) : 100)),
   };
 }
 
-function orderExpression(sort: PerformanceSortKey) {
-  if (sort === "rider") return Prisma.sql`coalesce(final.rider_name, final.driver_name, final.driver_id)`;
-  if (sort === "pickup") return Prisma.sql`final.pickup_picked`;
-  if (sort === "deliveryRate") return Prisma.sql`final.delivery_rate`;
-  if (sort === "pickupRate") return Prisma.sql`final.pickup_rate`;
-  return Prisma.sql`final.delivery_delivered`;
-}
+function orderClause(sort: PerformanceSortKey, direction: PerformanceDirection) {
+  const dir = direction === "asc" ? Prisma.sql`asc nulls last` : Prisma.sql`desc nulls last`;
+  const areaAsc = Prisma.sql`
+    final.kv asc nulls last,
+    final.delivery_district asc nulls last,
+    final.cot asc nulls last,
+    coalesce(final.rider_name, final.driver_name, final.driver_id) asc nulls last
+  `;
+  const areaDesc = Prisma.sql`
+    final.kv desc nulls last,
+    final.delivery_district desc nulls last,
+    final.cot desc nulls last,
+    coalesce(final.rider_name, final.driver_name, final.driver_id) desc nulls last
+  `;
 
-function orderDirection(direction: PerformanceDirection) {
-  return direction === "asc" ? Prisma.sql`asc nulls last` : Prisma.sql`desc nulls last`;
+  if (sort === "area") return direction === "asc" ? areaAsc : areaDesc;
+  if (sort === "rider") return Prisma.sql`coalesce(final.rider_name, final.driver_name, final.driver_id) ${dir}, ${areaAsc}`;
+  if (sort === "pickup") return Prisma.sql`final.pickup_picked ${dir}, ${areaAsc}`;
+  if (sort === "deliveryRate") return Prisma.sql`final.delivery_rate ${dir}, ${areaAsc}`;
+  if (sort === "pickupRate") return Prisma.sql`final.pickup_rate ${dir}, ${areaAsc}`;
+  return Prisma.sql`final.delivery_delivered ${dir}, ${areaAsc}`;
 }
 
 export const getDriverPerformance = cache(async (filters: PerformanceFilters): Promise<PerformanceResult> => {
-  const orderBy = orderExpression(filters.sort);
-  const direction = orderDirection(filters.dir);
+  const orderBy = orderClause(filters.sort, filters.dir);
   const offset = (filters.page - 1) * filters.pageSize;
   const likeQuery = `%${filters.q}%`;
+  const kvClause = filters.kv === "all" ? Prisma.empty : Prisma.sql`and upper(coalesce(kv, '')) = ${filters.kv}`;
+  const districtClause = filters.district === "all" ? Prisma.empty : Prisma.sql`and delivery_district = ${filters.district}`;
+  const cotClause = filters.cot === "all" ? Prisma.empty : Prisma.sql`and cot = ${filters.cot}`;
   const searchClause = filters.q
     ? Prisma.sql`and (
         p.driver_id ilike ${likeQuery}
@@ -152,6 +177,9 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
         delivery_district
       from public.riders
       where upper(coalesce(kv, '')) in ('KV5', 'KV6')
+        ${kvClause}
+        ${districtClause}
+        ${cotClause}
     ),
     grouped as (
       select
@@ -200,9 +228,28 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
       totals.total_active_riders
     from final
     cross join totals
-    order by ${orderBy} ${direction}, final.delivery_delivered desc, final.pickup_picked desc, final.driver_id asc
+    order by ${orderBy}, final.delivery_delivered desc, final.pickup_picked desc, final.driver_id asc
     limit ${filters.pageSize}
     offset ${offset}
+  `;
+
+  const options = await prisma.$queryRaw<Array<{ delivery_district: string | null; cot: string | null }>>`
+    with rider_scope as (
+      select
+        rider_code,
+        cot,
+        delivery_district
+      from public.riders
+      where upper(coalesce(kv, '')) in ('KV5', 'KV6')
+        ${kvClause}
+    )
+    select distinct
+      nullif(trim(r.delivery_district), '') as delivery_district,
+      nullif(trim(r.cot), '') as cot
+    from public.driver_performance_daily p
+    join rider_scope r on r.rider_code = p.driver_id
+    where p.report_date = ${filters.date}::date
+    order by delivery_district asc nulls last, cot asc nulls last
   `;
 
   const first = rows[0];
@@ -234,6 +281,12 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
           pickup_picked: decimalToNumber(first.total_pickup_picked) ?? 0,
         }
       : emptySummary,
+    options: {
+      districts: Array.from(new Set(options.map((option) => option.delivery_district).filter(Boolean) as string[])).sort((a, b) =>
+        a.localeCompare(b, "vi"),
+      ),
+      cots: Array.from(new Set(options.map((option) => option.cot).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b, "vi")),
+    },
   };
 });
 
