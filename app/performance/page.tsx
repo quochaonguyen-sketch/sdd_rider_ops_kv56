@@ -19,7 +19,8 @@ async function PerformanceContent({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const filters = parsePerformanceFilters(await searchParams);
+  const params = await searchParams;
+  const filters = parsePerformanceFilters(params);
   let result: PerformanceResult | null = null;
   let error: string | null = null;
 
@@ -29,5 +30,17 @@ async function PerformanceContent({
     error = caught instanceof Error ? caught.message : "Không thể tải dữ liệu performance";
   }
 
-  return <DriverPerformanceView result={result} filters={filters} error={error} />;
+  const loadedKey = [
+    filters.date,
+    filters.q,
+    filters.sort,
+    filters.dir,
+    filters.page,
+    filters.pageSize,
+    Array.isArray(params._r) ? params._r[0] : params._r ?? "",
+    result?.summary.groups ?? 0,
+    result?.rows.length ?? 0,
+  ].join("|");
+
+  return <DriverPerformanceView result={result} filters={filters} error={error} loadedKey={loadedKey} />;
 }

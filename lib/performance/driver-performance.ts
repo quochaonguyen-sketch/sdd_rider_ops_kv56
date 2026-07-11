@@ -142,7 +142,18 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
       total_active_riders: bigint | null;
     }>
   >`
-    with grouped as (
+    with rider_scope as (
+      select
+        rider_code,
+        full_name,
+        kv,
+        cot,
+        pickup_district,
+        delivery_district
+      from public.riders
+      where upper(coalesce(kv, '')) in ('KV5', 'KV6')
+    ),
+    grouped as (
       select
         p.report_date::date as report_date,
         p.driver_id,
@@ -157,9 +168,8 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
         sum(coalesce(p.pickup_assigned, 0))::bigint as pickup_assigned,
         sum(coalesce(p.pickup_picked, 0))::bigint as pickup_picked
       from public.driver_performance_daily p
-      join public.riders r on r.rider_code = p.driver_id
+      join rider_scope r on r.rider_code = p.driver_id
       where p.report_date = ${filters.date}::date
-        and upper(coalesce(r.kv, '')) in ('KV5', 'KV6')
         ${searchClause}
       group by p.report_date, p.driver_id
     ),

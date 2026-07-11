@@ -21,6 +21,7 @@ type Props = {
   result: PerformanceResult | null;
   filters: PerformanceFilters;
   error: string | null;
+  loadedKey: string;
 };
 
 const emptySummary: PerformanceSummary = {
@@ -32,24 +33,34 @@ const emptySummary: PerformanceSummary = {
   pickup_picked: 0,
 };
 
-export function DriverPerformanceView({ result, filters, error }: Props) {
+export function DriverPerformanceView({ result, filters, error, loadedKey }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
+  const [clientLoading, setClientLoading] = useState(false);
   const [queryInput, setQueryInput] = useState(filters.q);
   const rows = result?.rows ?? [];
   const summary = result?.summary ?? emptySummary;
   const pageCount = Math.max(1, Math.ceil(summary.groups / filters.pageSize));
-  const isLoading = isPending;
+  const isLoading = isPending || clientLoading;
 
   const updateParams = useCallback((mutator: (params: URLSearchParams) => void) => {
     const params = new URLSearchParams(searchParams.toString());
     mutator(params);
+    const nextUrl = `${pathname}?${params.toString()}`;
+    const currentUrl = `${pathname}?${searchParams.toString()}`;
+    if (nextUrl === currentUrl) return;
+    setClientLoading(true);
     startTransition(() => {
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      router.replace(nextUrl, { scroll: false });
     });
   }, [pathname, router, searchParams]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setClientLoading(false), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadedKey]);
 
   useEffect(() => {
     const nextQuery = queryInput.trim();
@@ -97,7 +108,9 @@ export function DriverPerformanceView({ result, filters, error }: Props) {
   }
 
   function refresh() {
-    router.refresh();
+    updateParams((params) => {
+      params.set("_r", String(Date.now()));
+    });
   }
 
   return (
@@ -163,10 +176,19 @@ export function DriverPerformanceView({ result, filters, error }: Props) {
             <h2 className="font-bold text-slate-950">Danh sách rider theo ngày</h2>
             <p className="text-sm text-slate-500">Bộ lọc: {activeFilterText}.</p>
           </div>
-          <Badge tone="blue">{formatNumber(rows.length)} / {formatNumber(summary.groups)} dòng</Badge>
+          <div className="flex items-center gap-2">
+            {isLoading ? <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">Đang tải dữ liệu...</span> : null}
+            <Badge tone="blue">{formatNumber(rows.length)} / {formatNumber(summary.groups)} dòng</Badge>
+          </div>
         </div>
 
-        <div className="max-h-[68vh] overflow-auto [scrollbar-gutter:stable]">
+        <div className="relative max-h-[68vh] overflow-auto [scrollbar-gutter:stable]">
+          {isLoading ? (
+            <div className="sticky top-0 z-20 flex items-center gap-2 border-b border-blue-100 bg-blue-50/95 px-4 py-2 text-sm font-semibold text-blue-700 backdrop-blur">
+              <span className="size-3 animate-spin rounded-full border-2 border-blue-300 border-t-blue-700" />
+              Đang tải dữ liệu ngày {formatDate(filters.date)}...
+            </div>
+          ) : null}
           <table className="w-full min-w-[1040px] text-left text-sm">
             <caption className="sr-only">Bảng performance Deli Pick rider KV5 KV6 theo một ngày</caption>
             <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 shadow-[0_1px_0_#e2e8f0]">
@@ -181,7 +203,7 @@ export function DriverPerformanceView({ result, filters, error }: Props) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {isLoading ? (
+              {isLoading && rows.length === 0 ? (
                 Array.from({ length: 8 }, (_, index) => (
                   <tr key={index} className="h-16 animate-pulse">
                     <td colSpan={7} className="px-4">
