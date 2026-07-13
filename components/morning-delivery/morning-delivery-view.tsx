@@ -93,6 +93,7 @@ type ApiResponse = {
   success: boolean;
   error?: string;
   can_edit?: boolean;
+  can_manage_riders?: boolean;
   riders?: MorningRider[];
   assignments?: AssignmentRow[];
   attendance?: AttendanceRow[];
@@ -136,6 +137,7 @@ export function MorningDeliveryView() {
   const [editingDefaultRiderId, setEditingDefaultRiderId] = useState<string | null>(null);
   const [cloneSourceRiderId, setCloneSourceRiderId] = useState("");
   const [canEdit, setCanEdit] = useState(false);
+  const [canManageRiders, setCanManageRiders] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [assignmentToast, setAssignmentToast] = useState<{ riderId: string; riderCode: string; district: string; message: string } | null>(null);
@@ -168,6 +170,7 @@ export function MorningDeliveryView() {
       ),
     );
     setCanEdit(Boolean(result.can_edit));
+    setCanManageRiders(Boolean(result.can_manage_riders));
     setLoading(false);
   }, [date]);
 
@@ -925,7 +928,7 @@ export function MorningDeliveryView() {
                     <td className="px-4 py-3">
                       <select
                         value={district?.id ?? ""}
-                        disabled={!canEdit || savingDefaultRiderId === rider.id}
+                        disabled={!canManageRiders || savingDefaultRiderId === rider.id}
                         onChange={(event) => {
                           const next = hcmDistricts.find((item) => item.id === event.target.value);
                           updateDefaultRoute(rider.id, next?.name ?? "");
@@ -941,13 +944,13 @@ export function MorningDeliveryView() {
                         {district ? findDefaultWards(district, rider.delivery_ward).map((ward) => <span key={ward.name} className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-100">{ward.name}</span>) : null}
                         {!rider.delivery_ward?.trim() ? <span className="text-xs text-slate-400">Chưa chọn phường</span> : null}
                       </div>
-                      <Button type="button" variant="outline" className="mt-2" disabled={!canEdit || !district} onClick={() => { setEditingDefaultRiderId(rider.id); setCloneSourceRiderId(""); }}>
+                      <Button type="button" variant="outline" className="mt-2" disabled={!canManageRiders || !district} onClick={() => { setEditingDefaultRiderId(rider.id); setCloneSourceRiderId(""); }}>
                         Chọn phường
                       </Button>
                     </td>
                     <td className="px-4 py-3 font-bold text-slate-600">{assignmentState}</td>
                     <td className="px-4 py-3 text-right">
-                      <Button type="button" variant="secondary" className="size-10 p-0" disabled={!canEdit || savingDefaultRiderId === rider.id} onClick={() => void saveDefaultRoute(rider)}>
+                      <Button type="button" variant="secondary" className="size-10 p-0" disabled={!canManageRiders || savingDefaultRiderId === rider.id} onClick={() => void saveDefaultRoute(rider)}>
                         <Save size={16} />
                       </Button>
                     </td>

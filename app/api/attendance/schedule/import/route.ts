@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { canManageOperations } from "@/lib/auth/permissions";
 
 type ScheduleStatus =
   | ""
@@ -239,7 +240,7 @@ export async function GET(request: Request) {
   if (!session) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
-  if (session.role !== "admin" && session.role !== "leader") {
+  if (!canManageOperations(session.role)) {
     return NextResponse.json({ success: false, error: "Bạn không có quyền tải file lịch" }, { status: 403 });
   }
 
@@ -307,7 +308,7 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
-  if (session.role !== "admin" && session.role !== "leader") {
+  if (!canManageOperations(session.role)) {
     return NextResponse.json({ success: false, error: "Bạn không có quyền import lịch rider" }, { status: 403 });
   }
 

@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { canonicalDistrictName } from "@/lib/locations/hcm";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { canManageRiders } from "@/lib/auth/permissions";
 
 type ImportRow = {
   row: number;
@@ -134,6 +135,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
+  const admin = createAdminClient();
+  const { data: profile } = await admin.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (!canManageRiders(profile?.role)) {
+    return NextResponse.json({ success: false, error: "Bạn không có quyền import rider" }, { status: 403 });
+  }
+
   const formData = await request.formData();
   const file = formData.get("file");
 
@@ -173,7 +180,6 @@ export async function POST(request: Request) {
     }
   }
 
-  const admin = createAdminClient();
   const uniqueCodes = [...codeRows.keys()];
   const existingCodes = new Set<string>();
 

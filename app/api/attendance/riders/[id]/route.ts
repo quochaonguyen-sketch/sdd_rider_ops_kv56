@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { canManageOperations } from "@/lib/auth/permissions";
 
 const idSchema = z.string().uuid();
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -71,7 +72,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   return NextResponse.json({
     success: true,
-    can_edit: session.role === "admin" || session.role === "leader",
+    can_edit: canManageOperations(session.role),
     rider,
     logs: logs ?? [],
   });

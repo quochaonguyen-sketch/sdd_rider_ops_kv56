@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { canManageOperations, canManageRiders } from "@/lib/auth/permissions";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const assignSchema = z.object({
@@ -40,7 +41,7 @@ async function getSession() {
 }
 
 function canEdit(role: string) {
-  return role === "admin" || role === "leader";
+  return canManageOperations(role);
 }
 
 function isCot1(value: string | null) {
@@ -116,6 +117,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     success: true,
     can_edit: canEdit(session.role),
+    can_manage_riders: canManageRiders(session.role),
     riders: cot1Riders,
     assignments: assignmentResult.data ?? [],
     attendance: attendanceResult.data ?? [],

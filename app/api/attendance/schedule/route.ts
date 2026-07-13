@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { canManageOperations } from "@/lib/auth/permissions";
 
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -112,7 +113,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success: true,
-      can_edit: session.role === "admin" || session.role === "leader",
+      can_edit: canManageOperations(session.role),
       riders,
       logs,
     });
@@ -129,7 +130,7 @@ export async function PUT(request: Request) {
   if (!session) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
-  if (session.role !== "admin" && session.role !== "leader") {
+  if (!canManageOperations(session.role)) {
     return NextResponse.json({ success: false, error: "Bạn không có quyền sửa lịch rider" }, { status: 403 });
   }
 

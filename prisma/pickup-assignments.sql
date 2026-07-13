@@ -155,19 +155,27 @@ execute function public.set_pickup_assignments_updated_at();
 alter table public.pickup_assignments enable row level security;
 
 drop policy if exists "Authenticated users can read pickup assignments" on public.pickup_assignments;
-create policy "Authenticated users can read pickup assignments"
+drop policy if exists "Non-member users can read pickup assignments" on public.pickup_assignments;
+create policy "Non-member users can read pickup assignments"
 on public.pickup_assignments
 for select
 to authenticated
-using (true);
+using (
+  coalesce((select role from public.profiles where id = (select auth.uid())), 'viewer') <> 'member'
+);
 
 drop policy if exists "Authenticated users can update pickup assignment routes" on public.pickup_assignments;
-create policy "Authenticated users can update pickup assignment routes"
+drop policy if exists "Non-member users can update pickup assignment routes" on public.pickup_assignments;
+create policy "Non-member users can update pickup assignment routes"
 on public.pickup_assignments
 for update
 to authenticated
-using (true)
-with check (true);
+using (
+  coalesce((select role from public.profiles where id = (select auth.uid())), 'viewer') <> 'member'
+)
+with check (
+  coalesce((select role from public.profiles where id = (select auth.uid())), 'viewer') <> 'member'
+);
 
 grant select, update on table public.pickup_assignments to authenticated;
 grant all privileges on table public.pickup_assignments to service_role;

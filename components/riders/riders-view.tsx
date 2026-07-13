@@ -12,6 +12,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  CloudUpload,
   MapPin,
   Navigation,
   Pencil,
@@ -77,6 +78,14 @@ type RiderPerformanceResponse = {
   error?: string;
 };
 
+type ThiCongPlanSyncResponse = {
+  success: boolean;
+  updated_riders?: number;
+  updated_rows?: number;
+  missing_rider_codes?: string[];
+  error?: string;
+};
+
 type RiderSortKey = "name" | "status" | "zone" | "cot" | "updated";
 const RIDERS_PER_PAGE = 20;
 
@@ -94,7 +103,7 @@ const emptyRiderForm: RiderFormState = {
   status: "active",
 };
 
-export function RidersView() {
+export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
   const [districts, setDistricts] = useState<DistrictDefinition[]>(hcmDistricts);
   const [riders, setRiders] = useState<Rider[]>([]);
   const [query, setQuery] = useState("");
@@ -117,6 +126,7 @@ export function RidersView() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [planSyncing, setPlanSyncing] = useState(false);
   const [importIssues, setImportIssues] = useState<ImportIssue[]>([]);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -262,7 +272,7 @@ export function RidersView() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(editingId ? { id: editingId, ...form } : form),
     });
-    const result = (await response.json().catch(() => null)) as { error?: string; rider?: Rider } | null;
+    const result = (await response.json().catch(() => null)) as { error?: string; rider?: Rider; sheet_sync?: ThiCongPlanSyncResponse } | null;
 
     setSaving(false);
 
@@ -275,8 +285,37 @@ export function RidersView() {
     setShowAddForm(false);
     setEditingId(null);
     setSelected(result?.rider ?? selected);
-    setSuccess(editingId ? "Đã cập nhật rider thành công." : "Đã thêm rider thành công.");
+    const savedMessage = editingId ? "Đã cập nhật rider thành công." : "Đã thêm rider thành công.";
+    const sheetSync = result?.sheet_sync;
+    if (sheetSync?.success && (sheetSync.updated_rows ?? 0) > 0) {
+      setSuccess(`${savedMessage} Đã tự đồng bộ ${sheetSync.updated_rows} dòng trên Thi Công Plan.`);
+    } else if (sheetSync?.success && sheetSync.missing_rider_codes?.length) {
+      setSuccess(`${savedMessage} Chưa đồng bộ Plan vì không thấy ID ${sheetSync.missing_rider_codes.join(", ")} trong cột D.`);
+    } else if (sheetSync && !sheetSync.success) {
+      setError(`Rider đã được lưu nhưng đồng bộ Thi Công Plan lỗi: ${sheetSync.error ?? "Không xác định"}`);
+    } else {
+      setSuccess(savedMessage);
+    }
     await load();
+  }
+
+  async function syncAllRidersToPlan() {
+    setPlanSyncing(true);
+    setError(null);
+    setSuccess(null);
+    const response = await fetch("/api/riders/thi-cong-plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sync_all: true }),
+    });
+    const result = await response.json().catch(() => null) as ThiCongPlanSyncResponse | null;
+    setPlanSyncing(false);
+    if (!response.ok || !result?.success) {
+      setError(result?.error ?? "Không thể đồng bộ Thi Công Plan");
+      return;
+    }
+    const missing = result.missing_rider_codes?.length ?? 0;
+    setSuccess(`Đã đồng bộ ${result.updated_riders ?? 0} rider (${result.updated_rows ?? 0} dòng) sang Thi Công Plan${missing ? `; ${missing} ID chưa có trên sheet.` : "."}`);
   }
 
   async function importExcel(file: File) {
@@ -419,26 +458,33 @@ export function RidersView() {
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void importExcel(file);
-            }}
-          />
-          <Button type="button" variant="secondary" className="px-2 sm:px-4" disabled={importing} onClick={() => fileInputRef.current?.click()}>
-            <Upload size={16} />
-            <span className="hidden sm:inline">{importing ? "Đang import..." : "Import Excel"}</span>
-            <span className="sm:hidden">Excel</span>
-          </Button>
-          <Button type="button" className="px-2 sm:px-4" onClick={beginAdd}>
-            <Plus size={16} />
-            Thêm rider
-          </Button>
+        <div className="flex flex-wrap gap-2">
+          {canManageRiders ? <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importExcel(file);
+              }}
+            />
+            <Button type="button" variant="secondary" className="px-2 sm:px-4" disabled={planSyncing} onClick={() => void syncAllRidersToPlan()} title="Ghi KV, quận, phường và COT sang tab Thi Công Plan theo ID rider">
+              <CloudUpload size={16} />
+              <span className="hidden sm:inline">{planSyncing ? "Đang đồng bộ..." : "Đồng bộ Plan"}</span>
+              <span className="sm:hidden">Plan</span>
+            </Button>
+            <Button type="button" variant="secondary" className="px-2 sm:px-4" disabled={importing} onClick={() => fileInputRef.current?.click()}>
+              <Upload size={16} />
+              <span className="hidden sm:inline">{importing ? "Đang import..." : "Import Excel"}</span>
+              <span className="sm:hidden">Excel</span>
+            </Button>
+            <Button type="button" className="px-2 sm:px-4" onClick={beginAdd}>
+              <Plus size={16} />
+              Thêm rider
+            </Button>
+          </> : null}
           <Button type="button" variant="secondary" className="px-2 sm:px-4" onClick={refresh} disabled={loading}>
             <RefreshCcw size={16} />
             <span className="hidden sm:inline">Tải lại</span>
@@ -454,7 +500,7 @@ export function RidersView() {
         <StatCard className="col-span-6 xl:col-span-3" icon={<MapPin size={18} />} label="Chưa gán khu vực" value={stats.unassigned} helper="Không có zone hoặc quận giao" tone="amber" active={deliveryDistrict === "__unassigned__"} onClick={() => { setDeliveryDistrict("__unassigned__"); setDeliveryWard("all"); setPage(1); }} />
       </div>
 
-      {showAddForm ? (
+      {canManageRiders && showAddForm ? (
         <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-end bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-4">
           <button type="button" aria-label="Đóng form rider" className="absolute inset-0 cursor-default" onClick={closeForm} />
           <Card className={cn("app-modal-panel relative z-10 w-full rounded-b-none shadow-2xl sm:mx-auto sm:max-w-6xl sm:rounded-xl", editingId && "border-blue-200 bg-blue-50")}>
@@ -581,12 +627,12 @@ export function RidersView() {
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div><h2 className="font-semibold text-slate-950">Danh sách rider</h2><p className="text-xs text-slate-500">{filtered.length} kết quả · Chọn dòng để xem chi tiết</p></div>
-            {checkedIds.size > 0 ? <div className="flex items-center gap-2"><span className="text-sm font-semibold text-blue-700">Đã chọn {checkedIds.size}</span>{checkedIds.size === 1 ? <Button type="button" variant="secondary" className="h-9" onClick={() => { const rider = riders.find((item) => checkedIds.has(item.id)); if (rider) beginEdit(rider); }}><Pencil size={15} />Sửa</Button> : null}<Button type="button" variant="ghost" className="h-9" onClick={() => setCheckedIds(new Set())}>Bỏ chọn</Button></div> : null}
+            {canManageRiders && checkedIds.size > 0 ? <div className="flex items-center gap-2"><span className="text-sm font-semibold text-blue-700">Đã chọn {checkedIds.size}</span>{checkedIds.size === 1 ? <Button type="button" variant="secondary" className="h-9" onClick={() => { const rider = riders.find((item) => checkedIds.has(item.id)); if (rider) beginEdit(rider); }}><Pencil size={15} />Sửa</Button> : null}<Button type="button" variant="ghost" className="h-9" onClick={() => setCheckedIds(new Set())}>Bỏ chọn</Button></div> : null}
           </div>
           <div className="max-h-[680px] min-h-[480px] overflow-auto">
             <table className="w-full min-w-[860px] table-fixed text-left text-sm">
-              <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-600 shadow-[0_1px_0_#e2e8f0]"><tr><th className="w-12 px-4 py-3"><input type="checkbox" aria-label="Chọn tất cả rider trên trang" checked={paginated.length > 0 && visibleChecked === paginated.length} onChange={toggleVisible} /></th><SortableRiderHeader label="Rider" sortKey="name" current={sort} onSort={changeSort} className="w-[30%]" /><SortableRiderHeader label="Trạng thái" sortKey="status" current={sort} onSort={changeSort} className="w-[14%]" /><SortableRiderHeader label="Khu vực" sortKey="zone" current={sort} onSort={changeSort} /><SortableRiderHeader label="COT" sortKey="cot" current={sort} onSort={changeSort} /><SortableRiderHeader label="Cập nhật" sortKey="updated" current={sort} onSort={changeSort} align="right" /><th className="w-16" /></tr></thead>
-              <tbody className="divide-y divide-slate-100">{loading ? Array.from({ length: 8 }, (_, index) => <tr key={index} className="h-16 animate-pulse"><td colSpan={7} className="px-4"><div className="h-4 rounded bg-slate-100" /></td></tr>) : paginated.map((rider) => <tr key={rider.id} className={cn("h-16 cursor-pointer transition hover:bg-blue-50/50", checkedIds.has(rider.id) && "bg-blue-50/70")} onClick={() => { setSelected(rider); setShowDetail(true); }}><td className="px-4" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Chọn ${rider.full_name ?? rider.rider_code}`} checked={checkedIds.has(rider.id)} onChange={() => toggleChecked(rider.id)} /></td><td className="px-4 py-2"><div className="flex min-w-0 items-center gap-3"><RiderAvatar rider={rider} size="sm" /><div className="min-w-0"><p className="truncate font-semibold text-slate-950">{rider.full_name ?? "Chưa có tên"}</p><p className="truncate font-mono text-xs text-slate-500">{rider.rider_code}{riderPhone(rider) ? ` · ${riderPhone(rider)}` : ""}</p></div></div></td><td className="px-4"><RiderStatusBadge status={rider.status} /></td><td className="px-4"><p className="truncate font-medium text-slate-800">{districtDisplayName(rider.delivery_district, districts) || "Chưa gán"}</p><p className="truncate text-xs text-slate-500">{rider.delivery_ward ?? rider.kv ?? "—"}</p></td><td className="px-4 font-semibold text-slate-700">{rider.cot ?? "—"}</td><td className="px-4 text-right"><p className="text-sm tabular-nums text-slate-700">{formatRelativeTime(rider.updated_at)}</p><p className="text-xs tabular-nums text-slate-400">{formatShortDate(rider.updated_at)}</p></td><td className="pr-3 text-right"><Button type="button" variant="ghost" aria-label={`Sửa ${rider.full_name ?? rider.rider_code}`} className="size-9 p-0" onClick={(event) => { event.stopPropagation(); beginEdit(rider); }}><Pencil size={15} /></Button></td></tr>)}{!loading && paginated.length === 0 ? <tr><td colSpan={7} className="h-80 text-center text-sm text-slate-500">Không có rider nào khớp bộ lọc hiện tại.</td></tr> : null}</tbody>
+              <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-600 shadow-[0_1px_0_#e2e8f0]"><tr>{canManageRiders ? <th className="w-12 px-4 py-3"><input type="checkbox" aria-label="Chọn tất cả rider trên trang" checked={paginated.length > 0 && visibleChecked === paginated.length} onChange={toggleVisible} /></th> : null}<SortableRiderHeader label="Rider" sortKey="name" current={sort} onSort={changeSort} className="w-[30%]" /><SortableRiderHeader label="Trạng thái" sortKey="status" current={sort} onSort={changeSort} className="w-[14%]" /><SortableRiderHeader label="Khu vực" sortKey="zone" current={sort} onSort={changeSort} /><SortableRiderHeader label="COT" sortKey="cot" current={sort} onSort={changeSort} /><SortableRiderHeader label="Cập nhật" sortKey="updated" current={sort} onSort={changeSort} align="right" />{canManageRiders ? <th className="w-16" /> : null}</tr></thead>
+              <tbody className="divide-y divide-slate-100">{loading ? Array.from({ length: 8 }, (_, index) => <tr key={index} className="h-16 animate-pulse"><td colSpan={canManageRiders ? 7 : 5} className="px-4"><div className="h-4 rounded bg-slate-100" /></td></tr>) : paginated.map((rider) => <tr key={rider.id} className={cn("h-16 cursor-pointer transition hover:bg-blue-50/50", checkedIds.has(rider.id) && "bg-blue-50/70")} onClick={() => { setSelected(rider); setShowDetail(true); }}>{canManageRiders ? <td className="px-4" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Chọn ${rider.full_name ?? rider.rider_code}`} checked={checkedIds.has(rider.id)} onChange={() => toggleChecked(rider.id)} /></td> : null}<td className="px-4 py-2"><div className="flex min-w-0 items-center gap-3"><RiderAvatar rider={rider} size="sm" /><div className="min-w-0"><p className="truncate font-semibold text-slate-950">{rider.full_name ?? "Chưa có tên"}</p><p className="truncate font-mono text-xs text-slate-500">{rider.rider_code}{riderPhone(rider) ? ` · ${riderPhone(rider)}` : ""}</p></div></div></td><td className="px-4"><RiderStatusBadge status={rider.status} /></td><td className="px-4"><p className="truncate font-medium text-slate-800">{districtDisplayName(rider.delivery_district, districts) || "Chưa gán"}</p><p className="truncate text-xs text-slate-500">{rider.delivery_ward ?? rider.kv ?? "—"}</p></td><td className="px-4 font-semibold text-slate-700">{rider.cot ?? "—"}</td><td className="px-4 text-right"><p className="text-sm tabular-nums text-slate-700">{formatRelativeTime(rider.updated_at)}</p><p className="text-xs tabular-nums text-slate-400">{formatShortDate(rider.updated_at)}</p></td>{canManageRiders ? <td className="pr-3 text-right"><Button type="button" variant="ghost" aria-label={`Sửa ${rider.full_name ?? rider.rider_code}`} className="size-9 p-0" onClick={(event) => { event.stopPropagation(); beginEdit(rider); }}><Pencil size={15} /></Button></td> : null}</tr>)}{!loading && paginated.length === 0 ? <tr><td colSpan={canManageRiders ? 7 : 5} className="h-80 text-center text-sm text-slate-500">Không có rider nào khớp bộ lọc hiện tại.</td></tr> : null}</tbody>
             </table>
           </div>
           <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3"><p className="text-sm text-slate-500">Trang <strong className="text-slate-700">{safePage}/{pageCount}</strong></p><div className="flex gap-2"><Button type="button" variant="secondary" className="size-9 p-0" aria-label="Trang trước" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}><ChevronLeft size={16} /></Button><Button type="button" variant="secondary" className="size-9 p-0" aria-label="Trang sau" disabled={safePage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}><ChevronRight size={16} /></Button></div></div>
@@ -594,7 +640,7 @@ export function RidersView() {
       </div>
 
       {selected && showDetail ? (
-        <RiderDetailModal selected={selected} deleting={selected.id === deletingId} onClose={() => setShowDetail(false)} onEdit={beginEdit} onDelete={deleteRider} onUpdated={updateRiderInView} />
+        <RiderDetailModal selected={selected} canManageRiders={canManageRiders} deleting={selected.id === deletingId} onClose={() => setShowDetail(false)} onEdit={beginEdit} onDelete={deleteRider} onUpdated={updateRiderInView} />
       ) : null}
     </div>
   );
@@ -679,7 +725,7 @@ function riderPhone(rider: Rider) {
   return typeof phone === "string" || typeof phone === "number" ? String(phone) : "";
 }
 
-function RiderDetailModal({ selected, deleting, onClose, onEdit, onDelete, onUpdated }: { selected: Rider; deleting: boolean; onClose: () => void; onEdit: (rider: Rider) => void; onDelete: (rider: Rider) => void; onUpdated: (rider: Rider) => void }) {
+function RiderDetailModal({ selected, canManageRiders, deleting, onClose, onEdit, onDelete, onUpdated }: { selected: Rider; canManageRiders: boolean; deleting: boolean; onClose: () => void; onEdit: (rider: Rider) => void; onDelete: (rider: Rider) => void; onUpdated: (rider: Rider) => void }) {
   const [performance, setPerformance] = useState<DriverPerformanceDaily[]>([]);
   const [performanceLoading, setPerformanceLoading] = useState(false);
   const [performanceError, setPerformanceError] = useState<string | null>(null);
@@ -743,12 +789,12 @@ function RiderDetailModal({ selected, deleting, onClose, onEdit, onDelete, onUpd
         <div className="min-h-0 flex-1 overflow-y-auto p-5 [scrollbar-gutter:stable] md:p-6">
           <div className="grid gap-5 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
             <div className="min-w-0">
-              <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
+              {canManageRiders ? <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
                 <p className="font-semibold text-blue-950">Cập nhật avatar rider</p>
                 <div className="mt-3">
                   <RiderAvatarEditor rider={selected} onUpdated={onUpdated} />
                 </div>
-              </div>
+              </div> : null}
 
               <div className="mt-4 grid grid-cols-3 gap-2">
                 <SummaryChip label="KV" value={selected.kv ?? "-"} tone="blue" />
@@ -766,7 +812,7 @@ function RiderDetailModal({ selected, deleting, onClose, onEdit, onDelete, onUpd
           </div>
         </div>
 
-        <div className="shrink-0 border-t border-slate-100 bg-white p-5 pt-4 md:p-6">
+        {canManageRiders ? <div className="shrink-0 border-t border-slate-100 bg-white p-5 pt-4 md:p-6">
           <div className="grid gap-2 sm:grid-cols-2">
             <Button type="button" className="w-full" onClick={() => onEdit(selected)}>
               <Pencil size={16} />
@@ -777,7 +823,7 @@ function RiderDetailModal({ selected, deleting, onClose, onEdit, onDelete, onUpd
               {deleting ? "Đang xóa..." : "Xóa rider"}
             </Button>
           </div>
-        </div>
+        </div> : null}
       </Card>
     </div>
   );

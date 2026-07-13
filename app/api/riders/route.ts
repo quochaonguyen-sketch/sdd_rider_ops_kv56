@@ -3,6 +3,8 @@ import { z } from "zod";
 import { canonicalDistrictName } from "@/lib/locations/hcm";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { canManageRiders } from "@/lib/auth/permissions";
+import { syncRidersToThiCongPlan } from "@/lib/google/thi-cong-plan";
 
 const createRiderSchema = z.object({
   kv: z.string().trim().optional().nullable(),
@@ -27,6 +29,17 @@ function normalizeBinhThanhDistrict(value: string | null | undefined) {
   return canonicalDistrictName(trimmed) === "Quận Bình Thạnh" ? "Quận Bình Thạnh" : trimmed;
 }
 
+async function syncSavedRider(rider: Parameters<typeof syncRidersToThiCongPlan>[0][number], signal: AbortSignal) {
+  try {
+    return await syncRidersToThiCongPlan([rider], signal);
+  } catch (error) {
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : "Không thể đồng bộ Thi Công Plan",
+    };
+  }
+}
+
 async function getSignedInUser() {
   const supabase = await createClient();
   const {
@@ -35,10 +48,26 @@ async function getSignedInUser() {
   return user;
 }
 
-export async function POST(request: Request) {
+async function getRiderManager() {
   const user = await getSignedInUser();
+  if (!user) return { user: null, allowed: false };
+
+  const { data: profile } = await createAdminClient()
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  return { user, allowed: canManageRiders(profile?.role) };
+}
+
+export async function POST(request: Request) {
+  const { user, allowed } = await getRiderManager();
   if (!user) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+  if (!allowed) {
+    return NextResponse.json({ success: false, error: "Bạn không có quyền thêm rider" }, { status: 403 });
   }
 
   const payload = await request.json().catch(() => null);
@@ -98,13 +127,17 @@ export async function POST(request: Request) {
     raw_data: rider,
   });
 
-  return NextResponse.json({ success: true, rider: data });
+  const sheetSync = await syncSavedRider(data, request.signal);
+  return NextResponse.json({ success: true, rider: data, sheet_sync: sheetSync });
 }
 
 export async function PATCH(request: Request) {
-  const user = await getSignedInUser();
+  const { user, allowed } = await getRiderManager();
   if (!user) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+  if (!allowed) {
+    return NextResponse.json({ success: false, error: "Bạn không có quyền chỉnh sửa rider" }, { status: 403 });
   }
 
   const payload = await request.json().catch(() => null);
@@ -176,17 +209,17 @@ export async function PATCH(request: Request) {
     raw_data: rider,
   });
 
-  return NextResponse.json({ success: true, rider: data });
+  const sheetSync = await syncSavedRider(data, request.signal);
+  return NextResponse.json({ success: true, rider: data, sheet_sync: sheetSync });
 }
 
 export async function DELETE(request: Request) {
-  const user = await getSignedInUser();
+  const { user, allowed } = await getRiderManager();
   if (!user) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-  const admin = createAdminClient();
-  const { data: profile } = await admin.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (profile?.role !== "admin" && profile?.role !== "leader") {
+  if (!allowed) {
     return NextResponse.json({ success: false, error: "Bạn không có quyền xóa rider" }, { status: 403 });
   }
+  const admin = createAdminClient();
   const parsed = z.object({ id: z.string().uuid() }).safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ success: false, error: "Rider không hợp lệ" }, { status: 400 });
   const { data: rider, error: findError } = await admin.from("riders").select("id,rider_code,full_name").eq("id", parsed.data.id).maybeSingle();

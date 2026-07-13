@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { canManageRiders } from "@/lib/auth/permissions";
 
 const BUCKET = "rider-avatars";
 const MAX_AVATAR_SIZE = 3 * 1024 * 1024;
@@ -30,6 +31,11 @@ export async function POST(request: Request, context: RouteContext<"/api/riders/
   }
 
   const admin = createAdminClient();
+  const { data: profile } = await admin.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (!canManageRiders(profile?.role)) {
+    return NextResponse.json({ success: false, error: "Bạn không có quyền chỉnh sửa avatar rider" }, { status: 403 });
+  }
+
   const { data: rider, error: riderError } = await admin
     .from("riders")
     .select("id, rider_code, avatar_url")

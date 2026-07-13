@@ -54,7 +54,7 @@ const toolItems = [
   { href: "/zone-builder", label: "Zone Builder", icon: PencilRuler },
   { href: "/pickup-management", label: "Pickup Management", icon: ListChecks },
 ];
-const moreNavItems = [...volumeItems, ...navItems.slice(4)];
+const memberHiddenItems = new Set(["/zone-builder", "/pickup-management"]);
 
 export function AppShell({
   children,
@@ -66,9 +66,15 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
+  const memberToolRestricted = user.role === "member";
+  const visibleToolItems = memberToolRestricted ? [] : toolItems;
+  const moreNavItems = [
+    ...volumeItems,
+    ...navItems.slice(4).filter((item) => !memberToolRestricted || !memberHiddenItems.has(item.href)),
+  ];
   const volumeActive = pathname.startsWith("/volume");
   const [volumeOpen, setVolumeOpen] = useState(volumeActive);
-  const toolsActive = toolItems.some((item) => pathname.startsWith(item.href));
+  const toolsActive = visibleToolItems.some((item) => pathname.startsWith(item.href));
   const [toolsOpen, setToolsOpen] = useState(toolsActive);
 
   async function signOut() {
@@ -135,7 +141,7 @@ export function AppShell({
               })}
             </div> : null}
           </div>
-          <div className="pt-1">
+          {visibleToolItems.length > 0 ? <div className="pt-1">
             <button
               type="button"
               aria-expanded={toolsOpen}
@@ -150,7 +156,7 @@ export function AppShell({
               <ChevronDown size={15} className={cn("transition-transform", toolsOpen && "rotate-180")} />
             </button>
             {toolsOpen ? <div className="ml-6 space-y-1 border-l border-slate-200 pl-3">
-              {toolItems.map((item) => {
+              {visibleToolItems.map((item) => {
                 const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
                 const Icon = item.icon;
                 return (
@@ -168,7 +174,7 @@ export function AppShell({
                 );
               })}
             </div> : null}
-          </div>
+          </div> : null}
           {navItems.slice(10).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;

@@ -14,7 +14,14 @@ create table if not exists public.pickup_replacements (
 create index if not exists pickup_replacements_date_idx on public.pickup_replacements(work_date);
 alter table public.pickup_replacements enable row level security;
 drop policy if exists "Authenticated users can read pickup replacements" on public.pickup_replacements;
-create policy "Authenticated users can read pickup replacements" on public.pickup_replacements for select to authenticated using (true);
+drop policy if exists "Non-member users can read pickup replacements" on public.pickup_replacements;
+create policy "Non-member users can read pickup replacements"
+on public.pickup_replacements
+for select
+to authenticated
+using (
+  coalesce((select role from public.profiles where id = (select auth.uid())), 'viewer') <> 'member'
+);
 grant select on public.pickup_replacements to authenticated;
 grant all privileges on public.pickup_replacements to service_role;
 create or replace function public.set_pickup_replacements_updated_at() returns trigger language plpgsql as $$ begin new.updated_at = now(); return new; end; $$;

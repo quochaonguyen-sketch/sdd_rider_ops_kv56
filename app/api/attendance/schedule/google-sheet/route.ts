@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createPrivateKey, createSign } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { canManageOperations } from "@/lib/auth/permissions";
 
 const bodySchema = z.object({
   sheet_url: z.url().max(1000),
@@ -83,7 +84,7 @@ async function googleAccessToken() {
 export async function GET() {
   const session = await adminSession();
   if (!session) return NextResponse.json({ success: false, error: "Chưa đăng nhập" }, { status: 401 });
-  if (session.role !== "admin" && session.role !== "leader") return NextResponse.json({ success: false, error: "Bạn không có quyền đồng bộ lịch" }, { status: 403 });
+  if (!canManageOperations(session.role)) return NextResponse.json({ success: false, error: "Bạn không có quyền đồng bộ lịch" }, { status: 403 });
   const email = cleanCredential(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL) || null;
   return NextResponse.json({ success: true, configured: Boolean(email && cleanCredential(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY)), service_account_email: email });
 }
@@ -91,7 +92,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const session = await adminSession();
   if (!session) return NextResponse.json({ success: false, error: "Chưa đăng nhập" }, { status: 401 });
-  if (session.role !== "admin" && session.role !== "leader") return NextResponse.json({ success: false, error: "Bạn không có quyền đồng bộ lịch" }, { status: 403 });
+  if (!canManageOperations(session.role)) return NextResponse.json({ success: false, error: "Bạn không có quyền đồng bộ lịch" }, { status: 403 });
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ success: false, error: "Link Google Sheet không hợp lệ" }, { status: 400 });
   const id = sheetId(parsed.data.sheet_url);
