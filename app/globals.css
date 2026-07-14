@@ -211,6 +211,68 @@ pre {
   filter: drop-shadow(0 0 5px rgb(255 255 255 / 95%)) drop-shadow(0 4px 8px rgb(15 23 42 / 58%));
 }
 
+.zone-operations-map .leaflet-tile-pane {
+  filter: grayscale(42%) saturate(48%) brightness(1.1) contrast(0.9);
+}
+
+.zone-operations-map .zone-polygon {
+  filter: drop-shadow(0 0 1.5px rgb(255 255 255 / 95%));
+}
+
+.ward-zone-label {
+  background: rgb(255 255 255 / 90%) !important;
+  border: 1px solid rgb(255 255 255 / 96%) !important;
+  border-radius: 7px !important;
+  box-shadow: 0 1px 4px rgb(15 23 42 / 24%) !important;
+  color: #0f172a !important;
+  display: grid;
+  gap: 0 !important;
+  line-height: 1.05 !important;
+  margin: 0 !important;
+  min-width: 34px;
+  padding: 3px 5px !important;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ward-zone-label::before {
+  display: none !important;
+}
+
+.ward-zone-label strong {
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.ward-zone-label span {
+  color: #475569;
+  font-size: 7px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.ward-zone-label--selected {
+  background: #0f172a !important;
+  border-color: white !important;
+  color: white !important;
+  padding: 5px 7px !important;
+  z-index: 10;
+}
+
+.ward-zone-label--selected strong {
+  font-size: 11px;
+}
+
+.ward-zone-label--selected span {
+  color: #cbd5e1;
+  font-size: 8px;
+}
+
+.zone-opacity-slider {
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
 .zone-map-label,
 .ward-map-label,
 .hamlet-map-label {

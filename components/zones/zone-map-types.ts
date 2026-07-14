@@ -53,6 +53,9 @@ export const MAP_DEFAULT_ZOOM = 11;
 export const MAP_MIN_ZOOM = 10;
 export const MAP_MAX_ZOOM = 17;
 export const MAP_FOCUS_PADDING: [number, number] = [36, 36];
+export const ZONE_OPACITY_MIN = 12;
+export const ZONE_OPACITY_MAX = 78;
+export const ZONE_OPACITY_DEFAULT = 46;
 
 export const MAP_DISTRICTS: MapDistrict[] = [
   { id: "go-vap", code: "GV", name: "Quận Gò Vấp", shortName: "Gò Vấp", aliases: ["go vap", "quan go vap", "q go vap", "qgv"], area: "KV6", wards: ["1", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17"] },

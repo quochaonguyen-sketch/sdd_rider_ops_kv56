@@ -11,6 +11,7 @@ import { ZoneLegend } from "@/components/zones/zone-legend";
 import {
   MAP_DISTRICTS,
   ZONE_COLORS,
+  ZONE_OPACITY_DEFAULT,
   compactZoneName,
   wardLabel,
   zoneId,
@@ -38,6 +39,7 @@ export function HcmZoneMap({ riders }: { riders: Rider[] }) {
   const [filters, setFilters] = useState<ZoneFilters>(initialFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [zoneOpacity, setZoneOpacity] = useState(ZONE_OPACITY_DEFAULT);
 
   const zones = useMemo(() => buildOperationalZones(riders, mode), [mode, riders]);
   const filteredZones = useMemo(() => zones.filter((zone) => matchesFilters(zone, filters)), [filters, zones]);
@@ -67,7 +69,7 @@ export function HcmZoneMap({ riders }: { riders: Rider[] }) {
 
       <div className="grid items-start gap-4 lg:grid-cols-[290px_minmax(0,1fr)]">
         <ZoneFilterPanel filters={filters} districts={MAP_DISTRICTS} zones={zones} matchingZones={filteredZones} resultCount={filteredZones.length} open={filtersOpen} onOpenChange={setFiltersOpen} onChange={setFilters} onSelectZone={setSelectedZoneId} />
-        <LeafletMap zones={zones} visibleZoneIds={visibleZoneIds} selectedZoneId={selectedZoneId} onSelectZone={setSelectedZoneId} />
+        <LeafletMap zones={zones} visibleZoneIds={visibleZoneIds} selectedZoneId={selectedZoneId} zoneOpacity={zoneOpacity} onZoneOpacityChange={setZoneOpacity} onSelectZone={setSelectedZoneId} />
       </div>
 
       <ZoneLegend capacityConfigured={zones.some((zone) => zone.capacity !== null)} />
