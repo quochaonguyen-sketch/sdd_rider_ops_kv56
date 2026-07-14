@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { canManageRiders } from "@/lib/auth/permissions";
+import { readRidersFromThiCongPlan, thiCongPlanConfig } from "@/lib/google/thi-cong-plan";
+import { canonicalDistrictName } from "@/lib/locations/hcm";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { syncRidersToThiCongPlan, thiCongPlanConfig, type ThiCongPlanRider } from "@/lib/google/thi-cong-plan";
 
-const riderColumns = "id,rider_code,kv,home_district,cot,pickup_district,pickup_ward,delivery_district,delivery_ward";
-const bodySchema = z.union([
-  z.object({ rider_id: z.string().uuid() }),
-  z.object({ sync_all: z.literal(true) }),
-]);
+function normalizedDistrict(value: string | null) {
+  return canonicalDistrictName(value) === "Quận Bình Thạnh" ? "Quận Bình Thạnh" : value;
+}
 
 async function managerSession() {
   const client = await createClient();
@@ -17,7 +15,7 @@ async function managerSession() {
   if (!user) return null;
   const admin = createAdminClient();
   const { data: profile } = await admin.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  return { admin, role: profile?.role ?? "viewer", user };
+  return { admin, role: profile?.role ?? "viewer" };
 }
 
 export async function GET() {
@@ -36,30 +34,54 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "Bạn không có quyền đồng bộ rider" }, { status: 403 });
   }
 
-  const parsed = bodySchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ success: false, error: "Yêu cầu đồng bộ không hợp lệ" }, { status: 400 });
-
-  const query = session.admin.from("riders").select(riderColumns);
-  const { data, error } = "rider_id" in parsed.data
-    ? await query.eq("id", parsed.data.rider_id)
-    : await query.order("rider_code", { ascending: true });
-  if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 });
-  if ("rider_id" in parsed.data && (data?.length ?? 0) === 0) {
-    return NextResponse.json({ success: false, error: "Không tìm thấy rider" }, { status: 404 });
-  }
-
   try {
-    const result = await syncRidersToThiCongPlan((data ?? []) as ThiCongPlanRider[], request.signal);
+    const source = await readRidersFromThiCongPlan(request.signal);
+    if (source.riders.length === 0) {
+      return NextResponse.json({ success: false, error: "Tab Thi Công Plan không có rider hợp lệ để đồng bộ" }, { status: 400 });
+    }
+
+    const existingCodes = new Set<string>();
+    const riderCodes = source.riders.map((rider) => rider.rider_code);
+    for (let index = 0; index < riderCodes.length; index += 500) {
+      const { data, error } = await session.admin
+        .from("riders")
+        .select("rider_code")
+        .in("rider_code", riderCodes.slice(index, index + 500));
+      if (error) throw error;
+      data?.forEach((rider) => existingCodes.add(rider.rider_code));
+    }
+
+    for (let index = 0; index < source.riders.length; index += 500) {
+      const payload = source.riders.slice(index, index + 500).map((rider) => ({
+        ...rider,
+        home_district: normalizedDistrict(rider.home_district),
+        pickup_district: normalizedDistrict(rider.pickup_district),
+        delivery_district: normalizedDistrict(rider.delivery_district),
+        name: rider.full_name,
+      }));
+      const { error } = await session.admin.from("riders").upsert(payload, { onConflict: "rider_code" });
+      if (error) throw error;
+    }
+
+    const updatedRiders = source.riders.filter((rider) => existingCodes.has(rider.rider_code)).length;
+    const result = {
+      success: true as const,
+      synced_riders: source.riders.length,
+      inserted_riders: source.riders.length - updatedRiders,
+      updated_riders: updatedRiders,
+      sheet_rows: source.sheet_rows,
+      skipped_rows: source.skipped_rows,
+    };
     await session.admin.from("activity_logs").insert({
       entity_type: "rider",
-      action: "synced_thi_cong_plan",
-      message: `Synced ${result.updated_riders} riders to Thi Công Plan`,
+      action: "synced_from_thi_cong_plan",
+      message: `Synced ${result.synced_riders} riders from Thi Công Plan to web`,
       raw_data: result,
     });
     return NextResponse.json(result);
   } catch (syncError) {
     return NextResponse.json(
-      { success: false, error: syncError instanceof Error ? syncError.message : "Không thể đồng bộ Thi Công Plan" },
+      { success: false, error: syncError instanceof Error ? syncError.message : "Không thể đồng bộ dữ liệu từ Thi Công Plan" },
       { status: 400 },
     );
   }

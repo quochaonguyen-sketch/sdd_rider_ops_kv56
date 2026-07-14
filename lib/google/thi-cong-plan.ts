@@ -5,22 +5,22 @@ export const THI_CONG_PLAN_SPREADSHEET_ID =
 export const THI_CONG_PLAN_SHEET_NAME = "Thi Công Plan";
 
 export type ThiCongPlanRider = {
-  id: string;
-  rider_code: string;
   kv: string | null;
   home_district: string | null;
   cot: string | null;
+  rider_code: string;
+  full_name: string | null;
   pickup_district: string | null;
   pickup_ward: string | null;
+  point_name: string | null;
   delivery_district: string | null;
   delivery_ward: string | null;
 };
 
-export type ThiCongPlanSyncResult = {
-  success: true;
-  updated_riders: number;
-  updated_rows: number;
-  missing_rider_codes: string[];
+export type ThiCongPlanReadResult = {
+  riders: ThiCongPlanRider[];
+  sheet_rows: number;
+  skipped_rows: number;
 };
 
 type GoogleError = { error?: { message?: string } };
@@ -57,7 +57,7 @@ async function googleAccessToken(signal?: AbortSignal) {
   const header = base64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const claims = base64Url(JSON.stringify({
     iss: email,
-    scope: "https://www.googleapis.com/auth/spreadsheets",
+    scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
     aud: "https://oauth2.googleapis.com/token",
     iat: now,
     exp: now + 3600,
@@ -98,8 +98,8 @@ function a1Range(range: string) {
   return `'${THI_CONG_PLAN_SHEET_NAME.replaceAll("'", "''")}'!${range}`;
 }
 
-function cell(value: string | null) {
-  return value?.trim() ?? "";
+function cell(value: unknown) {
+  return String(value ?? "").trim() || null;
 }
 
 function normalizeHeader(value: unknown) {
@@ -107,42 +107,29 @@ function normalizeHeader(value: unknown) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/gi, "d")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
 }
 
-async function assertExpectedColumns(token: string, signal?: AbortSignal) {
-  const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${THI_CONG_PLAN_SPREADSHEET_ID}/values/${encodeURIComponent(a1Range("A1:L1"))}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`,
-    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store", signal: requestSignal(signal) },
-  );
-  const result = await response.json().catch(() => null) as SheetValuesResponse | null;
-  if (!response.ok) throw new Error(result?.error?.message ?? "Không thể kiểm tra tiêu đề tab Thi Công Plan");
-
-  const header = result?.values?.[0] ?? [];
+function assertExpectedColumns(header: unknown[]) {
   const expected = new Map<number, string>([
     [0, "kv"],
     [1, "quan o"],
     [2, "cot"],
     [3, "id"],
+    [4, "fullname"],
     [5, "quan lay"],
     [6, "phuong lay"],
+    [7, "point name"],
     [8, "quan giao"],
     [11, "phuong giao"],
   ]);
   const mismatches = Array.from(expected).filter(([index, label]) => normalizeHeader(header[index]) !== label);
   if (mismatches.length > 0) {
-    throw new Error("Cấu trúc cột tab Thi Công Plan đã thay đổi; đã dừng đồng bộ để tránh ghi nhầm dữ liệu");
+    throw new Error("Cấu trúc cột tab Thi Công Plan đã thay đổi; đã dừng đồng bộ để tránh cập nhật nhầm dữ liệu trên web");
   }
-}
-
-function valuesForRider(rider: ThiCongPlanRider, row: number) {
-  return [
-    { range: a1Range(`A${row}:C${row}`), values: [[cell(rider.kv), cell(rider.home_district), cell(rider.cot)]] },
-    { range: a1Range(`F${row}:G${row}`), values: [[cell(rider.pickup_district), cell(rider.pickup_ward)]] },
-    { range: a1Range(`I${row}`), values: [[cell(rider.delivery_district)]] },
-    { range: a1Range(`L${row}`), values: [[cell(rider.delivery_ward)]] },
-  ];
 }
 
 export function thiCongPlanConfig() {
@@ -152,64 +139,49 @@ export function thiCongPlanConfig() {
     service_account_email: email,
     spreadsheet_id: THI_CONG_PLAN_SPREADSHEET_ID,
     sheet_name: THI_CONG_PLAN_SHEET_NAME,
+    direction: "sheet_to_web" as const,
   };
 }
 
-export async function syncRidersToThiCongPlan(riders: ThiCongPlanRider[], signal?: AbortSignal): Promise<ThiCongPlanSyncResult> {
-  if (riders.length === 0) return { success: true, updated_riders: 0, updated_rows: 0, missing_rider_codes: [] };
-
+export async function readRidersFromThiCongPlan(signal?: AbortSignal): Promise<ThiCongPlanReadResult> {
   const token = await googleAccessToken(signal);
-  await assertExpectedColumns(token, signal);
-  const idColumnResponse = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${THI_CONG_PLAN_SPREADSHEET_ID}/values/${encodeURIComponent(a1Range("D2:D"))}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`,
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${THI_CONG_PLAN_SPREADSHEET_ID}/values/${encodeURIComponent(a1Range("A1:L"))}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`,
     { headers: { Authorization: `Bearer ${token}` }, cache: "no-store", signal: requestSignal(signal) },
   );
-  const idColumn = await idColumnResponse.json().catch(() => null) as SheetValuesResponse | null;
-  if (!idColumnResponse.ok) {
-    throw new Error(idColumn?.error?.message ?? "Google Sheets API từ chối đọc tab Thi Công Plan");
+  const result = await response.json().catch(() => null) as SheetValuesResponse | null;
+  if (!response.ok) {
+    throw new Error(result?.error?.message ?? "Google Sheets API từ chối đọc tab Thi Công Plan");
   }
 
-  const rowsByCode = new Map<string, number[]>();
-  for (const [index, row] of (idColumn?.values ?? []).entries()) {
-    const code = String(row[0] ?? "").trim();
-    if (!code) continue;
-    const rows = rowsByCode.get(code) ?? [];
-    rows.push(index + 2);
-    rowsByCode.set(code, rows);
-  }
+  const [header = [], ...rows] = result?.values ?? [];
+  assertExpectedColumns(header);
 
-  const missing: string[] = [];
-  const updates: Array<{ range: string; values: string[][] }> = [];
-  let updatedRiders = 0;
-  let updatedRows = 0;
-  for (const rider of riders) {
-    const code = rider.rider_code.trim();
-    const matchingRows = rowsByCode.get(code) ?? [];
-    if (matchingRows.length === 0) {
-      missing.push(code);
+  const riders = new Map<string, ThiCongPlanRider>();
+  let skippedRows = 0;
+  for (const row of rows) {
+    const riderCode = cell(row[3]);
+    if (!riderCode) {
+      if (row.some((value) => cell(value))) skippedRows += 1;
       continue;
     }
-    updatedRiders += 1;
-    updatedRows += matchingRows.length;
-    for (const row of matchingRows) updates.push(...valuesForRider(rider, row));
-  }
-
-  for (let index = 0; index < updates.length; index += 400) {
-    const response = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${THI_CONG_PLAN_SPREADSHEET_ID}/values:batchUpdate`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ valueInputOption: "RAW", data: updates.slice(index, index + 400) }),
-        cache: "no-store",
-        signal: requestSignal(signal),
-      },
-    );
-    const result = await response.json().catch(() => null) as GoogleError | null;
-    if (!response.ok) {
-      throw new Error(result?.error?.message ?? "Google Sheets API từ chối cập nhật tab Thi Công Plan");
+    if (riders.has(riderCode)) {
+      throw new Error(`ID ${riderCode} bị trùng trên tab Thi Công Plan; hãy xử lý dòng trùng trước khi đồng bộ`);
     }
+
+    riders.set(riderCode, {
+      kv: cell(row[0]),
+      home_district: cell(row[1]),
+      cot: cell(row[2]),
+      rider_code: riderCode,
+      full_name: cell(row[4]),
+      pickup_district: cell(row[5]),
+      pickup_ward: cell(row[6]),
+      point_name: cell(row[7]),
+      delivery_district: cell(row[8]),
+      delivery_ward: cell(row[11]),
+    });
   }
 
-  return { success: true, updated_riders: updatedRiders, updated_rows: updatedRows, missing_rider_codes: missing };
+  return { riders: [...riders.values()], sheet_rows: rows.length, skipped_rows: skippedRows };
 }

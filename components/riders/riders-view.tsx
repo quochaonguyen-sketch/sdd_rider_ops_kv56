@@ -12,7 +12,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
-  CloudUpload,
+  CloudDownload,
   MapPin,
   Navigation,
   Pencil,
@@ -80,9 +80,10 @@ type RiderPerformanceResponse = {
 
 type ThiCongPlanSyncResponse = {
   success: boolean;
+  synced_riders?: number;
+  inserted_riders?: number;
   updated_riders?: number;
-  updated_rows?: number;
-  missing_rider_codes?: string[];
+  skipped_rows?: number;
   error?: string;
 };
 
@@ -272,7 +273,7 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(editingId ? { id: editingId, ...form } : form),
     });
-    const result = (await response.json().catch(() => null)) as { error?: string; rider?: Rider; sheet_sync?: ThiCongPlanSyncResponse } | null;
+    const result = (await response.json().catch(() => null)) as { error?: string; rider?: Rider } | null;
 
     setSaving(false);
 
@@ -285,28 +286,16 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
     setShowAddForm(false);
     setEditingId(null);
     setSelected(result?.rider ?? selected);
-    const savedMessage = editingId ? "Đã cập nhật rider thành công." : "Đã thêm rider thành công.";
-    const sheetSync = result?.sheet_sync;
-    if (sheetSync?.success && (sheetSync.updated_rows ?? 0) > 0) {
-      setSuccess(`${savedMessage} Đã tự đồng bộ ${sheetSync.updated_rows} dòng trên Thi Công Plan.`);
-    } else if (sheetSync?.success && sheetSync.missing_rider_codes?.length) {
-      setSuccess(`${savedMessage} Chưa đồng bộ Plan vì không thấy ID ${sheetSync.missing_rider_codes.join(", ")} trong cột D.`);
-    } else if (sheetSync && !sheetSync.success) {
-      setError(`Rider đã được lưu nhưng đồng bộ Thi Công Plan lỗi: ${sheetSync.error ?? "Không xác định"}`);
-    } else {
-      setSuccess(savedMessage);
-    }
+    setSuccess(editingId ? "Đã cập nhật rider thành công." : "Đã thêm rider thành công.");
     await load();
   }
 
-  async function syncAllRidersToPlan() {
+  async function syncRidersFromPlan() {
     setPlanSyncing(true);
     setError(null);
     setSuccess(null);
     const response = await fetch("/api/riders/thi-cong-plan", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sync_all: true }),
     });
     const result = await response.json().catch(() => null) as ThiCongPlanSyncResponse | null;
     setPlanSyncing(false);
@@ -314,8 +303,7 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
       setError(result?.error ?? "Không thể đồng bộ Thi Công Plan");
       return;
     }
-    const missing = result.missing_rider_codes?.length ?? 0;
-    setSuccess(`Đã đồng bộ ${result.updated_riders ?? 0} rider (${result.updated_rows ?? 0} dòng) sang Thi Công Plan${missing ? `; ${missing} ID chưa có trên sheet.` : "."}`);
+    setSuccess(`Đã lấy ${result.synced_riders ?? 0} rider từ Thi Công Plan về web: thêm ${result.inserted_riders ?? 0}, cập nhật ${result.updated_riders ?? 0}${result.skipped_rows ? `; bỏ qua ${result.skipped_rows} dòng không có ID` : ""}.`);
   }
 
   async function importExcel(file: File) {
@@ -470,8 +458,8 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
                 if (file) void importExcel(file);
               }}
             />
-            <Button type="button" variant="secondary" className="px-2 sm:px-4" disabled={planSyncing} onClick={() => void syncAllRidersToPlan()} title="Ghi KV, quận, phường và COT sang tab Thi Công Plan theo ID rider">
-              <CloudUpload size={16} />
+            <Button type="button" variant="secondary" className="px-2 sm:px-4" disabled={planSyncing} onClick={() => void syncRidersFromPlan()} title="Lấy dữ liệu rider từ tab Thi Công Plan về website">
+              <CloudDownload size={16} />
               <span className="hidden sm:inline">{planSyncing ? "Đang đồng bộ..." : "Đồng bộ Plan"}</span>
               <span className="sm:hidden">Plan</span>
             </Button>

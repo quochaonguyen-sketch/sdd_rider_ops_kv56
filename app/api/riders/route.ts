@@ -4,7 +4,6 @@ import { canonicalDistrictName } from "@/lib/locations/hcm";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { canManageRiders } from "@/lib/auth/permissions";
-import { syncRidersToThiCongPlan } from "@/lib/google/thi-cong-plan";
 
 const createRiderSchema = z.object({
   kv: z.string().trim().optional().nullable(),
@@ -27,17 +26,6 @@ function emptyToNull(value: string | null | undefined) {
 function normalizeBinhThanhDistrict(value: string | null | undefined) {
   const trimmed = emptyToNull(value);
   return canonicalDistrictName(trimmed) === "Quận Bình Thạnh" ? "Quận Bình Thạnh" : trimmed;
-}
-
-async function syncSavedRider(rider: Parameters<typeof syncRidersToThiCongPlan>[0][number], signal: AbortSignal) {
-  try {
-    return await syncRidersToThiCongPlan([rider], signal);
-  } catch (error) {
-    return {
-      success: false as const,
-      error: error instanceof Error ? error.message : "Không thể đồng bộ Thi Công Plan",
-    };
-  }
 }
 
 async function getSignedInUser() {
@@ -127,8 +115,7 @@ export async function POST(request: Request) {
     raw_data: rider,
   });
 
-  const sheetSync = await syncSavedRider(data, request.signal);
-  return NextResponse.json({ success: true, rider: data, sheet_sync: sheetSync });
+  return NextResponse.json({ success: true, rider: data });
 }
 
 export async function PATCH(request: Request) {
@@ -209,8 +196,7 @@ export async function PATCH(request: Request) {
     raw_data: rider,
   });
 
-  const sheetSync = await syncSavedRider(data, request.signal);
-  return NextResponse.json({ success: true, rider: data, sheet_sync: sheetSync });
+  return NextResponse.json({ success: true, rider: data });
 }
 
 export async function DELETE(request: Request) {
