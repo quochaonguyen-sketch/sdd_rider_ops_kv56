@@ -1,101 +1,29 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bike, MapPin, Users } from "lucide-react";
 import type { Rider } from "@/types";
-import { cn } from "@/utils/cn";
 import { canonicalWardNames, splitLocationParts } from "@/lib/locations/hcm";
-import { PUBLISHED_ZONES_STORAGE_KEY, readCustomZones, type CustomZone } from "@/lib/zone-builder/custom-zones";
-
-type LocationMode = "pickup" | "delivery" | "home";
-
-type DistrictDefinition = {
-  id: string;
-  name: string;
-  shortName: string;
-  aliases: string[];
-  color: string;
-  wards: string[];
-};
+import { cn } from "@/utils/cn";
+import { ZoneFilterPanel } from "@/components/zones/zone-filter-panel";
+import { ZoneLegend } from "@/components/zones/zone-legend";
+import {
+  MAP_DISTRICTS,
+  ZONE_COLORS,
+  compactZoneName,
+  wardLabel,
+  zoneId,
+  type LocationMode,
+  type OperationalZone,
+  type ZoneFilters,
+  type ZoneStatus,
+} from "@/components/zones/zone-map-types";
 
 const LeafletMap = dynamic(
   () => import("@/components/zones/hcm-leaflet-map").then((module) => module.HcmLeafletMap),
-  { ssr: false, loading: () => <div className="h-[620px] animate-pulse rounded-2xl bg-slate-100" /> },
+  { ssr: false, loading: () => <div className="h-[560px] animate-pulse rounded-2xl bg-slate-100 lg:h-[680px]" /> },
 );
-
-const districts: DistrictDefinition[] = [
-  {
-    id: "go-vap",
-    name: "Quận Gò Vấp",
-    shortName: "Gò Vấp",
-    aliases: ["go vap", "quan go vap", "q go vap", "qgv"],
-    color: "#2563eb",
-    wards: ["1", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17"],
-  },
-  {
-    id: "quan-12",
-    name: "Quận 12",
-    shortName: "Quận 12",
-    aliases: ["12", "quan 12", "q12", "district 12"],
-    color: "#7c3aed",
-    wards: ["An Phú Đông", "Đông Hưng Thuận", "Hiệp Thành", "Tân Chánh Hiệp", "Tân Hưng Thuận", "Tân Thới Hiệp", "Tân Thới Nhất", "Thạnh Lộc", "Thạnh Xuân", "Thới An", "Trung Mỹ Tây"],
-  },
-  {
-    id: "hoc-mon",
-    name: "Huyện Hóc Môn",
-    shortName: "Hóc Môn",
-    aliases: ["hoc mon", "huyen hoc mon", "hocmon", "hm"],
-    color: "#dc2626",
-    wards: ["Bà Điểm", "Đông Thạnh", "Hóc Môn", "Nhị Bình", "Tân Hiệp", "Tân Thới Nhì", "Tân Xuân", "Thới Tam Thôn", "Trung Chánh", "Xuân Thới Đông", "Xuân Thới Sơn", "Xuân Thới Thượng"],
-  },
-  {
-    id: "binh-thanh",
-    name: "Quận Bình Thạnh",
-    shortName: "Bình Thạnh",
-    aliases: ["binh thanh", "quan binh thanh", "q binh thanh", "qbt"],
-    color: "#0891b2",
-    wards: ["1", "2", "3", "5", "6", "7", "11", "12", "13", "14", "15", "17", "19", "21", "22", "24", "25", "26", "27", "28"],
-  },
-  {
-    id: "quan-3",
-    name: "Quận 3",
-    shortName: "Quận 3",
-    aliases: ["3", "quan 3", "q3", "district 3"],
-    color: "#f59e0b",
-    wards: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14"],
-  },
-  {
-    id: "quan-2",
-    name: "Quận 2",
-    shortName: "Quận 2",
-    aliases: ["2", "quan 2", "q2", "district 2", "thu duc quan 2"],
-    color: "#10b981",
-    wards: ["An Khánh", "An Lợi Đông", "An Phú", "Bình An", "Bình Khánh", "Bình Trưng Đông", "Bình Trưng Tây", "Cát Lái", "Thạnh Mỹ Lợi", "Thảo Điền", "Thủ Thiêm"],
-  },
-  {
-    id: "quan-9",
-    name: "Quận 9",
-    shortName: "Quận 9",
-    aliases: ["9", "quan 9", "q9", "district 9", "thu duc quan 9"],
-    color: "#e11d48",
-    wards: [
-      "Hiệp Phú",
-      "Long Bình",
-      "Long Phước",
-      "Long Thạnh Mỹ",
-      "Long Trường",
-      "Phú Hữu",
-      "Phước Bình",
-      "Phước Long A",
-      "Phước Long B",
-      "Tân Phú",
-      "Tăng Nhơn Phú A",
-      "Tăng Nhơn Phú B",
-      "Trường Thạnh",
-    ],
-  },
-];
 
 const modeOptions: Array<{ value: LocationMode; label: string }> = [
   { value: "pickup", label: "Khu vực lấy" },
@@ -103,261 +31,81 @@ const modeOptions: Array<{ value: LocationMode; label: string }> = [
   { value: "home", label: "Nơi ở" },
 ];
 
+const initialFilters: ZoneFilters = { query: "", area: "all", districtId: "all", wardId: "all", status: "all" };
+
 export function HcmZoneMap({ riders }: { riders: Rider[] }) {
-  const [mode, setMode] = useState<LocationMode>("pickup");
-  const [selectedId, setSelectedId] = useState(districts[0].id);
-  const [zoomed, setZoomed] = useState(false);
-  const [customZones] = useState<CustomZone[]>(() => readCustomZones(PUBLISHED_ZONES_STORAGE_KEY));
-  const selectedDistrict = districts.find((district) => district.id === selectedId) ?? districts[0];
-  const selectedCustomZones = useMemo(
-    () => customZones.filter((zone) => customZoneBelongsToDistrict(zone, selectedDistrict)),
-    [customZones, selectedDistrict],
+  const [mode, setMode] = useState<LocationMode>("delivery");
+  const [filters, setFilters] = useState<ZoneFilters>(initialFilters);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+
+  const zones = useMemo(() => buildOperationalZones(riders, mode), [mode, riders]);
+  const filteredZones = useMemo(() => zones.filter((zone) => matchesFilters(zone, filters)), [filters, zones]);
+  const visibleZoneIds = useMemo(() => filteredZones.map((zone) => zone.id), [filteredZones]);
+  const selectedZone = zones.find((zone) => zone.id === selectedZoneId) ?? null;
+  const selectedZoneRiders = useMemo(
+    () => selectedZone ? riders.filter((rider) => matchesDistrict(districtValue(rider, mode), MAP_DISTRICTS.find((district) => district.id === selectedZone.districtId)!) && matchesWard(rider, mode, selectedZone.ward)) : [],
+    [mode, riders, selectedZone],
   );
 
-  const selectedRiders = useMemo(
-    () => riders.filter((rider) => matchesDistrict(districtValue(rider, mode), selectedDistrict)),
-    [mode, riders, selectedDistrict],
-  );
+  useEffect(() => {
+    if (selectedZoneId && !visibleZoneIds.includes(selectedZoneId)) setSelectedZoneId(null);
+  }, [selectedZoneId, visibleZoneIds]);
 
-  const wardCounts = useMemo(
-    () =>
-      selectedDistrict.wards.map((ward) => {
-        const wardRiders = selectedRiders
-          .filter((rider) => matchesWard(rider, mode, ward))
-          .sort((a, b) => {
-            const codeCompare = a.rider_code.localeCompare(b.rider_code, "vi");
-            return codeCompare || (a.full_name ?? "").localeCompare(b.full_name ?? "", "vi");
-          });
-        return {
-          ward,
-          count: wardRiders.length,
-          cotCounts: summarizeCot(wardRiders),
-          riders: wardRiders.map((rider) => ({
-            id: rider.id,
-            rider_code: rider.rider_code,
-            full_name: rider.full_name,
-            cot: rider.cot,
-          })),
-        };
-      }),
-    [mode, selectedDistrict, selectedRiders],
-  );
-
-  const cotCounts = useMemo(() => summarizeCot(selectedRiders), [selectedRiders]);
-  const sortedWardCounts = useMemo(
-    () => [...wardCounts].sort((a, b) => b.count - a.count || a.ward.localeCompare(b.ward, "vi")),
-    [wardCounts],
-  );
-  const maxWardCount = Math.max(1, ...wardCounts.map(({ count }) => count));
-  const maxCotCount = Math.max(1, ...cotCounts.map(({ count }) => count));
+  useEffect(() => {
+    if (!filters.query.trim() || filteredZones.length !== 1) return;
+    const onlyMatch = filteredZones[0];
+    if (onlyMatch && onlyMatch.id !== selectedZoneId) setSelectedZoneId(onlyMatch.id);
+  }, [filteredZones, filters.query, selectedZoneId]);
 
   return (
     <section className="space-y-4">
       <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-3">
-          <span className="grid size-10 place-items-center rounded-xl bg-blue-50 text-blue-700">
-            <MapPin size={20} />
-          </span>
-          <div>
-            <h2 className="font-bold text-slate-950">Bản đồ rider TP. Hồ Chí Minh</h2>
-            <p className="text-sm text-slate-500">Bấm quận/huyện để xem màu từng phường, xã và số rider</p>
-          </div>
-        </div>
-        <div className="flex w-full rounded-xl bg-slate-100 p-1 lg:w-auto">
-          {modeOptions.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => setMode(option.value)}
-              className={cn(
-                "flex-1 rounded-lg px-4 py-2 text-xs font-semibold transition sm:text-sm lg:flex-none",
-                mode === option.value ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-800",
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        <div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-blue-50 text-blue-700"><MapPin size={20} /></span><div><h2 className="font-bold text-slate-950">Bản đồ zone KV5 & KV6</h2><p className="text-sm text-slate-500">Tìm, lọc và chọn phường/xã để xem quân số vận hành</p></div></div>
+        <div className="flex w-full rounded-xl bg-slate-100 p-1 lg:w-auto">{modeOptions.map((option) => <button key={option.value} type="button" onClick={() => setMode(option.value)} className={cn("flex-1 rounded-lg px-4 py-2 text-xs font-semibold transition sm:text-sm lg:flex-none", mode === option.value ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-800")}>{option.label}</button>)}</div>
       </div>
 
-      <LeafletMap
-        selectedId={selectedId}
-        customZones={customZones}
-        zoomed={zoomed}
-        wardCounts={wardCounts}
-        showWards={mode !== "home"}
-        onSelect={(id) => {
-          setSelectedId(id);
-          setZoomed(true);
-        }}
-        onZoomOut={() => setZoomed(false)}
-      />
-
-      <div className="flex flex-wrap gap-2">
-        {districts.map((district) => (
-          <button
-            key={district.id}
-            type="button"
-            onClick={() => {
-              setSelectedId(district.id);
-              setZoomed(true);
-            }}
-            className={cn(
-              "flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition",
-              selectedId === district.id
-                ? "border-slate-300 bg-white text-slate-950 shadow-sm"
-                : "border-transparent bg-slate-100 text-slate-500 hover:bg-white",
-            )}
-          >
-            <span className="size-2.5 rounded-full" style={{ backgroundColor: district.color }} />
-            {district.shortName}
-          </button>
-        ))}
+      <div className="grid items-start gap-4 lg:grid-cols-[290px_minmax(0,1fr)]">
+        <ZoneFilterPanel filters={filters} districts={MAP_DISTRICTS} zones={zones} matchingZones={filteredZones} resultCount={filteredZones.length} open={filtersOpen} onOpenChange={setFiltersOpen} onChange={setFilters} onSelectZone={setSelectedZoneId} />
+        <LeafletMap zones={zones} visibleZoneIds={visibleZoneIds} selectedZoneId={selectedZoneId} onSelectZone={setSelectedZoneId} />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[0.72fr_1.28fr]">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider" style={{ color: selectedDistrict.color }}>
-                Chi tiết khu vực
-              </p>
-              <h3 className="mt-1 text-xl font-black text-slate-950">{selectedDistrict.name}</h3>
-              <p className="mt-1 text-sm text-slate-500">{selectedDistrict.wards.length} phường/xã</p>
-            </div>
-            <div className="rounded-xl bg-slate-50 px-4 py-2 text-center">
-              <Users size={17} className="mx-auto" style={{ color: selectedDistrict.color }} />
-              <p className="mt-1 text-xl font-black text-slate-950">{selectedRiders.length}</p>
-              <p className="text-[10px] font-bold uppercase text-slate-400">rider</p>
-            </div>
-          </div>
+      <ZoneLegend capacityConfigured={zones.some((zone) => zone.capacity !== null)} />
 
-          <h4 className="mt-5 text-sm font-bold text-slate-900">Chia theo COT</h4>
-          <div className="mt-3 space-y-2">
-            {cotCounts.map(({ cot, count }) => (
-              <div key={cot} className="rounded-xl bg-slate-50 p-3">
-                <div className="flex justify-between gap-3 text-sm">
-                  <span className="font-semibold text-slate-700">{cot}</span>
-                  <strong>{count} rider</strong>
-                </div>
-                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
-                  <div className="h-full rounded-full" style={{ width: `${Math.max(8, (count / maxCotCount) * 100)}%`, backgroundColor: selectedDistrict.color }} />
-                </div>
-              </div>
-            ))}
-            {cotCounts.length === 0 ? <p className="text-sm text-slate-500">Chưa có rider trong khu vực.</p> : null}
+      {selectedZone ? (
+        <div className="grid gap-4 lg:grid-cols-[0.7fr_1.3fr]">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-3"><div><p className="font-mono text-xs font-bold uppercase tracking-wider text-blue-600">{selectedZone.code}</p><h3 className="mt-1 text-xl font-black text-slate-950">{selectedZone.name}</h3><p className="mt-1 text-sm text-slate-500">{selectedZone.area} · {statusLabel(selectedZone.status)}</p></div><span className="grid size-12 place-items-center rounded-xl text-white shadow-sm" style={{ backgroundColor: selectedZone.color }}><MapPin size={20} /></span></div>
+            <div className="mt-5 grid grid-cols-2 gap-3"><Metric icon={<Users size={16} />} label="Tổng rider" value={selectedZone.riderCount} /><Metric icon={<Bike size={16} />} label="Đang active" value={selectedZone.activeRiderCount} /></div>
           </div>
-
-          {selectedCustomZones.length > 0 ? (
-            <>
-              <h4 className="mt-5 text-sm font-bold text-slate-900">Phan khu tu Zone Builder</h4>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {selectedCustomZones.map((zone) => (
-                  <span
-                    key={zone.id}
-                    className="rounded-full border px-2.5 py-1 text-xs font-bold"
-                    style={{ borderColor: zone.color, color: zone.color }}
-                  >
-                    {zone.name}
-                  </span>
-                ))}
-              </div>
-            </>
-          ) : null}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><h4 className="font-bold text-slate-950">Rider trong zone</h4><span className="text-xs font-semibold text-slate-500">{selectedZoneRiders.length} rider</span></div><div className="mt-3 grid max-h-64 gap-2 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3">{selectedZoneRiders.map((rider) => <div key={rider.id} className="flex min-w-0 items-center gap-2 rounded-xl bg-slate-50 p-2.5"><span className="shrink-0 rounded-lg bg-white px-2 py-1 font-mono text-xs font-bold text-slate-700 shadow-sm">{rider.rider_code}</span><span className="min-w-0 truncate text-sm font-semibold text-slate-800">{rider.full_name || "Chưa có tên"}</span></div>)}{selectedZoneRiders.length === 0 ? <p className="text-sm text-slate-500">Zone chưa có rider theo chế độ đang xem.</p> : null}</div></div>
         </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          <div className="flex items-center justify-between">
-            <h4 className="font-bold text-slate-950">Rider theo phường/xã</h4>
-            <span className="text-xs font-semibold text-slate-500">{sortedWardCounts.length} khu vực</span>
-          </div>
-          {mode === "home" ? (
-            <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
-              Dữ liệu hiện chỉ có quận nơi ở, chưa có phường nơi ở của rider.
-            </p>
-          ) : (
-            <div className="mt-4 grid max-h-[430px] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
-              {sortedWardCounts.map(({ ward, count, cotCounts: wardCots }) => (
-                <div key={ward} className="rounded-xl border border-slate-100 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-800">
-                      <Bike size={15} style={{ color: selectedDistrict.color }} />
-                      <span className="truncate">{/^\d+$/.test(ward) ? `Phường ${ward}` : ward}</span>
-                    </span>
-                    <strong className="shrink-0 text-sm">{count}</strong>
-                  </div>
-                  {wardCots.length > 0 ? (
-                    <p className="mt-1 truncate text-[11px] text-slate-500">
-                      {wardCots.map(({ cot, count: cotCount }) => `${cot}: ${cotCount}`).join(" · ")}
-                    </p>
-                  ) : null}
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                    <div className="h-full rounded-full" style={{ width: `${count ? Math.max(8, (count / maxWardCount) * 100) : 0}%`, backgroundColor: selectedDistrict.color }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+      ) : null}
     </section>
   );
 }
 
-function customZoneBelongsToDistrict(zone: CustomZone, district: DistrictDefinition) {
-  if (zone.district.trim()) return matchesDistrict(zone.district, district);
-  if (!zone.ward.trim()) return false;
-  return district.wards.some((ward) => normalize(ward) === normalize(zone.ward));
+function buildOperationalZones(riders: Rider[], mode: LocationMode) {
+  let colorIndex = 0;
+  return MAP_DISTRICTS.flatMap((district) => district.wards.map((ward) => {
+    const zoneRiders = riders.filter((rider) => matchesDistrict(districtValue(rider, mode), district) && matchesWard(rider, mode, ward));
+    const activeRiders = zoneRiders.filter((rider) => rider.status !== "inactive").length;
+    const capacity: number | null = null;
+    const status: ZoneStatus = capacity !== null && activeRiders >= capacity ? "full" : activeRiders > 0 ? "active" : "inactive";
+    const color = ZONE_COLORS[colorIndex++ % ZONE_COLORS.length];
+    return { id: zoneId(district.id, ward), code: `${district.area}-${district.code}-${compactZoneName(ward).toUpperCase()}`, name: `${wardLabel(ward)} · ${district.shortName}`, districtId: district.id, districtName: district.name, ward, area: district.area, color, status, riderCount: zoneRiders.length, activeRiderCount: activeRiders, capacity } satisfies OperationalZone;
+  }));
 }
 
-function normalize(value: string | null | undefined) {
-  return (value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[đĐ]/g, "d")
-    .toLowerCase()
-    .replace(/\b(phuong|p\.?|ward|xa|thi tran|tt\.?)\b/g, "")
-    .replace(/[.,/_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function matchesFilters(zone: OperationalZone, filters: ZoneFilters) {
+  const query = normalize(filters.query);
+  return (!query || normalize(`${zone.name} ${zone.code}`).includes(query)) && (filters.area === "all" || zone.area === filters.area) && (filters.districtId === "all" || zone.districtId === filters.districtId) && (filters.wardId === "all" || zone.id === filters.wardId) && (filters.status === "all" || zone.status === filters.status);
 }
 
-function districtValue(rider: Rider, mode: LocationMode) {
-  if (mode === "pickup") return rider.pickup_district;
-  if (mode === "delivery") return rider.delivery_district;
-  return rider.home_district;
-}
-
-function wardValue(rider: Rider, mode: LocationMode) {
-  if (mode === "pickup") return rider.pickup_ward;
-  if (mode === "delivery") return rider.delivery_ward;
-  return null;
-}
-
-function matchesWard(rider: Rider, mode: LocationMode, ward: string) {
-  const district = districtValue(rider, mode);
-  const rawWard = wardValue(rider, mode);
-  const normalizedWard = normalize(ward);
-  const canonicalNames = canonicalWardNames(district, rawWard);
-  const parts = canonicalNames.length > 0 ? canonicalNames : splitLocationParts(rawWard);
-  return parts.some((part) => normalize(part) === normalizedWard);
-}
-
-function matchesDistrict(value: string | null, district: DistrictDefinition) {
-  const normalized = normalize(value);
-  return district.aliases.some((alias) => {
-    const normalizedAlias = normalize(alias);
-    return normalized === normalizedAlias || normalized.startsWith(`${normalizedAlias} `);
-  });
-}
-
-function summarizeCot(riders: Rider[]) {
-  const counts = new Map<string, number>();
-  for (const rider of riders) {
-    const cot = rider.cot?.trim() || "Chưa có COT";
-    counts.set(cot, (counts.get(cot) ?? 0) + 1);
-  }
-  return Array.from(counts, ([cot, count]) => ({ cot, count })).sort(
-    (a, b) => b.count - a.count || a.cot.localeCompare(b.cot, "vi"),
-  );
-}
+function normalize(value: string | null | undefined) { return (value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toLowerCase().replace(/\b(phuong|p\.?|ward|xa|thi tran|tt\.?)\b/g, "").replace(/[.,/_-]+/g, " ").replace(/\s+/g, " ").trim(); }
+function districtValue(rider: Rider, mode: LocationMode) { return mode === "pickup" ? rider.pickup_district : mode === "delivery" ? rider.delivery_district : rider.home_district; }
+function wardValue(rider: Rider, mode: LocationMode) { return mode === "pickup" ? rider.pickup_ward : mode === "delivery" ? rider.delivery_ward : null; }
+function matchesWard(rider: Rider, mode: LocationMode, ward: string) { const rawWard = wardValue(rider, mode); const parts = canonicalWardNames(districtValue(rider, mode), rawWard); return (parts.length ? parts : splitLocationParts(rawWard)).some((part) => normalize(part) === normalize(ward)); }
+function matchesDistrict(value: string | null, district: (typeof MAP_DISTRICTS)[number]) { const normalized = normalize(value); return district.aliases.some((alias) => normalized === normalize(alias) || normalized.startsWith(`${normalize(alias)} `)); }
+function statusLabel(status: ZoneStatus) { return status === "full" ? "Đầy tải" : status === "active" ? "Đang hoạt động" : "Không hoạt động"; }
+function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) { return <div className="rounded-xl bg-slate-50 p-3"><span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">{icon}{label}</span><p className="mt-2 text-2xl font-black text-slate-950">{value}</p></div>; }

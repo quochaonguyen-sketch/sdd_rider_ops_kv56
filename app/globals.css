@@ -197,6 +197,20 @@ pre {
   max-width: none !important;
 }
 
+.zone-polygon,
+.zone-polygon-hovered,
+.zone-polygon-selected {
+  transition: fill-opacity 140ms ease, stroke-width 140ms ease, filter 140ms ease;
+}
+
+.zone-polygon-hovered {
+  filter: drop-shadow(0 2px 4px rgb(15 23 42 / 42%));
+}
+
+.zone-polygon-selected {
+  filter: drop-shadow(0 0 5px rgb(255 255 255 / 95%)) drop-shadow(0 4px 8px rgb(15 23 42 / 58%));
+}
+
 .zone-map-label,
 .ward-map-label,
 .hamlet-map-label {
