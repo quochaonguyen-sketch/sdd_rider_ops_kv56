@@ -273,6 +273,37 @@ pre {
   cursor: pointer;
 }
 
+.address-pin-pulse {
+  animation: address-pin-pulse 1.8s ease-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.address-pin-dot {
+  filter: drop-shadow(0 2px 4px rgb(15 23 42 / 55%));
+}
+
+.address-pin-label {
+  background: #0f172a !important;
+  border: 1px solid white !important;
+  border-radius: 999px !important;
+  box-shadow: 0 4px 12px rgb(15 23 42 / 35%) !important;
+  color: white !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  padding: 4px 8px !important;
+  white-space: nowrap;
+}
+
+.address-pin-label::before {
+  display: none !important;
+}
+
+@keyframes address-pin-pulse {
+  0% { opacity: 0.7; transform: scale(0.7); }
+  75%, 100% { opacity: 0; transform: scale(1.55); }
+}
+
 .zone-map-label,
 .ward-map-label,
 .hamlet-map-label {

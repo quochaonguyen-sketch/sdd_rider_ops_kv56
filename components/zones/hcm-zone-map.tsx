@@ -8,6 +8,7 @@ import { canonicalWardNames, splitLocationParts } from "@/lib/locations/hcm";
 import { cn } from "@/utils/cn";
 import { ZoneFilterPanel } from "@/components/zones/zone-filter-panel";
 import { ZoneLegend } from "@/components/zones/zone-legend";
+import { ZoneAddressSearch } from "@/components/zones/zone-address-search";
 import {
   MAP_DISTRICTS,
   ZONE_COLORS,
@@ -16,6 +17,7 @@ import {
   wardLabel,
   zoneId,
   type LocationMode,
+  type AddressPin,
   type OperationalZone,
   type ZoneFilters,
   type ZoneStatus,
@@ -40,6 +42,7 @@ export function HcmZoneMap({ riders }: { riders: Rider[] }) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [zoneOpacity, setZoneOpacity] = useState(ZONE_OPACITY_DEFAULT);
+  const [addressPin, setAddressPin] = useState<AddressPin | null>(null);
 
   const zones = useMemo(() => buildOperationalZones(riders, mode), [mode, riders]);
   const filteredZones = useMemo(() => zones.filter((zone) => matchesFilters(zone, filters)), [filters, zones]);
@@ -68,8 +71,11 @@ export function HcmZoneMap({ riders }: { riders: Rider[] }) {
       </div>
 
       <div className="grid items-start gap-4 lg:grid-cols-[290px_minmax(0,1fr)]">
-        <ZoneFilterPanel filters={filters} districts={MAP_DISTRICTS} zones={zones} matchingZones={filteredZones} resultCount={filteredZones.length} open={filtersOpen} onOpenChange={setFiltersOpen} onChange={setFilters} onSelectZone={setSelectedZoneId} />
-        <LeafletMap zones={zones} visibleZoneIds={visibleZoneIds} selectedZoneId={selectedZoneId} zoneOpacity={zoneOpacity} onZoneOpacityChange={setZoneOpacity} onSelectZone={setSelectedZoneId} />
+        <div className="space-y-4">
+          <ZoneAddressSearch pin={addressPin} matchedZoneName={addressPin ? selectedZone?.name ?? null : null} onResult={(pin) => { setFilters(initialFilters); setSelectedZoneId(null); setAddressPin(pin); }} onClear={() => { setAddressPin(null); setSelectedZoneId(null); }} />
+          <ZoneFilterPanel filters={filters} districts={MAP_DISTRICTS} zones={zones} matchingZones={filteredZones} resultCount={filteredZones.length} open={filtersOpen} onOpenChange={setFiltersOpen} onChange={setFilters} onSelectZone={(id) => { setAddressPin(null); setSelectedZoneId(id); }} />
+        </div>
+        <LeafletMap zones={zones} visibleZoneIds={visibleZoneIds} selectedZoneId={selectedZoneId} addressPin={addressPin} zoneOpacity={zoneOpacity} onAddressZoneMatch={setSelectedZoneId} onZoneOpacityChange={setZoneOpacity} onSelectZone={(id) => { setAddressPin(null); setSelectedZoneId(id); }} />
       </div>
 
       <ZoneLegend capacityConfigured={zones.some((zone) => zone.capacity !== null)} />

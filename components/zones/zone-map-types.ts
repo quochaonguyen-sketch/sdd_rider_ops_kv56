@@ -2,6 +2,14 @@ export type ZoneArea = "KV5" | "KV6";
 export type ZoneStatus = "active" | "inactive" | "full";
 export type LocationMode = "pickup" | "delivery" | "home";
 
+export type AddressPin = {
+  lat: number;
+  lng: number;
+  displayName: string;
+  sourceWard: string | null;
+  sourceDistrict: string | null;
+};
+
 export type ZoneFilters = {
   query: string;
   area: "all" | ZoneArea;

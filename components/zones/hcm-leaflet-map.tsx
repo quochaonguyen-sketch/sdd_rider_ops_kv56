@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { LocateFixed, Minus, Plus, RotateCcw, SunMedium } from "lucide-react";
-import { MapContainer, TileLayer, useMap } from "react-leaflet";
+import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from "react-leaflet";
 import { geoJSON } from "leaflet";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import { ZonePolygon } from "@/components/zones/zone-polygon";
-import { MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM, MAP_FOCUS_PADDING, MAP_MAX_ZOOM, MAP_MIN_ZOOM, ZONE_OPACITY_MAX, ZONE_OPACITY_MIN, compactZoneName, zoneId, type OperationalZone } from "@/components/zones/zone-map-types";
+import { MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM, MAP_FOCUS_PADDING, MAP_MAX_ZOOM, MAP_MIN_ZOOM, ZONE_OPACITY_MAX, ZONE_OPACITY_MIN, compactZoneName, zoneId, type AddressPin, type OperationalZone } from "@/components/zones/zone-map-types";
 
 type WardProperties = { districtId: string; wardKey: string; capacity?: number; source: string };
 type WardFeature = Feature<Geometry, WardProperties>;
@@ -15,12 +15,14 @@ type HcmLeafletMapProps = {
   zones: OperationalZone[];
   visibleZoneIds: string[];
   selectedZoneId: string | null;
+  addressPin: AddressPin | null;
   zoneOpacity: number;
+  onAddressZoneMatch: (zoneId: string | null) => void;
   onZoneOpacityChange: (opacity: number) => void;
   onSelectZone: (zoneId: string) => void;
 };
 
-export function HcmLeafletMap({ zones, visibleZoneIds, selectedZoneId, zoneOpacity, onZoneOpacityChange, onSelectZone }: HcmLeafletMapProps) {
+export function HcmLeafletMap({ zones, visibleZoneIds, selectedZoneId, addressPin, zoneOpacity, onAddressZoneMatch, onZoneOpacityChange, onSelectZone }: HcmLeafletMapProps) {
   const [boundaries, setBoundaries] = useState<FeatureCollection<Geometry, WardProperties> | null>(null);
   useEffect(() => { let active = true; fetch("/data/hcm-legacy-wards.geojson").then((response) => { if (!response.ok) throw new Error("Không thể tải ranh giới hành chính"); return response.json() as Promise<FeatureCollection<Geometry, WardProperties>>; }).then((data) => { if (active) setBoundaries(data); }).catch(() => { if (active) setBoundaries({ type: "FeatureCollection", features: [] }); }); return () => { active = false; }; }, []);
 
@@ -29,12 +31,25 @@ export function HcmLeafletMap({ zones, visibleZoneIds, selectedZoneId, zoneOpaci
   const visibleFeatures = useMemo(() => boundaries?.features.flatMap((feature) => { const id = featureZoneId(feature); const zone = zoneById.get(id); return zone && visibleIds.has(id) ? [{ feature, zone }] : []; }) ?? [], [boundaries, visibleIds, zoneById]);
   const selectedFeature = visibleFeatures.find(({ zone }) => zone.id === selectedZoneId)?.feature ?? null;
 
+  useEffect(() => {
+    if (!addressPin || !boundaries) return;
+    const matchedFeature = boundaries.features.find((feature) => geometryContainsPoint(feature.geometry, addressPin.lat, addressPin.lng));
+    const matchedId = matchedFeature ? featureZoneId(matchedFeature) : null;
+    onAddressZoneMatch(matchedId && zoneById.has(matchedId) ? matchedId : null);
+  }, [addressPin, boundaries, onAddressZoneMatch, zoneById]);
+
   return (
     <div className="zone-operations-map relative h-[560px] overflow-hidden rounded-2xl border border-slate-300 bg-slate-100 shadow-inner lg:h-[680px]">
       <MapContainer center={MAP_DEFAULT_CENTER} zoom={MAP_DEFAULT_ZOOM} minZoom={MAP_MIN_ZOOM} maxZoom={MAP_MAX_ZOOM} zoomControl={false} scrollWheelZoom className="h-full w-full">
         <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>' url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
-        <ViewportController selectedFeature={selectedFeature} />
+        <ViewportController selectedFeature={selectedFeature} addressPin={addressPin} />
         {visibleFeatures.map(({ feature, zone }) => <ZonePolygon key={zone.id} feature={feature} zone={zone} selected={zone.id === selectedZoneId} opacity={zoneOpacity / 100} onSelect={onSelectZone} />)}
+        {addressPin ? <>
+          <CircleMarker center={[addressPin.lat, addressPin.lng]} radius={15} interactive={false} pathOptions={{ className: "address-pin-pulse", color: "#fb7185", fillColor: "#fb7185", fillOpacity: 0.18, opacity: 0.5, weight: 1 }} />
+          <CircleMarker center={[addressPin.lat, addressPin.lng]} radius={6} pathOptions={{ className: "address-pin-dot", color: "#ffffff", fillColor: "#e11d48", fillOpacity: 1, opacity: 1, weight: 2.5 }}>
+            <Tooltip permanent direction="top" offset={[0, -8]} className="address-pin-label">Vị trí tìm được</Tooltip>
+          </CircleMarker>
+        </> : null}
         <MapControls selectedFeature={selectedFeature} />
       </MapContainer>
       <div className="absolute bottom-4 left-4 z-[500] w-[min(280px,calc(100%-7rem))] rounded-2xl border border-white/90 bg-white/95 p-3 shadow-xl backdrop-blur">
@@ -47,10 +62,18 @@ export function HcmLeafletMap({ zones, visibleZoneIds, selectedZoneId, zoneOpaci
   );
 }
 
-function ViewportController({ selectedFeature }: { selectedFeature: WardFeature | null }) {
+function ViewportController({ selectedFeature, addressPin }: { selectedFeature: WardFeature | null; addressPin: AddressPin | null }) {
   const map = useMap();
   useEffect(() => { const container = map.getContainer(); const refresh = () => map.invalidateSize({ animate: false }); const frame = requestAnimationFrame(refresh); const observer = new ResizeObserver(refresh); observer.observe(container); return () => { cancelAnimationFrame(frame); observer.disconnect(); }; }, [map]);
-  useEffect(() => { if (!selectedFeature) return; const bounds = geoJSON(selectedFeature).getBounds(); if (bounds.isValid()) map.flyToBounds(bounds, { duration: 0.55, padding: MAP_FOCUS_PADDING, maxZoom: 15 }); }, [map, selectedFeature]);
+  useEffect(() => {
+    if (addressPin) {
+      map.flyTo([addressPin.lat, addressPin.lng], 16, { duration: 0.65 });
+      return;
+    }
+    if (!selectedFeature) return;
+    const bounds = geoJSON(selectedFeature).getBounds();
+    if (bounds.isValid()) map.flyToBounds(bounds, { duration: 0.55, padding: MAP_FOCUS_PADDING, maxZoom: 15 });
+  }, [addressPin, map, selectedFeature]);
   return null;
 }
 
@@ -65,3 +88,29 @@ function ControlButton({ label, onClick, disabled = false, border = false, stand
 }
 
 function featureZoneId(feature: WardFeature) { return zoneId(feature.properties.districtId, compactZoneName(feature.properties.wardKey)); }
+
+function geometryContainsPoint(geometry: Geometry, lat: number, lng: number) {
+  if (geometry.type === "Polygon") return polygonContainsPoint(geometry.coordinates, lat, lng);
+  if (geometry.type === "MultiPolygon") return geometry.coordinates.some((polygon) => polygonContainsPoint(polygon, lat, lng));
+  return false;
+}
+
+function polygonContainsPoint(rings: number[][][], lat: number, lng: number) {
+  const [outerRing, ...holes] = rings;
+  if (!outerRing || !ringContainsPoint(outerRing, lat, lng)) return false;
+  return !holes.some((ring) => ringContainsPoint(ring, lat, lng));
+}
+
+function ringContainsPoint(ring: number[][], lat: number, lng: number) {
+  let inside = false;
+  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index++) {
+    const current = ring[index];
+    const before = ring[previous];
+    if (!current || !before) continue;
+    const [currentLng, currentLat] = current;
+    const [beforeLng, beforeLat] = before;
+    const crosses = currentLat > lat !== beforeLat > lat;
+    if (crosses && lng < ((beforeLng - currentLng) * (lat - currentLat)) / (beforeLat - currentLat) + currentLng) inside = !inside;
+  }
+  return inside;
+}
