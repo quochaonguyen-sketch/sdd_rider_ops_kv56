@@ -162,6 +162,7 @@ textarea {
   .rider-loader-bike { left: calc(50% - 4rem); opacity: 0.86; }
   .route-reveal-content { animation: none; }
   .route-content-loading { opacity: 0.35; }
+  .address-pin-pulse { animation: none; }
 }
 
 pre {
@@ -203,6 +204,22 @@ pre {
   transition: fill-opacity 140ms ease, stroke-width 140ms ease, filter 140ms ease;
 }
 
+.zone-operations-map .zone-polygon {
+  fill-opacity: var(--zone-fill-opacity, 0.46) !important;
+}
+
+.zone-operations-map .zone-polygon--inactive {
+  fill-opacity: calc(var(--zone-fill-opacity, 0.46) * 0.58) !important;
+}
+
+.zone-operations-map .zone-polygon-hovered {
+  fill-opacity: min(0.86, calc(var(--zone-fill-opacity, 0.46) + 0.12)) !important;
+}
+
+.zone-operations-map .zone-polygon-selected {
+  fill-opacity: min(0.92, calc(var(--zone-fill-opacity, 0.46) + 0.2)) !important;
+}
+
 .zone-polygon-hovered {
   filter: drop-shadow(0 2px 4px rgb(15 23 42 / 42%));
 }
@@ -215,7 +232,7 @@ pre {
   filter: grayscale(42%) saturate(48%) brightness(1.1) contrast(0.9);
 }
 
-.zone-operations-map .zone-polygon {
+.zone-operations-map path.zone-polygon {
   filter: drop-shadow(0 0 1.5px rgb(255 255 255 / 95%));
 }
 

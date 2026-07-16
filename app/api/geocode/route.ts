@@ -66,7 +66,7 @@ export async function GET(request: Request) {
         "Accept-Language": "vi,en;q=0.8",
         "User-Agent": "RiderOpsKV56/1.0 (https://sdd-rider-ops-kv56.vercel.app)",
       },
-      cache: "no-store",
+      next: { revalidate: 86_400 },
       signal: AbortSignal.timeout(12_000),
     });
     if (!response.ok) throw new Error(`Nominatim returned ${response.status}`);

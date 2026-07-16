@@ -1,3 +1,20 @@
+import type { Rider } from "@/types";
+
+export type ZoneRider = Pick<
+  Rider,
+  | "id"
+  | "rider_code"
+  | "full_name"
+  | "kv"
+  | "home_district"
+  | "cot"
+  | "pickup_district"
+  | "pickup_ward"
+  | "delivery_district"
+  | "delivery_ward"
+  | "status"
+>;
+
 export type ZoneArea = "KV5" | "KV6";
 export type ZoneStatus = "active" | "inactive" | "full";
 export type LocationMode = "pickup" | "delivery" | "home";

@@ -4,20 +4,22 @@ import { useCallback, useEffect, useState } from "react";
 import { Map, RefreshCcw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
-import type { Rider } from "@/types";
 import { Button } from "@/components/ui/button";
 import { HcmZoneMap } from "@/components/zones/hcm-zone-map";
+import type { ZoneRider } from "@/components/zones/zone-map-types";
+
+const ZONE_RIDER_COLUMNS = "id,rider_code,full_name,kv,home_district,cot,pickup_district,pickup_ward,delivery_district,delivery_ward,status";
 
 export function ZonesView() {
-  const [riders, setRiders] = useState<Rider[]>([]);
+  const [riders, setRiders] = useState<ZoneRider[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
-    const result = await createClient().from("riders").select("*").order("full_name");
+    const result = await createClient().from("riders").select(ZONE_RIDER_COLUMNS).order("full_name");
     if (result.error) setError(result.error.message);
-    else setRiders((result.data ?? []) as Rider[]);
+    else setRiders((result.data ?? []) as ZoneRider[]);
     setLoading(false);
   }, []);
 
@@ -26,7 +28,24 @@ export function ZonesView() {
     void load();
   }, [load]);
 
-  useSupabaseRealtime({ table: "riders", onChange: load });
+  const applyRealtimeChange = useCallback((payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }) => {
+    const nextRider = payload.new as Partial<ZoneRider>;
+    const previousRider = payload.old as Partial<ZoneRider>;
+    if (payload.eventType === "DELETE" && previousRider.id) {
+      setRiders((current) => current.filter((rider) => rider.id !== previousRider.id));
+      return;
+    }
+    if ((payload.eventType === "INSERT" || payload.eventType === "UPDATE") && nextRider.id && nextRider.rider_code) {
+      setRiders((current) => sortZoneRiders([
+        nextRider as ZoneRider,
+        ...current.filter((rider) => rider.id !== nextRider.id),
+      ]));
+      return;
+    }
+    void load();
+  }, [load]);
+
+  useSupabaseRealtime({ table: "riders", onChange: applyRealtimeChange, debounceMs: 250 });
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -42,4 +61,8 @@ export function ZonesView() {
       <HcmZoneMap riders={riders} />
     </div>
   );
+}
+
+function sortZoneRiders(riders: ZoneRider[]) {
+  return riders.sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? "", "vi") || a.rider_code.localeCompare(b.rider_code, "vi"));
 }

@@ -1,30 +1,37 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { LocateFixed, Minus, Plus, RotateCcw, SunMedium } from "lucide-react";
 import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from "react-leaflet";
 import { geoJSON } from "leaflet";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import { ZonePolygon } from "@/components/zones/zone-polygon";
-import { MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM, MAP_FOCUS_PADDING, MAP_MAX_ZOOM, MAP_MIN_ZOOM, ZONE_OPACITY_MAX, ZONE_OPACITY_MIN, compactZoneName, zoneId, type AddressPin, type OperationalZone } from "@/components/zones/zone-map-types";
+import { MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM, MAP_FOCUS_PADDING, MAP_MAX_ZOOM, MAP_MIN_ZOOM, ZONE_OPACITY_DEFAULT, ZONE_OPACITY_MAX, ZONE_OPACITY_MIN, compactZoneName, zoneId, type AddressPin, type OperationalZone } from "@/components/zones/zone-map-types";
 
 type WardProperties = { districtId: string; wardKey: string; capacity?: number; source: string };
 type WardFeature = Feature<Geometry, WardProperties>;
+
+let boundariesRequest: Promise<FeatureCollection<Geometry, WardProperties>> | null = null;
 
 type HcmLeafletMapProps = {
   zones: OperationalZone[];
   visibleZoneIds: string[];
   selectedZoneId: string | null;
   addressPin: AddressPin | null;
-  zoneOpacity: number;
   onAddressZoneMatch: (zoneId: string | null) => void;
-  onZoneOpacityChange: (opacity: number) => void;
   onSelectZone: (zoneId: string) => void;
 };
 
-export function HcmLeafletMap({ zones, visibleZoneIds, selectedZoneId, addressPin, zoneOpacity, onAddressZoneMatch, onZoneOpacityChange, onSelectZone }: HcmLeafletMapProps) {
+export function HcmLeafletMap({ zones, visibleZoneIds, selectedZoneId, addressPin, onAddressZoneMatch, onSelectZone }: HcmLeafletMapProps) {
   const [boundaries, setBoundaries] = useState<FeatureCollection<Geometry, WardProperties> | null>(null);
-  useEffect(() => { let active = true; fetch("/data/hcm-legacy-wards.geojson").then((response) => { if (!response.ok) throw new Error("Không thể tải ranh giới hành chính"); return response.json() as Promise<FeatureCollection<Geometry, WardProperties>>; }).then((data) => { if (active) setBoundaries(data); }).catch(() => { if (active) setBoundaries({ type: "FeatureCollection", features: [] }); }); return () => { active = false; }; }, []);
+  const [zoneOpacity, setZoneOpacity] = useState(ZONE_OPACITY_DEFAULT);
+  useEffect(() => {
+    let active = true;
+    loadBoundaries()
+      .then((data) => { if (active) setBoundaries(data); })
+      .catch(() => { if (active) setBoundaries({ type: "FeatureCollection", features: [] }); });
+    return () => { active = false; };
+  }, []);
 
   const zoneById = useMemo(() => new Map(zones.map((zone) => [zone.id, zone])), [zones]);
   const visibleIds = useMemo(() => new Set(visibleZoneIds), [visibleZoneIds]);
@@ -39,11 +46,11 @@ export function HcmLeafletMap({ zones, visibleZoneIds, selectedZoneId, addressPi
   }, [addressPin, boundaries, onAddressZoneMatch, zoneById]);
 
   return (
-    <div className="zone-operations-map relative h-[560px] overflow-hidden rounded-2xl border border-slate-300 bg-slate-100 shadow-inner lg:h-[680px]">
+    <div className="zone-operations-map relative h-[560px] overflow-hidden rounded-2xl border border-slate-300 bg-slate-100 shadow-inner lg:h-[680px]" style={{ "--zone-fill-opacity": zoneOpacity / 100 } as CSSProperties}>
       <MapContainer center={MAP_DEFAULT_CENTER} zoom={MAP_DEFAULT_ZOOM} minZoom={MAP_MIN_ZOOM} maxZoom={MAP_MAX_ZOOM} zoomControl={false} scrollWheelZoom className="h-full w-full">
         <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>' url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
         <ViewportController selectedFeature={selectedFeature} addressPin={addressPin} />
-        {visibleFeatures.map(({ feature, zone }) => <ZonePolygon key={zone.id} feature={feature} zone={zone} selected={zone.id === selectedZoneId} opacity={zoneOpacity / 100} onSelect={onSelectZone} />)}
+        {visibleFeatures.map(({ feature, zone }) => <ZonePolygon key={zone.id} feature={feature} zone={zone} selected={zone.id === selectedZoneId} onSelect={onSelectZone} />)}
         {addressPin ? <>
           <CircleMarker center={[addressPin.lat, addressPin.lng]} radius={15} interactive={false} pathOptions={{ className: "address-pin-pulse", color: "#fb7185", fillColor: "#fb7185", fillOpacity: 0.18, opacity: 0.5, weight: 1 }} />
           <CircleMarker center={[addressPin.lat, addressPin.lng]} radius={6} pathOptions={{ className: "address-pin-dot", color: "#ffffff", fillColor: "#e11d48", fillOpacity: 1, opacity: 1, weight: 2.5 }}>
@@ -54,7 +61,7 @@ export function HcmLeafletMap({ zones, visibleZoneIds, selectedZoneId, addressPi
       </MapContainer>
       <div className="absolute bottom-4 left-4 z-[500] w-[min(280px,calc(100%-7rem))] rounded-2xl border border-white/90 bg-white/95 p-3 shadow-xl backdrop-blur">
         <div className="flex items-center justify-between gap-3 text-xs"><span className="flex items-center gap-2 font-bold text-slate-700"><SunMedium size={15} className="text-amber-500" /> Độ đậm màu zone</span><strong className="tabular-nums text-blue-700">{zoneOpacity}%</strong></div>
-        <input aria-label="Độ đậm màu zone" type="range" min={ZONE_OPACITY_MIN} max={ZONE_OPACITY_MAX} value={zoneOpacity} onChange={(event) => onZoneOpacityChange(Number(event.target.value))} className="zone-opacity-slider mt-2 w-full" />
+        <input aria-label="Độ đậm màu zone" type="range" min={ZONE_OPACITY_MIN} max={ZONE_OPACITY_MAX} value={zoneOpacity} onChange={(event) => setZoneOpacity(Number(event.target.value))} className="zone-opacity-slider mt-2 w-full" />
         <div className="mt-1 flex justify-between text-[10px] font-semibold text-slate-400"><span>Nhạt, dễ xem nền</span><span>Đậm, nổi zone</span></div>
       </div>
       <div className="pointer-events-none absolute bottom-4 right-4 z-[500] rounded-xl border border-white/80 bg-white/90 px-3 py-2 text-xs font-semibold text-slate-600 shadow-md backdrop-blur">{visibleFeatures.length} zone đang hiển thị</div>
@@ -88,6 +95,14 @@ function ControlButton({ label, onClick, disabled = false, border = false, stand
 }
 
 function featureZoneId(feature: WardFeature) { return zoneId(feature.properties.districtId, compactZoneName(feature.properties.wardKey)); }
+
+function loadBoundaries() {
+  boundariesRequest ??= fetch("/data/hcm-legacy-wards.geojson", { cache: "force-cache" }).then((response) => {
+    if (!response.ok) throw new Error("Không thể tải ranh giới hành chính");
+    return response.json() as Promise<FeatureCollection<Geometry, WardProperties>>;
+  });
+  return boundariesRequest;
+}
 
 function geometryContainsPoint(geometry: Geometry, lat: number, lng: number) {
   if (geometry.type === "Polygon") return polygonContainsPoint(geometry.coordinates, lat, lng);

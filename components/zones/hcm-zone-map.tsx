@@ -1,9 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { Bike, MapPin, Users } from "lucide-react";
-import type { Rider } from "@/types";
 import { canonicalWardNames, splitLocationParts } from "@/lib/locations/hcm";
 import { cn } from "@/utils/cn";
 import { ZoneFilterPanel } from "@/components/zones/zone-filter-panel";
@@ -12,7 +11,6 @@ import { ZoneAddressSearch } from "@/components/zones/zone-address-search";
 import {
   MAP_DISTRICTS,
   ZONE_COLORS,
-  ZONE_OPACITY_DEFAULT,
   compactZoneName,
   wardLabel,
   zoneId,
@@ -21,6 +19,7 @@ import {
   type OperationalZone,
   type ZoneFilters,
   type ZoneStatus,
+  type ZoneRider,
 } from "@/components/zones/zone-map-types";
 
 const LeafletMap = dynamic(
@@ -36,32 +35,37 @@ const modeOptions: Array<{ value: LocationMode; label: string }> = [
 
 const initialFilters: ZoneFilters = { query: "", area: "all", districtId: "all", wardId: "all", status: "all" };
 
-export function HcmZoneMap({ riders }: { riders: Rider[] }) {
+export function HcmZoneMap({ riders }: { riders: ZoneRider[] }) {
   const [mode, setMode] = useState<LocationMode>("delivery");
   const [filters, setFilters] = useState<ZoneFilters>(initialFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
-  const [zoneOpacity, setZoneOpacity] = useState(ZONE_OPACITY_DEFAULT);
   const [addressPin, setAddressPin] = useState<AddressPin | null>(null);
 
-  const zones = useMemo(() => buildOperationalZones(riders, mode), [mode, riders]);
-  const filteredZones = useMemo(() => zones.filter((zone) => matchesFilters(zone, filters)), [filters, zones]);
+  const deferredFilters = useDeferredValue(filters);
+  const ridersByZone = useMemo(() => indexRidersByZone(riders, mode), [mode, riders]);
+  const zones = useMemo(() => buildOperationalZones(ridersByZone), [ridersByZone]);
+  const filteredZones = useMemo(() => zones.filter((zone) => matchesFilters(zone, deferredFilters)), [deferredFilters, zones]);
   const visibleZoneIds = useMemo(() => filteredZones.map((zone) => zone.id), [filteredZones]);
-  const selectedZone = zones.find((zone) => zone.id === selectedZoneId) ?? null;
-  const selectedZoneRiders = useMemo(
-    () => selectedZone ? riders.filter((rider) => matchesDistrict(districtValue(rider, mode), MAP_DISTRICTS.find((district) => district.id === selectedZone.districtId)!) && matchesWard(rider, mode, selectedZone.ward)) : [],
-    [mode, riders, selectedZone],
-  );
+  const visibleSelectedZoneId = selectedZoneId && visibleZoneIds.includes(selectedZoneId) ? selectedZoneId : null;
+  const singleSearchMatchId = deferredFilters.query.trim() && filteredZones.length === 1 ? filteredZones[0]?.id ?? null : null;
+  const activeSelectedZoneId = visibleSelectedZoneId ?? singleSearchMatchId;
+  const selectedZone = zones.find((zone) => zone.id === activeSelectedZoneId) ?? null;
+  const selectedZoneRiders = activeSelectedZoneId ? ridersByZone.get(activeSelectedZoneId) ?? [] : [];
 
-  useEffect(() => {
-    if (selectedZoneId && !visibleZoneIds.includes(selectedZoneId)) setSelectedZoneId(null);
-  }, [selectedZoneId, visibleZoneIds]);
-
-  useEffect(() => {
-    if (!filters.query.trim() || filteredZones.length !== 1) return;
-    const onlyMatch = filteredZones[0];
-    if (onlyMatch && onlyMatch.id !== selectedZoneId) setSelectedZoneId(onlyMatch.id);
-  }, [filteredZones, filters.query, selectedZoneId]);
+  const selectZone = useCallback((id: string) => {
+    setAddressPin(null);
+    setSelectedZoneId(id);
+  }, []);
+  const showAddress = useCallback((pin: AddressPin) => {
+    setFilters(initialFilters);
+    setSelectedZoneId(null);
+    setAddressPin(pin);
+  }, []);
+  const clearAddress = useCallback(() => {
+    setAddressPin(null);
+    setSelectedZoneId(null);
+  }, []);
 
   return (
     <section className="space-y-4">
@@ -72,10 +76,10 @@ export function HcmZoneMap({ riders }: { riders: Rider[] }) {
 
       <div className="grid items-start gap-4 lg:grid-cols-[290px_minmax(0,1fr)]">
         <div className="space-y-4">
-          <ZoneAddressSearch pin={addressPin} matchedZoneName={addressPin ? selectedZone?.name ?? null : null} onResult={(pin) => { setFilters(initialFilters); setSelectedZoneId(null); setAddressPin(pin); }} onClear={() => { setAddressPin(null); setSelectedZoneId(null); }} />
-          <ZoneFilterPanel filters={filters} districts={MAP_DISTRICTS} zones={zones} matchingZones={filteredZones} resultCount={filteredZones.length} open={filtersOpen} onOpenChange={setFiltersOpen} onChange={setFilters} onSelectZone={(id) => { setAddressPin(null); setSelectedZoneId(id); }} />
+          <ZoneAddressSearch pin={addressPin} matchedZoneName={addressPin ? selectedZone?.name ?? null : null} onResult={showAddress} onClear={clearAddress} />
+          <ZoneFilterPanel filters={filters} districts={MAP_DISTRICTS} zones={zones} matchingZones={filteredZones} resultCount={filteredZones.length} open={filtersOpen} onOpenChange={setFiltersOpen} onChange={setFilters} onSelectZone={selectZone} />
         </div>
-        <LeafletMap zones={zones} visibleZoneIds={visibleZoneIds} selectedZoneId={selectedZoneId} addressPin={addressPin} zoneOpacity={zoneOpacity} onAddressZoneMatch={setSelectedZoneId} onZoneOpacityChange={setZoneOpacity} onSelectZone={(id) => { setAddressPin(null); setSelectedZoneId(id); }} />
+        <LeafletMap zones={zones} visibleZoneIds={visibleZoneIds} selectedZoneId={activeSelectedZoneId} addressPin={addressPin} onAddressZoneMatch={setSelectedZoneId} onSelectZone={selectZone} />
       </div>
 
       <ZoneLegend capacityConfigured={zones.some((zone) => zone.capacity !== null)} />
@@ -93,10 +97,10 @@ export function HcmZoneMap({ riders }: { riders: Rider[] }) {
   );
 }
 
-function buildOperationalZones(riders: Rider[], mode: LocationMode) {
+function buildOperationalZones(ridersByZone: Map<string, ZoneRider[]>) {
   let colorIndex = 0;
   return MAP_DISTRICTS.flatMap((district) => district.wards.map((ward) => {
-    const zoneRiders = riders.filter((rider) => matchesDistrict(districtValue(rider, mode), district) && matchesWard(rider, mode, ward));
+    const zoneRiders = ridersByZone.get(zoneId(district.id, ward)) ?? [];
     const activeRiders = zoneRiders.filter((rider) => rider.status !== "inactive").length;
     const capacity: number | null = null;
     const status: ZoneStatus = capacity !== null && activeRiders >= capacity ? "full" : activeRiders > 0 ? "active" : "inactive";
@@ -105,15 +109,35 @@ function buildOperationalZones(riders: Rider[], mode: LocationMode) {
   }));
 }
 
+function indexRidersByZone(riders: ZoneRider[], mode: LocationMode) {
+  const index = new Map<string, ZoneRider[]>();
+  if (mode === "home") return index;
+
+  for (const rider of riders) {
+    const districtValueForRider = districtValue(rider, mode);
+    const district = MAP_DISTRICTS.find((candidate) => matchesDistrict(districtValueForRider, candidate));
+    if (!district) continue;
+    const rawWard = wardValue(rider, mode);
+    const canonicalWards = canonicalWardNames(districtValueForRider, rawWard);
+    const wardParts = canonicalWards.length > 0 ? canonicalWards : splitLocationParts(rawWard);
+    const uniqueZoneIds = new Set(wardParts.map((ward) => zoneId(district.id, ward)));
+    for (const id of uniqueZoneIds) {
+      const zoneRiders = index.get(id);
+      if (zoneRiders) zoneRiders.push(rider);
+      else index.set(id, [rider]);
+    }
+  }
+  return index;
+}
+
 function matchesFilters(zone: OperationalZone, filters: ZoneFilters) {
   const query = normalize(filters.query);
   return (!query || normalize(`${zone.name} ${zone.code}`).includes(query)) && (filters.area === "all" || zone.area === filters.area) && (filters.districtId === "all" || zone.districtId === filters.districtId) && (filters.wardId === "all" || zone.id === filters.wardId) && (filters.status === "all" || zone.status === filters.status);
 }
 
 function normalize(value: string | null | undefined) { return (value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toLowerCase().replace(/\b(phuong|p\.?|ward|xa|thi tran|tt\.?)\b/g, "").replace(/[.,/_-]+/g, " ").replace(/\s+/g, " ").trim(); }
-function districtValue(rider: Rider, mode: LocationMode) { return mode === "pickup" ? rider.pickup_district : mode === "delivery" ? rider.delivery_district : rider.home_district; }
-function wardValue(rider: Rider, mode: LocationMode) { return mode === "pickup" ? rider.pickup_ward : mode === "delivery" ? rider.delivery_ward : null; }
-function matchesWard(rider: Rider, mode: LocationMode, ward: string) { const rawWard = wardValue(rider, mode); const parts = canonicalWardNames(districtValue(rider, mode), rawWard); return (parts.length ? parts : splitLocationParts(rawWard)).some((part) => normalize(part) === normalize(ward)); }
+function districtValue(rider: ZoneRider, mode: LocationMode) { return mode === "pickup" ? rider.pickup_district : mode === "delivery" ? rider.delivery_district : rider.home_district; }
+function wardValue(rider: ZoneRider, mode: LocationMode) { return mode === "pickup" ? rider.pickup_ward : mode === "delivery" ? rider.delivery_ward : null; }
 function matchesDistrict(value: string | null, district: (typeof MAP_DISTRICTS)[number]) { const normalized = normalize(value); return district.aliases.some((alias) => normalized === normalize(alias) || normalized.startsWith(`${normalize(alias)} `)); }
 function statusLabel(status: ZoneStatus) { return status === "full" ? "Đầy tải" : status === "active" ? "Đang hoạt động" : "Không hoạt động"; }
 function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) { return <div className="rounded-xl bg-slate-50 p-3"><span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">{icon}{label}</span><p className="mt-2 text-2xl font-black text-slate-950">{value}</p></div>; }
