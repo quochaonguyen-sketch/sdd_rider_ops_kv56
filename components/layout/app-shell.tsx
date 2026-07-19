@@ -1,31 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import {
-  Activity,
-  BarChart3,
-  Bike,
-  CalendarDays,
-  ClipboardCheck,
-  ChevronDown,
-  ListChecks,
-  ListTodo,
-  LogOut,
-  MapPinned,
-  Menu,
-  PackageOpen,
-  PackagePlus,
-  PencilRuler,
-  Truck,
-  Upload,
-  UsersRound,
-  X,
-} from "lucide-react";
+import { Activity, BarChart3, Bike, CalendarDays, ChevronDown, ClipboardCheck, ListChecks, ListTodo, LogOut, MapPinned, Menu, Moon, PackageOpen, PackagePlus, PanelLeftClose, PanelLeftOpen, PencilRuler, Sun, Truck, Upload, UsersRound, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import { AuroraBackground } from "@/components/ui/aurora-background";
 import { cn } from "@/utils/cn";
 import { AppBrand, AppCopyright } from "@/components/layout/app-brand";
 import { RouteReveal } from "@/components/layout/route-reveal";
@@ -55,27 +34,38 @@ const toolItems = [
   { href: "/pickup-management", label: "Pickup Management", icon: ListChecks },
 ];
 const memberHiddenItems = new Set(["/zone-builder", "/pickup-management"]);
+const morePaths = ["/performance", "/attendance", "/morning-delivery", "/zones", "/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"];
+type ThemeMode = "light" | "dark";
 
-export function AppShell({
-  children,
-  user,
-}: {
-  children: React.ReactNode;
-  user: { email: string; fullName: string | null; role: string };
-}) {
+export function AppShell({ children, user }: { children: React.ReactNode; user: { email: string; fullName: string | null; role: string } }) {
   const pathname = usePathname();
   const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [theme, setTheme] = useState<ThemeMode>("light");
   const memberToolRestricted = user.role === "member";
   const visibleToolItems = memberToolRestricted ? [] : toolItems;
-  const moreNavItems = [
-    ...volumeItems,
-    ...navItems.slice(4).filter((item) => !memberToolRestricted || !memberHiddenItems.has(item.href)),
-  ];
+  const moreNavItems = [...volumeItems, ...navItems.slice(4).filter((item) => !memberToolRestricted || !memberHiddenItems.has(item.href))];
   const volumeActive = pathname.startsWith("/volume");
   const [volumeOpen, setVolumeOpen] = useState(volumeActive);
   const toolsActive = visibleToolItems.some((item) => pathname.startsWith(item.href));
   const [toolsOpen, setToolsOpen] = useState(toolsActive);
+  const moreRouteActive = morePaths.some((path) => pathname.startsWith(path));
+  const currentPage = [...navItems, ...volumeItems].find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+
+  useEffect(() => {
+    // The root boot script applies the saved mode before paint; this only syncs the control label.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
+  }, []);
+
+  function toggleTheme() {
+    const nextTheme: ThemeMode = theme === "dark" ? "light" : "dark";
+    document.documentElement.classList.toggle("dark", nextTheme === "dark");
+    document.documentElement.dataset.theme = nextTheme;
+    window.localStorage.setItem("rider-ops-theme", nextTheme);
+    setTheme(nextTheme);
+  }
 
   async function signOut() {
     await createClient().auth.signOut();
@@ -83,231 +73,100 @@ export function AppShell({
   }
 
   return (
-    <div className="relative isolate min-h-screen overflow-hidden bg-slate-50/80">
-      <AuroraBackground className="fixed" />
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200/80 bg-white md:flex">
-        <div className="flex h-[76px] items-center border-b border-slate-100 px-5">
-          <AppBrand />
-        </div>
-        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+    <div className={cn("app-shell-technical", !sidebarOpen && "is-sidebar-collapsed")}>
+      <aside id="operations-sidebar" className="app-sidebar">
+        <div className="app-sidebar-brand"><AppBrand inverse /></div>
+        <div className="app-sidebar-context"><span className="app-live-dot" aria-hidden="true" /><span>Operations workspace</span></div>
+        <nav className="app-sidebar-nav" aria-label="Điều hướng chính">
+          <p className="app-nav-eyebrow">Workspace</p>
           {navItems.slice(0, 8).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950",
-                  active && "bg-slate-950 text-white hover:bg-slate-950 hover:text-white",
-                )}
-              >
-                <Icon size={18} />
-                {item.label}
-              </Link>
-            );
+            return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span></Link>;
           })}
-          <div className="pt-1">
-            <button
-              type="button"
-              aria-expanded={volumeOpen}
-              onClick={() => setVolumeOpen((current) => !current)}
-              className={cn(
-                "flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950",
-                volumeActive && "text-slate-950",
-              )}
-            >
-              <PackageOpen size={18} />
-              <span className="flex-1">Volume</span>
-              <ChevronDown size={15} className={cn("transition-transform", volumeOpen && "rotate-180")} />
-            </button>
-            {volumeOpen ? <div className="ml-6 space-y-1 border-l border-slate-200 pl-3">
-              {volumeItems.map((item) => {
-                const active = pathname === item.href;
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-500 transition duration-150 hover:bg-blue-50 hover:text-blue-700",
-                      active && "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-100",
-                    )}
-                  >
-                    <Icon size={16} />
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div> : null}
-          </div>
-          {visibleToolItems.length > 0 ? <div className="pt-1">
-            <button
-              type="button"
-              aria-expanded={toolsOpen}
-              onClick={() => setToolsOpen((current) => !current)}
-              className={cn(
-                "flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950",
-                toolsActive && "text-slate-950",
-              )}
-            >
-              <PencilRuler size={18} />
-              <span className="flex-1">Tools</span>
-              <ChevronDown size={15} className={cn("transition-transform", toolsOpen && "rotate-180")} />
-            </button>
-            {toolsOpen ? <div className="ml-6 space-y-1 border-l border-slate-200 pl-3">
-              {visibleToolItems.map((item) => {
-                const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-500 transition duration-150 hover:bg-blue-50 hover:text-blue-700",
-                      active && "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-100",
-                    )}
-                  >
-                    <Icon size={16} />
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div> : null}
-          </div> : null}
+          <SidebarDisclosure label="Volume" icon={PackageOpen} open={volumeOpen} active={volumeActive} onToggle={() => setVolumeOpen((current) => !current)}>
+            {volumeItems.map((item) => {
+              const active = pathname === item.href;
+              const Icon = item.icon;
+              return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-sub-link", active && "is-active")}><Icon size={15} aria-hidden="true" /><span>{item.label}</span></Link>;
+            })}
+          </SidebarDisclosure>
+          {visibleToolItems.length > 0 ? <SidebarDisclosure label="Tools" icon={PencilRuler} open={toolsOpen} active={toolsActive} onToggle={() => setToolsOpen((current) => !current)}>
+            {visibleToolItems.map((item) => {
+              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+              const Icon = item.icon;
+              return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-sub-link", active && "is-active")}><Icon size={15} aria-hidden="true" /><span>{item.label}</span></Link>;
+            })}
+          </SidebarDisclosure> : null}
+          <p className="app-nav-eyebrow app-nav-eyebrow-secondary">System</p>
           {navItems.slice(10).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-600 transition duration-150 hover:bg-blue-50 hover:text-blue-700",
-                  active && "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-100",
-                )}
-              >
-                <Icon size={18} />
-                {item.label}
-              </Link>
-            );
+            return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span></Link>;
           })}
         </nav>
+        <div className="app-sidebar-foot"><span>SDD · KV5 + KV6</span><span>Internal operations</span></div>
       </aside>
-      <div className="relative z-10 flex min-h-screen flex-col md:pl-64">
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 shadow-[0_1px_3px_rgba(15,23,42,0.03)] backdrop-blur-xl md:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <AppBrand compact className="md:hidden" />
-            <div className="min-w-0">
-              <p className="hidden text-sm font-semibold text-slate-950 md:block">{user.fullName ?? user.email}</p>
-              <p className="hidden text-xs uppercase tracking-wide text-slate-500 md:block">{user.role}</p>
+
+      <div className="app-shell-content">
+        <header className="app-header">
+          <div className="app-header-mobile-brand"><AppBrand compact /></div>
+          <div className="app-header-leading">
+            <button type="button" className="app-sidebar-toggle" aria-controls="operations-sidebar" aria-expanded={sidebarOpen} aria-label={sidebarOpen ? "Ẩn thanh điều hướng" : "Hiện thanh điều hướng"} title={sidebarOpen ? "Ẩn thanh điều hướng" : "Hiện thanh điều hướng"} onClick={() => setSidebarOpen((current) => !current)}>
+              {sidebarOpen ? <PanelLeftClose size={18} aria-hidden="true" /> : <PanelLeftOpen size={18} aria-hidden="true" />}
+            </button>
+            <div className="app-header-context">
+              <p className="app-header-kicker">Rider Operations / Workspace</p>
+              <div className="app-header-title-row"><h1>{currentPage?.label ?? "Operations"}</h1><span className="app-header-status"><span className="app-live-dot" aria-hidden="true" />System ready</span></div>
             </div>
           </div>
-          <BadgeRole role={user.role} />
-          <Button type="button" variant="secondary" className="hidden md:inline-flex" onClick={signOut}>
-            <LogOut size={16} />
-            Sign out
-          </Button>
+          <div className="app-header-account">
+            <button type="button" className="app-theme-toggle" aria-label={theme === "dark" ? "Chuyển sang giao diện sáng" : "Chuyển sang giao diện tối"} title={theme === "dark" ? "Giao diện sáng" : "Giao diện tối"} onClick={toggleTheme}>
+              {theme === "dark" ? <Sun size={17} aria-hidden="true" /> : <Moon size={17} aria-hidden="true" />}
+            </button>
+            <div className="app-account-copy"><strong>{user.fullName ?? user.email}</strong><span>{user.role}</span></div>
+            <RoleBadge role={user.role} />
+            <button type="button" className="app-signout" onClick={() => void signOut()}><LogOut size={15} aria-hidden="true" /><span>Sign out</span></button>
+          </div>
         </header>
-        <main className="flex-1 px-3 py-4 pb-28 sm:px-4 md:px-6 md:py-6 md:pb-6"><RouteReveal key={pathname}>{children}</RouteReveal></main>
-        <footer className="border-t border-slate-200/70 bg-white/60 px-6 pb-28 pt-4 md:py-4">
-          <AppCopyright />
-        </footer>
+        <main className="app-main"><RouteReveal key={pathname}>{children}</RouteReveal></main>
+        <footer className="app-footer"><AppCopyright /><p>Rider Ops Console · {currentPage?.label ?? "Operations"}</p></footer>
       </div>
 
-      {moreOpen ? (
-        <button
-          type="button"
-          aria-label="Close menu"
-          className="fixed inset-0 z-30 bg-slate-950/30 backdrop-blur-[1px] md:hidden"
-          onClick={() => setMoreOpen(false)}
-        />
-      ) : null}
-
-      <div
-        className={cn(
-          "fixed inset-x-3 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-40 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl transition md:hidden",
-          moreOpen ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0",
-        )}
-      >
-        <div className="grid grid-cols-2 gap-2">
+      {moreOpen ? <button type="button" aria-label="Đóng menu" className="app-mobile-scrim" onClick={() => setMoreOpen(false)} /> : null}
+      <section className={cn("app-more-sheet", moreOpen && "is-open")} aria-label="Menu chức năng khác" aria-hidden={!moreOpen}>
+        <div className="app-more-heading"><div><span>Navigation index</span><h2>Operations menu</h2></div><button type="button" aria-label="Đóng menu" onClick={() => setMoreOpen(false)}><X size={18} /></button></div>
+        <div className="app-more-grid">
           {moreNavItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setMoreOpen(false)}
-                className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-3 text-sm font-medium text-slate-700"
-              >
-                <Icon size={18} />
-                {item.label}
-              </Link>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => void signOut()}
-            className="col-span-2 flex items-center justify-center gap-2 rounded-xl bg-red-50 px-3 py-3 text-sm font-medium text-red-700"
-          >
-            <LogOut size={18} />
-            Sign out
-          </button>
-        </div>
-      </div>
-
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
-        <div className="grid h-20 grid-cols-5">
-          {mobileNavItems.map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-medium transition",
-                  active ? "text-slate-950" : "text-slate-400",
-                )}
-              >
-                <span className={cn("grid size-9 place-items-center rounded-xl", active && "bg-slate-950 text-white")}>
-                  <Icon size={19} />
-                </span>
-                {item.label}
-              </Link>
-            );
+            return <Link key={item.href} href={item.href} onClick={() => setMoreOpen(false)} aria-current={active ? "page" : undefined} className={cn("app-more-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span></Link>;
           })}
-          <button
-            type="button"
-            onClick={() => setMoreOpen((current) => !current)}
-              className={cn(
-                "flex flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-medium",
-              moreOpen || ["/performance", "/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"].some((path) => pathname.startsWith(path))
-                ? "text-slate-950"
-                : "text-slate-400",
-            )}
-          >
-            <span
-              className={cn(
-                "grid size-9 place-items-center rounded-xl",
-                (moreOpen || ["/performance", "/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"].some((path) => pathname.startsWith(path))) &&
-                  "bg-slate-950 text-white",
-              )}
-            >
-              {moreOpen ? <X size={19} /> : <Menu size={19} />}
-            </span>
-            Thêm
-          </button>
         </div>
+        <button type="button" onClick={() => void signOut()} className="app-more-signout"><LogOut size={17} />Sign out</button>
+      </section>
+
+      <nav className="app-taskbar" aria-label="Điều hướng nhanh">
+        {mobileNavItems.map((item) => {
+          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+          const Icon = item.icon;
+          return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-taskbar-link", active && "is-active")}><Icon size={19} aria-hidden="true" /><span>{item.label}</span></Link>;
+        })}
+        <button type="button" aria-expanded={moreOpen} onClick={() => setMoreOpen((current) => !current)} className={cn("app-taskbar-link", (moreOpen || moreRouteActive) && "is-active")}>
+          {moreOpen ? <X size={19} aria-hidden="true" /> : <Menu size={19} aria-hidden="true" />}<span>Thêm</span>
+        </button>
       </nav>
     </div>
   );
 }
 
-function BadgeRole({ role }: { role: string }) {
-  return (
-    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-blue-700 md:hidden">
-      {role}
-    </span>
-  );
+function SidebarDisclosure({ label, icon: Icon, open, active, onToggle, children }: { label: string; icon: typeof PackageOpen; open: boolean; active: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return <div className="app-nav-disclosure">
+    <button type="button" aria-expanded={open} onClick={onToggle} className={cn("app-nav-link app-nav-toggle", active && "has-active-child")}><Icon size={17} aria-hidden="true" /><span>{label}</span><ChevronDown size={14} className={cn("app-nav-chevron", open && "is-open")} aria-hidden="true" /></button>
+    {open ? <div className="app-nav-sublist">{children}</div> : null}
+  </div>;
+}
+
+function RoleBadge({ role }: { role: string }) {
+  return <span className="app-role-badge">{role}</span>;
 }

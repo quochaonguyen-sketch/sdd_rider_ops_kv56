@@ -1,0 +1,23 @@
+[
+  {
+    "date": "2026-07-19",
+    "macrostructure": "Daily Dossier",
+    "theme": "Cobalt adapted",
+    "enrichment": "data-native paired bars",
+    "brief": "Per-rider daily Delivery and Pickup performance page"
+  },
+  {
+    "date": "2026-07-19",
+    "macrostructure": "Workbench",
+    "theme": "Cobalt adapted",
+    "enrichment": "none",
+    "brief": "Technical redesign of the Riders operations registry"
+  },
+  {
+    "date": "2026-07-19",
+    "macrostructure": "Control Ledger",
+    "theme": "Cobalt adapted",
+    "enrichment": "data-native SVG donuts",
+    "brief": "KV5 KV6 volume dashboard with monthly daily averages and Failed rider rankings"
+  }
+]

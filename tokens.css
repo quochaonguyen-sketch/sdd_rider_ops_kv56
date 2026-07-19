@@ -1,0 +1,111 @@
+/* Hallmark · macrostructure: Workbench · tone: technical · anchor hue: cobalt
+ * genre: modern-minimal · theme: Cobalt adapted · enrichment: none
+ * pre-emit critique: P4 H4 E4 S5 R5 V4
+ */
+
+:root {
+  --color-paper: oklch(0.985 0.004 250);
+  --color-paper-2: oklch(0.965 0.008 250);
+  --color-paper-3: oklch(0.935 0.012 250);
+  --color-ink: oklch(0.22 0.025 258);
+  --color-ink-2: oklch(0.34 0.02 257);
+  --color-neutral: oklch(0.48 0.018 256);
+  --color-muted: oklch(0.42 0.018 256);
+  --color-rule: oklch(0.88 0.014 252);
+  --color-rule-strong: oklch(0.76 0.022 254);
+  --color-accent: oklch(0.48 0.2 256);
+  --color-accent-soft: oklch(0.94 0.035 256);
+  --color-accent-ink: oklch(0.985 0.004 250);
+  --color-focus: oklch(0.14 0.04 256);
+  --color-graphite: oklch(0.205 0.022 260);
+  --color-graphite-2: oklch(0.255 0.024 258);
+  --color-graphite-ink: oklch(0.94 0.01 250);
+  --color-success: oklch(0.5 0.13 155);
+  --color-success-soft: oklch(0.95 0.025 155);
+  --color-warning: oklch(0.58 0.13 72);
+  --color-warning-soft: oklch(0.95 0.03 78);
+  --color-error: oklch(0.52 0.19 28);
+  --color-error-soft: oklch(0.95 0.025 28);
+  --color-chart-1: oklch(0.52 0.19 256);
+  --color-chart-2: oklch(0.58 0.15 230);
+  --color-chart-3: oklch(0.56 0.13 170);
+  --color-chart-4: oklch(0.63 0.14 110);
+  --color-chart-5: oklch(0.62 0.16 65);
+  --color-chart-6: oklch(0.57 0.17 25);
+  --color-chart-7: oklch(0.54 0.16 315);
+
+  --font-display: "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
+  --font-body: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
+
+  --space-3xs: 0.125rem;
+  --space-2xs: 0.25rem;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2.5rem;
+  --space-2xl: 4rem;
+  --space-3xl: 6rem;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-md: 1.25rem;
+  --text-lg: 1.5625rem;
+  --text-xl: 1.9531rem;
+  --text-2xl: 2.4414rem;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms;
+  --dur-short: 220ms;
+  --dur-long: 420ms;
+
+  --rule-hairline: 1px;
+  --radius-control: 0.375rem;
+  --radius-panel: 0.625rem;
+  --radius-modal: 0.875rem;
+
+  --z-base: 1;
+  --z-raised: 10;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-sticky-nav: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+}
+
+.dark {
+  --color-paper: oklch(0.185 0.014 258);
+  --color-paper-2: oklch(0.145 0.016 260);
+  --color-paper-3: oklch(0.235 0.018 258);
+  --color-ink: oklch(0.94 0.012 250);
+  --color-ink-2: oklch(0.82 0.016 252);
+  --color-neutral: oklch(0.7 0.018 254);
+  --color-muted: oklch(0.74 0.018 254);
+  --color-rule: oklch(0.32 0.02 256);
+  --color-rule-strong: oklch(0.46 0.025 254);
+  --color-accent: oklch(0.68 0.18 256);
+  --color-accent-soft: oklch(0.27 0.055 256);
+  --color-accent-ink: oklch(0.14 0.02 258);
+  --color-focus: oklch(0.78 0.15 250);
+  --color-graphite: oklch(0.105 0.016 262);
+  --color-graphite-2: oklch(0.16 0.02 260);
+  --color-graphite-ink: oklch(0.94 0.01 250);
+  --color-success: oklch(0.72 0.14 155);
+  --color-success-soft: oklch(0.25 0.045 155);
+  --color-warning: oklch(0.78 0.14 78);
+  --color-warning-soft: oklch(0.27 0.05 78);
+  --color-error: oklch(0.72 0.17 28);
+  --color-error-soft: oklch(0.26 0.055 28);
+  --color-chart-1: oklch(0.7 0.17 256);
+  --color-chart-2: oklch(0.72 0.14 230);
+  --color-chart-3: oklch(0.7 0.12 170);
+  --color-chart-4: oklch(0.76 0.13 110);
+  --color-chart-5: oklch(0.75 0.15 65);
+  --color-chart-6: oklch(0.7 0.16 25);
+  --color-chart-7: oklch(0.7 0.15 315);
+}

@@ -3,13 +3,13 @@ import { cn } from "@/utils/cn";
 export const APP_NAME = "Rider Operations";
 export const APP_UNIT = "Khu vực 5 & 6 · SDD";
 
-export function AppBrand({ compact = false, className }: { compact?: boolean; className?: string }) {
+export function AppBrand({ compact = false, inverse = false, className }: { compact?: boolean; inverse?: boolean; className?: string }) {
   return (
     <div className={cn("flex min-w-0 items-center gap-3", className)}>
       <div
         className={cn(
-          "relative grid shrink-0 place-items-center overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-900 text-white shadow-[0_8px_24px_rgba(37,99,235,0.28)] ring-1 ring-white/20",
-          compact ? "size-9 rounded-xl" : "size-11",
+          "relative grid shrink-0 place-items-center overflow-hidden rounded-md bg-blue-600 text-white shadow-[0_6px_18px_rgba(36,88,218,0.2)] ring-1 ring-inset ring-white/20",
+          compact ? "size-9" : "size-10",
         )}
         aria-hidden="true"
       >
@@ -24,8 +24,8 @@ export function AppBrand({ compact = false, className }: { compact?: boolean; cl
         <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-emerald-300 shadow-[0_0_0_3px_rgba(255,255,255,0.14)]" />
       </div>
       <div className="min-w-0">
-        <p className={cn("truncate font-bold tracking-[-0.02em] text-slate-950", compact ? "text-sm" : "text-[15px]")}>{APP_NAME}</p>
-        <p className="truncate text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{APP_UNIT}</p>
+        <p className={cn("truncate font-bold tracking-[-0.02em]", inverse ? "text-white" : "text-slate-950", compact ? "text-sm" : "text-[15px]")}>{APP_NAME}</p>
+        <p className={cn("truncate text-[11px] font-semibold uppercase tracking-[0.12em]", inverse ? "text-slate-400" : "text-slate-500")}>{APP_UNIT}</p>
       </div>
     </div>
   );

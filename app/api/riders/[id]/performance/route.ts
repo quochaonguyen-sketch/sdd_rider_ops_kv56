@@ -41,7 +41,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   const { data: rider, error: riderError } = await session.admin
     .from("riders")
-    .select("id,rider_code,full_name")
+    .select("id,rider_code,full_name,avatar_url,kv,cot,status,pickup_district,pickup_ward,delivery_district,delivery_ward")
     .eq("id", parsedId.data)
     .maybeSingle();
 

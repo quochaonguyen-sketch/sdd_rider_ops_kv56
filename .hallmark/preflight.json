@@ -1,0 +1,8 @@
+{
+  "date": "2026-07-19",
+  "font_stack": "Geist via next/font; previous body override to Inter removed",
+  "palette": "OKLCH variables in app/globals.css",
+  "motion": "motion-cut; no motion library",
+  "spacing": "Tailwind utilities plus Hallmark 4pt named tokens",
+  "framework": "Next.js 16.2.7 App Router, React 19.2.4, Tailwind CSS 4"
+}
