@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Activity, BarChart3, Bike, CalendarDays, ChevronDown, ClipboardCheck, ListChecks, ListTodo, LogOut, MapPinned, Menu, Moon, PackageOpen, PackagePlus, PanelLeftClose, PanelLeftOpen, PencilRuler, Sun, Truck, Upload, UsersRound, X } from "lucide-react";
+import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, ClipboardCheck, ListChecks, ListTodo, LogOut, MapPinned, Menu, Moon, PackageOpen, PackagePlus, PanelLeftClose, PanelLeftOpen, PencilRuler, Sun, Truck, Upload, UsersRound, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/utils/cn";
 import { AppBrand, AppCopyright } from "@/components/layout/app-brand";
@@ -16,6 +16,7 @@ const navItems = [
   { href: "/riders", label: "Riders", icon: Bike },
   { href: "/performance", label: "Performance", icon: BarChart3 },
   { href: "/attendance", label: "Attendance", icon: CalendarDays },
+  { href: "/off-schedule", label: "Off Schedule", icon: CalendarOff },
   { href: "/morning-delivery", label: "Morning Dispatch", icon: ClipboardCheck },
   { href: "/zones", label: "Zones", icon: MapPinned },
   { href: "/zone-builder", label: "Zone Builder", icon: PencilRuler },
@@ -34,7 +35,7 @@ const toolItems = [
   { href: "/pickup-management", label: "Pickup Management", icon: ListChecks },
 ];
 const memberHiddenItems = new Set(["/zone-builder", "/pickup-management"]);
-const morePaths = ["/performance", "/attendance", "/morning-delivery", "/zones", "/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"];
+const morePaths = ["/performance", "/attendance", "/off-schedule", "/morning-delivery", "/zones", "/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"];
 type ThemeMode = "light" | "dark";
 
 export function AppShell({ children, user }: { children: React.ReactNode; user: { email: string; fullName: string | null; role: string } }) {
@@ -79,7 +80,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
         <div className="app-sidebar-context"><span className="app-live-dot" aria-hidden="true" /><span>Operations workspace</span></div>
         <nav className="app-sidebar-nav" aria-label="Điều hướng chính">
           <p className="app-nav-eyebrow">Workspace</p>
-          {navItems.slice(0, 8).map((item) => {
+          {navItems.slice(0, 9).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span></Link>;
@@ -99,7 +100,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
             })}
           </SidebarDisclosure> : null}
           <p className="app-nav-eyebrow app-nav-eyebrow-secondary">System</p>
-          {navItems.slice(10).map((item) => {
+          {navItems.slice(11).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span></Link>;

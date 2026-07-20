@@ -63,6 +63,23 @@ export type AttendanceLog = {
   };
 };
 
+export type RiderOffRequest = {
+  id: string;
+  rider_id: string;
+  rider_code: string;
+  off_date: string;
+  request_type: "WEEKLY" | "PLANNED" | "EMERGENCY";
+  shift: "FULL_DAY" | "MORNING" | "AFTERNOON";
+  reason: string | null;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  created_at: string;
+  updated_at: string;
+  rider?: Pick<Rider, "full_name" | "kv" | "cot" | "delivery_district" | "current_shift">;
+};
+
 export type DeliveryVolume = {
   id: string;
   shipment_id: string;

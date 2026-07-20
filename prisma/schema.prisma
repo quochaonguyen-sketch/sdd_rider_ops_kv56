@@ -58,8 +58,31 @@ model Rider {
   updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
   zone             Zone?           @relation(fields: [zoneId], references: [id])
   attendance       AttendanceLog[]
+  offRequests      RiderOffRequest[]
 
   @@map("riders")
+}
+
+model RiderOffRequest {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  riderId     String   @map("rider_id") @db.Uuid
+  riderCode   String   @map("rider_code")
+  offDate     DateTime @map("off_date") @db.Date
+  requestType String   @map("request_type")
+  shift       String   @default("FULL_DAY")
+  reason      String?
+  status      String   @default("PENDING")
+  reviewedBy  String?  @map("reviewed_by") @db.Uuid
+  reviewedAt  DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewNote  String?  @map("review_note")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  rider       Rider    @relation(fields: [riderId], references: [id], onDelete: Cascade)
+
+  @@unique([riderId, offDate])
+  @@index([offDate])
+  @@index([status])
+  @@map("rider_off_requests")
 }
 
 model AttendanceLog {
