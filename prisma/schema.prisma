@@ -36,27 +36,27 @@ model Zone {
 }
 
 model Rider {
-  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   kv               String?
-  homeDistrict     String?         @map("home_district")
+  homeDistrict     String?           @map("home_district")
   cot              String?
-  riderCode        String          @unique @map("rider_code")
-  fullName         String?         @map("full_name")
-  pickupDistrict   String?         @map("pickup_district")
-  pickupWard       String?         @map("pickup_ward")
-  pointName        String?         @map("point_name")
-  deliveryDistrict String?         @map("delivery_district")
-  deliveryWard     String?         @map("delivery_ward")
-  avatarUrl        String?         @map("avatar_url")
+  riderCode        String            @unique @map("rider_code")
+  fullName         String?           @map("full_name")
+  pickupDistrict   String?           @map("pickup_district")
+  pickupWard       String?           @map("pickup_ward")
+  pointName        String?           @map("point_name")
+  deliveryDistrict String?           @map("delivery_district")
+  deliveryWard     String?           @map("delivery_ward")
+  avatarUrl        String?           @map("avatar_url")
   name             String?
   phone            String?
-  zoneId           String?         @map("zone_id") @db.Uuid
-  status           String          @default("active")
-  currentShift     String?         @map("current_shift")
-  rawData          Json?           @map("raw_data")
-  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
-  zone             Zone?           @relation(fields: [zoneId], references: [id])
+  zoneId           String?           @map("zone_id") @db.Uuid
+  status           String            @default("active")
+  currentShift     String?           @map("current_shift")
+  rawData          Json?             @map("raw_data")
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  zone             Zone?             @relation(fields: [zoneId], references: [id])
   attendance       AttendanceLog[]
   offRequests      RiderOffRequest[]
 
@@ -64,24 +64,33 @@ model Rider {
 }
 
 model RiderOffRequest {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  riderId     String   @map("rider_id") @db.Uuid
-  riderCode   String   @map("rider_code")
-  offDate     DateTime @map("off_date") @db.Date
-  requestType String   @map("request_type")
-  shift       String   @default("FULL_DAY")
-  reason      String?
-  status      String   @default("PENDING")
-  reviewedBy  String?  @map("reviewed_by") @db.Uuid
-  reviewedAt  DateTime? @map("reviewed_at") @db.Timestamptz(6)
-  reviewNote  String?  @map("review_note")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  rider       Rider    @relation(fields: [riderId], references: [id], onDelete: Cascade)
+  id                      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  batchId                 String    @default(dbgenerated("gen_random_uuid()")) @map("batch_id") @db.Uuid
+  riderId                 String    @map("rider_id") @db.Uuid
+  riderCode               String    @map("rider_code")
+  offDate                 DateTime  @map("off_date") @db.Date
+  requestType             String    @map("request_type")
+  shift                   String    @default("FULL_DAY")
+  reason                  String?
+  evidencePath            String?   @map("evidence_path")
+  evidenceName            String?   @map("evidence_name")
+  evidenceType            String?   @map("evidence_type")
+  requesterEmail          String?   @map("requester_email")
+  emailNotificationStatus String    @default("PENDING") @map("email_notification_status")
+  emailNotificationError  String?   @map("email_notification_error")
+  emailNotifiedAt         DateTime? @map("email_notified_at") @db.Timestamptz(6)
+  status                  String    @default("PENDING")
+  reviewedBy              String?   @map("reviewed_by") @db.Uuid
+  reviewedAt              DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewNote              String?   @map("review_note")
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  rider                   Rider     @relation(fields: [riderId], references: [id], onDelete: Cascade)
 
   @@unique([riderId, offDate])
   @@index([offDate])
   @@index([status])
+  @@index([batchId])
   @@map("rider_off_requests")
 }
 
@@ -98,10 +107,10 @@ model AttendanceLog {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
   rider     Rider?   @relation(fields: [riderId], references: [id])
 
+  @@unique([riderCode, workDate])
   @@index([workDate])
   @@index([status])
   @@index([riderCode])
-  @@unique([riderCode, workDate])
   @@map("attendance_logs")
 }
 

@@ -1,6 +1,13 @@
 [
   {
     "date": "2026-07-20",
+    "macrostructure": "Separated Decision Lanes",
+    "theme": "Cobalt adapted",
+    "enrichment": "multi-date calendar and evidence preview",
+    "brief": "Split pending and approved OFF queues with multi-date leave evidence"
+  },
+  {
+    "date": "2026-07-20",
     "macrostructure": "Verification Desk",
     "theme": "Cobalt adapted",
     "enrichment": "three-step operational brief",

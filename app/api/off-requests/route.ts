@@ -49,9 +49,19 @@ export async function GET(request: Request) {
   if (riderError) return NextResponse.json({ success: false, error: riderError.message }, { status: 500 });
 
   const riderById = new Map((riders ?? []).map((rider) => [rider.id, rider]));
+  const evidencePaths = Array.from(new Set((requests ?? []).map((item) => item.evidence_path).filter((path): path is string => Boolean(path))));
+  const signedEvidence = new Map<string, string>();
+  await Promise.all(evidencePaths.map(async (path) => {
+    const { data } = await admin.storage.from("off-request-evidence").createSignedUrl(path, 60 * 60);
+    if (data?.signedUrl) signedEvidence.set(path, data.signedUrl);
+  }));
   return NextResponse.json({
     success: true,
     can_edit: canManageOperations(profile?.role),
-    requests: (requests ?? []).map((item) => ({ ...item, rider: riderById.get(item.rider_id) ?? null })),
+    requests: (requests ?? []).map((item) => ({
+      ...item,
+      evidence_url: item.evidence_path ? signedEvidence.get(item.evidence_path) ?? null : null,
+      rider: riderById.get(item.rider_id) ?? null,
+    })),
   });
 }

@@ -65,12 +65,21 @@ export type AttendanceLog = {
 
 export type RiderOffRequest = {
   id: string;
+  batch_id: string;
   rider_id: string;
   rider_code: string;
   off_date: string;
   request_type: "WEEKLY" | "PLANNED" | "EMERGENCY";
   shift: "FULL_DAY" | "MORNING" | "AFTERNOON";
   reason: string | null;
+  evidence_path: string | null;
+  evidence_name: string | null;
+  evidence_type: string | null;
+  evidence_url?: string | null;
+  requester_email: string | null;
+  email_notification_status: "PENDING" | "SENT" | "FAILED" | "NOT_CONFIGURED";
+  email_notification_error: string | null;
+  email_notified_at: string | null;
   status: "PENDING" | "APPROVED" | "REJECTED";
   reviewed_by: string | null;
   reviewed_at: string | null;
