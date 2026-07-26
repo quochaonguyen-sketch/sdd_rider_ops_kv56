@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AppShell } from "@/components/layout/app-shell";
@@ -24,14 +25,16 @@ export async function ProtectedPage({ children }: { children: React.ReactNode })
   }
 
   return (
-    <AppShell
-      user={{
-        email: user.email ?? "",
-        fullName: profile.full_name,
-        role: profile.role,
-      }}
-    >
-      {children}
-    </AppShell>
+    <Suspense fallback={<main className="app-embedded-main">{children}</main>}>
+      <AppShell
+        user={{
+          email: user.email ?? "",
+          fullName: profile.full_name,
+          role: profile.role,
+        }}
+      >
+        {children}
+      </AppShell>
+    </Suspense>
   );
 }

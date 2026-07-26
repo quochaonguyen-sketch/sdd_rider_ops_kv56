@@ -139,3 +139,17 @@ model ActivityLog {
   @@index([createdAt])
   @@map("activity_logs")
 }
+
+model PersonalNote {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  title     String
+  content   String   @default("")
+  isPinned  Boolean  @default(false) @map("is_pinned")
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([userId, isPinned, updatedAt])
+  @@map("personal_notes")
+}

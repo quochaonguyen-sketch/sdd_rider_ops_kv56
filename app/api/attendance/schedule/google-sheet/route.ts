@@ -11,7 +11,13 @@ const bodySchema = z.object({
   range_mode: z.enum(["week", "month"]),
   anchor_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
-type Status = "OFF_WEEKLY" | "OFF_APPROVED" | "OFF_UNEXPECTED" | "NO_PICKUP" | "NO_DELIVERY";
+type Status =
+  | "OFF_WEEKLY"
+  | "OFF_APPROVED"
+  | "OFF_UNEXPECTED"
+  | "WORKING_REST_DAY"
+  | "NO_PICKUP"
+  | "NO_DELIVERY";
 
 async function adminSession() {
   const client = await createClient();
@@ -42,6 +48,7 @@ function statusValue(value: unknown): Status | null {
   if (text === "off tuan" || text === "off") return "OFF_WEEKLY";
   if (["off co xin phep", "off co phep", "off phep"].includes(text)) return "OFF_APPROVED";
   if (text === "off dot xuat") return "OFF_UNEXPECTED";
+  if (text === "off nhung khong off") return "WORKING_REST_DAY";
   if (text === "khong di pick") return "NO_PICKUP";
   if (text === "khong di giao") return "NO_DELIVERY";
   return null;

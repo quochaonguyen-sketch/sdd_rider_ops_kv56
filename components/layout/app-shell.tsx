@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
-import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, ClipboardCheck, ListChecks, ListTodo, LogOut, MapPinned, Menu, Moon, PackageOpen, PackagePlus, PanelLeftClose, PanelLeftOpen, PencilRuler, Sun, Truck, Upload, UsersRound, X } from "lucide-react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, ClipboardCheck, Columns2, ListChecks, ListTodo, LogOut, MapPinned, Menu, Moon, NotebookPen, PackageOpen, PackagePlus, PanelLeftClose, PanelLeftOpen, PencilRuler, Sun, Truck, Upload, UsersRound, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/utils/cn";
 import { AppBrand, AppCopyright } from "@/components/layout/app-brand";
@@ -13,6 +13,7 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { href: "/realtime-dashboard", label: "Realtime Dashboard", icon: Activity },
   { href: "/tasks", label: "Tasks", icon: ListTodo },
+  { href: "/notes", label: "My Notes", icon: NotebookPen },
   { href: "/riders", label: "Riders", icon: Bike },
   { href: "/performance", label: "Performance", icon: BarChart3 },
   { href: "/attendance", label: "Attendance", icon: CalendarDays },
@@ -35,14 +36,29 @@ const toolItems = [
   { href: "/pickup-management", label: "Pickup Management", icon: ListChecks },
 ];
 const memberHiddenItems = new Set(["/zone-builder", "/pickup-management"]);
-const morePaths = ["/performance", "/attendance", "/off-schedule", "/morning-delivery", "/zones", "/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"];
+const morePaths = ["/notes", "/performance", "/attendance", "/off-schedule", "/morning-delivery", "/zones", "/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"];
 type ThemeMode = "light" | "dark";
+const subscribeToFrameContext = () => () => {};
+
+function getTrustedFrameContext() {
+  if (window.self === window.top) return false;
+  try {
+    return new URL(document.referrer).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
 
 export function AppShell({ children, user }: { children: React.ReactNode; user: { email: string; fullName: string | null; role: string } }) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isTrustedFrame = useSyncExternalStore(subscribeToFrameContext, getTrustedFrameContext, () => false);
+  const isEmbedded = searchParams.get("embed") === "split" || isTrustedFrame;
   const [moreOpen, setMoreOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [splitRoute, setSplitRoute] = useState("/notes");
   const [theme, setTheme] = useState<ThemeMode>("light");
   const memberToolRestricted = user.role === "member";
   const visibleToolItems = memberToolRestricted ? [] : toolItems;
@@ -53,6 +69,9 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
   const [toolsOpen, setToolsOpen] = useState(toolsActive);
   const moreRouteActive = morePaths.some((path) => pathname.startsWith(path));
   const currentPage = [...navItems, ...volumeItems].find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+  const splitItems = [...navItems.filter((item) => !memberToolRestricted || !memberHiddenItems.has(item.href)), ...volumeItems]
+    .filter((item) => item.href !== pathname);
+  const activeSplitRoute = splitRoute === pathname ? (splitItems[0]?.href ?? "/dashboard") : splitRoute;
 
   useEffect(() => {
     // The root boot script applies the saved mode before paint; this only syncs the control label.
@@ -73,6 +92,21 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
     router.replace("/login");
   }
 
+  function preserveEmbeddedNavigation(event: React.MouseEvent<HTMLElement>) {
+    if (!isEmbedded || !(event.target instanceof Element)) return;
+    const anchor = event.target.closest("a");
+    if (!anchor || anchor.target === "_blank" || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const url = new URL(anchor.href, window.location.origin);
+    if (url.origin !== window.location.origin) return;
+    event.preventDefault();
+    url.searchParams.set("embed", "split");
+    router.push(`${url.pathname}${url.search}${url.hash}`);
+  }
+
+  if (isEmbedded) {
+    return <main className="app-embedded-main" onClickCapture={preserveEmbeddedNavigation}><RouteReveal key={pathname}>{children}</RouteReveal></main>;
+  }
+
   return (
     <div className={cn("app-shell-technical", !sidebarOpen && "is-sidebar-collapsed")}>
       <aside id="operations-sidebar" className="app-sidebar">
@@ -80,7 +114,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
         <div className="app-sidebar-context"><span className="app-live-dot" aria-hidden="true" /><span>Operations workspace</span></div>
         <nav className="app-sidebar-nav" aria-label="Điều hướng chính">
           <p className="app-nav-eyebrow">Workspace</p>
-          {navItems.slice(0, 9).map((item) => {
+          {navItems.slice(0, 10).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span></Link>;
@@ -100,7 +134,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
             })}
           </SidebarDisclosure> : null}
           <p className="app-nav-eyebrow app-nav-eyebrow-secondary">System</p>
-          {navItems.slice(11).map((item) => {
+          {navItems.slice(12).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span></Link>;
@@ -122,6 +156,9 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
             </div>
           </div>
           <div className="app-header-account">
+            <button type="button" className={cn("app-split-toggle", splitOpen && "is-active")} aria-pressed={splitOpen} aria-label={splitOpen ? "Tắt chia màn hình" : "Chia màn hình"} title={splitOpen ? "Tắt chia màn hình" : "Chia màn hình"} onClick={() => setSplitOpen((current) => !current)}>
+              <Columns2 size={17} aria-hidden="true" /><span>{splitOpen ? "Đóng chia màn hình" : "Chia màn hình"}</span>
+            </button>
             <button type="button" className="app-theme-toggle" aria-label={theme === "dark" ? "Chuyển sang giao diện sáng" : "Chuyển sang giao diện tối"} title={theme === "dark" ? "Giao diện sáng" : "Giao diện tối"} onClick={toggleTheme}>
               {theme === "dark" ? <Sun size={17} aria-hidden="true" /> : <Moon size={17} aria-hidden="true" />}
             </button>
@@ -130,7 +167,15 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
             <button type="button" className="app-signout" onClick={() => void signOut()}><LogOut size={15} aria-hidden="true" /><span>Sign out</span></button>
           </div>
         </header>
-        <main className="app-main"><RouteReveal key={pathname}>{children}</RouteReveal></main>
+        <main className={cn("app-main", splitOpen && "is-quick-split")}>
+          <section className="app-primary-pane"><RouteReveal key={pathname}>{children}</RouteReveal></section>
+          {splitOpen ? <aside className="app-quick-split-pane" aria-label="Màn hình làm việc thứ hai">
+            <header><span>Làm song song</span><select value={activeSplitRoute} onChange={(event) => setSplitRoute(event.target.value)} aria-label="Chọn màn hình thứ hai">
+              {splitItems.map((item) => <option key={item.href} value={item.href}>{item.label}</option>)}
+            </select></header>
+            <iframe src={`${activeSplitRoute}?embed=split`} title={`Màn hình song song: ${splitItems.find((item) => item.href === activeSplitRoute)?.label ?? activeSplitRoute}`} />
+          </aside> : null}
+        </main>
         <footer className="app-footer"><AppCopyright /><p>Rider Ops Console · {currentPage?.label ?? "Operations"}</p></footer>
       </div>
 

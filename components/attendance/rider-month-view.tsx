@@ -47,6 +47,9 @@ type RiderMonthResponse = {
   rider?: Rider;
   logs?: AttendanceLog[];
   error?: string;
+  sheet_sync?:
+    | { success: true; updated: number; appended: number; cleared: number }
+    | { success: false; error: string };
 };
 
 type DayEditor = {
@@ -158,6 +161,7 @@ export function RiderMonthView({ riderId, initialMonth }: { riderId: string; ini
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        sheet_url: window.localStorage.getItem("rider-ops-off-sheet-url") || null,
         updates: [
           {
             rider_id: rider.id,
@@ -181,7 +185,15 @@ export function RiderMonthView({ riderId, initialMonth }: { riderId: string; ini
       ...current.filter((log) => log.work_date !== editor.date),
       ...(result.logs ?? []),
     ]);
-    setSuccess(`Đã cập nhật lịch ngày ${format(parseISO(editor.date), "dd/MM/yyyy")}.`);
+    if (result.sheet_sync?.success === false) {
+      setError(`Web đã lưu nhưng Google Sheet chưa đồng bộ: ${result.sheet_sync.error}`);
+    } else {
+      setSuccess(
+        `Đã cập nhật lịch ngày ${format(parseISO(editor.date), "dd/MM/yyyy")}.${
+          result.sheet_sync?.success ? " Đã đồng bộ Google Sheet." : ""
+        }`,
+      );
+    }
     setEditor(null);
   }
 

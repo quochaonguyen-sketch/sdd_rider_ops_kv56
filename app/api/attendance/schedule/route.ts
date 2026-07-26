@@ -3,6 +3,10 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { canManageOperations } from "@/lib/auth/permissions";
+import {
+  resolveOffScheduleSpreadsheetId,
+  syncScheduleUpdatesToGoogleSheet,
+} from "@/lib/google/off-schedule";
 
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -18,6 +22,7 @@ const scheduleStatusSchema = z.enum([
 ]);
 
 const updateSchema = z.object({
+  sheet_url: z.string().trim().max(1000).optional().nullable(),
   updates: z
     .array(
       z.object({
@@ -146,7 +151,7 @@ export async function PUT(request: Request) {
   const riderIds = Array.from(new Set(parsed.data.updates.map((item) => item.rider_id)));
   const { data: riders, error: riderError } = await session.admin
     .from("riders")
-    .select("id,rider_code")
+    .select("id,rider_code,full_name")
     .in("id", riderIds);
 
   if (riderError) {
@@ -154,6 +159,7 @@ export async function PUT(request: Request) {
   }
 
   const riderCodes = new Map((riders ?? []).map((rider) => [rider.id, rider.rider_code]));
+  const riderNames = new Map((riders ?? []).map((rider) => [rider.id, rider.full_name ?? ""]));
   if (riderCodes.size !== riderIds.length) {
     return NextResponse.json({ success: false, error: "Có rider không tồn tại" }, { status: 400 });
   }
@@ -198,6 +204,34 @@ export async function PUT(request: Request) {
     updatedLogs = data ?? [];
   }
 
+  let sheetSync:
+    | { success: true; spreadsheet_id: string; updated: number; appended: number; cleared: number }
+    | { success: false; error: string };
+  try {
+    const spreadsheetId = resolveOffScheduleSpreadsheetId(parsed.data.sheet_url);
+    if (!spreadsheetId) {
+      throw new Error(
+        "Chưa chọn Google Sheet khu 5,6. Hãy mở Đồng bộ Google Sheet và lưu link một lần.",
+      );
+    }
+    const result = await syncScheduleUpdatesToGoogleSheet(
+      spreadsheetId,
+      parsed.data.updates.map((item) => ({
+        rider_code: riderCodes.get(item.rider_id) ?? "",
+        rider_name: riderNames.get(item.rider_id) ?? "",
+        work_date: item.work_date,
+        status: item.status,
+      })),
+      request.signal,
+    );
+    sheetSync = { success: true, ...result };
+  } catch (error) {
+    sheetSync = {
+      success: false,
+      error: error instanceof Error ? error.message : "Không thể đồng bộ Google Sheet",
+    };
+  }
+
   await session.admin.from("activity_logs").insert({
     entity_type: "attendance_schedule",
     action: "updated",
@@ -205,6 +239,7 @@ export async function PUT(request: Request) {
     raw_data: {
       count: parsed.data.updates.length,
       dates: Array.from(new Set(parsed.data.updates.map((item) => item.work_date))),
+      google_sheet: sheetSync,
     },
   });
 
@@ -215,5 +250,6 @@ export async function PUT(request: Request) {
       rider_id: item.rider_id,
       work_date: item.work_date,
     })),
+    sheet_sync: sheetSync,
   });
 }

@@ -13,6 +13,24 @@ import { canonicalDistrictShortName } from "@/lib/locations/hcm";
 const KV5_DISTRICT_ORDER = ["Quận 2", "Quận 9", "Bình Thạnh", "Quận 3", "Hóc Môn", "Quận 12", "Gò Vấp"];
 
 export type WeeklyAttendanceStatus = "working" | "off" | "incident";
+export type WeeklyScheduleValue =
+  | "ON"
+  | "OFF_WEEKLY"
+  | "OFF_APPROVED"
+  | "OFF_UNEXPECTED"
+  | "WORKING_REST_DAY"
+  | "NO_PICKUP"
+  | "NO_DELIVERY";
+
+const WEEKLY_STATUS_OPTIONS: Array<{ value: WeeklyScheduleValue; label: string }> = [
+  { value: "ON", label: "Đi làm" },
+  { value: "OFF_WEEKLY", label: "OFF tuần" },
+  { value: "OFF_APPROVED", label: "OFF phép" },
+  { value: "OFF_UNEXPECTED", label: "OFF đột xuất" },
+  { value: "WORKING_REST_DAY", label: "OFF nhưng đi làm" },
+  { value: "NO_PICKUP", label: "Không đi pick" },
+  { value: "NO_DELIVERY", label: "Không đi giao" },
+];
 
 export interface WeeklyDaySummary {
   date: string;
@@ -42,7 +60,7 @@ interface WeeklyAttendanceDashboardProps {
   onOnlyExceptionsChange: (value: boolean) => void;
   onSelectDate: (date: string) => void;
   onChangeWeek: (date: string) => void;
-  onEditCell: (rider: Rider, date: string) => void;
+  onStatusChange: (rider: Rider, date: string, status: WeeklyScheduleValue) => void;
   actions: React.ReactNode;
 }
 
@@ -67,7 +85,7 @@ export function WeeklyAttendanceDashboard({
   onOnlyExceptionsChange,
   onSelectDate,
   onChangeWeek,
-  onEditCell,
+  onStatusChange,
   actions,
 }: WeeklyAttendanceDashboardProps) {
   const weekStart = startOfWeek(parseISO(selectedDate), { weekStartsOn: 1 });
@@ -157,7 +175,7 @@ export function WeeklyAttendanceDashboard({
           loading={loading}
           canEdit={canEdit}
           savingCells={savingCells}
-          onEdit={onEditCell}
+          onStatusChange={onStatusChange}
         />
       </section>
     </div>
@@ -179,8 +197,8 @@ function DistrictAttendanceBreakdown({ date, rows }: { date: string; rows: Array
 
 function StatLine({ label, value, dot }: { label: string; value: number; dot: string }) { return <div className="flex items-center justify-between gap-2"><span className="flex items-center gap-1.5 text-slate-500"><span className={`size-1.5 rounded-full ${dot}`} />{label}</span><strong className="tabular-nums text-slate-800">{value}</strong></div>; }
 
-export function AttendanceTable({ riders, days, logMap, selectedDate, loading, canEdit, savingCells, onEdit }: { riders: Rider[]; days: Date[]; logMap: Map<string, AttendanceLog>; selectedDate: string; loading: boolean; canEdit: boolean; savingCells: Set<string>; onEdit: (rider: Rider, date: string) => void }) {
-  return <div className="max-h-[640px] overflow-auto"><table className="w-full min-w-[960px] border-separate border-spacing-0 text-left"><thead className="sticky top-0 z-30 bg-slate-50"><tr><th className="sticky left-0 z-40 w-72 border-b border-r border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Rider · Cột · Quận · Phường</th>{days.map((day) => { const date = format(day, "yyyy-MM-dd"); return <th key={date} className={`min-w-24 border-b border-slate-200 px-2 py-3 text-center ${date === selectedDate ? "bg-blue-50" : ""}`}><p className="text-xs font-semibold uppercase text-slate-500">{format(day, "EEE", { locale: vi })}</p><p className="mt-0.5 text-sm font-bold text-slate-900">{format(day, "dd/MM")}</p></th>; })}</tr></thead><tbody>{loading ? <tr><td colSpan={8} className="h-48 text-center text-sm text-slate-500">Đang tải dữ liệu chấm công…</td></tr> : riders.length === 0 ? <tr><td colSpan={8} className="h-48 text-center text-sm text-slate-500">Không có rider phù hợp với bộ lọc.</td></tr> : riders.map((rider, index) => <tr key={rider.id} className="group"><td className={`sticky left-0 z-20 border-b border-r border-slate-200 px-4 py-3 ${index % 2 ? "bg-slate-50" : "bg-white"}`}><Link href={`/attendance/riders/${rider.id}?month=${format(days[0], "yyyy-MM")}`} className="block max-w-56 truncate text-sm font-semibold text-slate-900 hover:text-blue-700">{rider.full_name ?? rider.rider_code}</Link><p className="mt-0.5 font-mono text-[11px] text-slate-500">{rider.rider_code}</p><p className="mt-1 truncate text-[11px] text-slate-400">Cột {rider.cot ?? "—"} · {canonicalDistrictShortName(rider.delivery_district) || "Chưa xếp quận"} · {rider.delivery_ward ?? "Chưa xếp phường"}</p></td>{days.map((day) => { const date = format(day, "yyyy-MM-dd"); const key = `${rider.id}:${date}`; const log = logMap.get(key); return <td key={date} className={`border-b border-slate-100 px-2 py-3 text-center ${date === selectedDate ? "bg-blue-50/50" : ""}`}><button type="button" disabled={!canEdit || savingCells.has(key)} onClick={() => onEdit(rider, date)} title={statusTooltip(log)} className="rounded-lg p-1.5 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-default"><StatusBadge status={attendanceStatus(log)} saving={savingCells.has(key)} /></button></td>; })}</tr>)}</tbody></table></div>;
+export function AttendanceTable({ riders, days, logMap, selectedDate, loading, canEdit, savingCells, onStatusChange }: { riders: Rider[]; days: Date[]; logMap: Map<string, AttendanceLog>; selectedDate: string; loading: boolean; canEdit: boolean; savingCells: Set<string>; onStatusChange: (rider: Rider, date: string, status: WeeklyScheduleValue) => void }) {
+  return <div className="max-h-[640px] overflow-auto"><table className="w-full min-w-[1240px] border-separate border-spacing-0 text-left"><thead className="sticky top-0 z-30 bg-slate-50"><tr><th className="sticky left-0 z-40 w-72 border-b border-r border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Rider · Cột · Quận · Phường</th>{days.map((day) => { const date = format(day, "yyyy-MM-dd"); return <th key={date} className={`min-w-36 border-b border-slate-200 px-2 py-3 text-center ${date === selectedDate ? "bg-blue-50" : ""}`}><p className="text-xs font-semibold uppercase text-slate-500">{format(day, "EEE", { locale: vi })}</p><p className="mt-0.5 text-sm font-bold text-slate-900">{format(day, "dd/MM")}</p></th>; })}</tr></thead><tbody>{loading ? <tr><td colSpan={8} className="h-48 text-center text-sm text-slate-500">Đang tải dữ liệu chấm công…</td></tr> : riders.length === 0 ? <tr><td colSpan={8} className="h-48 text-center text-sm text-slate-500">Không có rider phù hợp với bộ lọc.</td></tr> : riders.map((rider, index) => <tr key={rider.id} className="group"><td className={`sticky left-0 z-20 border-b border-r border-slate-200 px-4 py-3 ${index % 2 ? "bg-slate-50" : "bg-white"}`}><Link href={`/attendance/riders/${rider.id}?month=${format(days[0], "yyyy-MM")}`} className="block max-w-56 truncate text-sm font-semibold text-slate-900 hover:text-blue-700">{rider.full_name ?? rider.rider_code}</Link><p className="mt-0.5 font-mono text-[11px] text-slate-500">{rider.rider_code}</p><p className="mt-1 truncate text-[11px] text-slate-400">Cột {rider.cot ?? "—"} · {canonicalDistrictShortName(rider.delivery_district) || "Chưa xếp quận"} · {rider.delivery_ward ?? "Chưa xếp phường"}</p></td>{days.map((day) => { const date = format(day, "yyyy-MM-dd"); const key = `${rider.id}:${date}`; const log = logMap.get(key); const saving = savingCells.has(key); const currentStatus = scheduleValue(log); return <td key={date} className={`border-b border-slate-100 px-2 py-3 text-center ${date === selectedDate ? "bg-blue-50/50" : ""}`}><Select aria-label={`Trạng thái ${rider.full_name ?? rider.rider_code} ngày ${format(day, "dd/MM/yyyy")}`} title={statusTooltip(log)} className={`h-9 min-w-32 border font-semibold shadow-sm transition-colors ${saving ? "border-slate-200 bg-slate-100 text-slate-500" : scheduleToneClass(currentStatus)}`} value={currentStatus} disabled={!canEdit || saving} onChange={(event) => onStatusChange(rider, date, event.target.value as WeeklyScheduleValue)}>{WEEKLY_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{saving && option.value === currentStatus ? "Đang lưu…" : option.label}</option>)}</Select></td>; })}</tr>)}</tbody></table></div>;
 }
 
 export function StatusBadge({ status, saving = false }: { status: WeeklyAttendanceStatus; saving?: boolean }) {
@@ -192,6 +210,26 @@ function attendanceStatus(log: AttendanceLog | undefined): WeeklyAttendanceStatu
   if (raw.includes("NO_PICKUP") || raw.includes("NO_DELIVERY")) return "incident";
   if (raw.includes("OFF")) return "off";
   return "working";
+}
+
+function scheduleValue(log: AttendanceLog | undefined): WeeklyScheduleValue {
+  const status = log?.status?.trim().toUpperCase();
+  return WEEKLY_STATUS_OPTIONS.some((option) => option.value === status)
+    ? status as WeeklyScheduleValue
+    : "ON";
+}
+
+function scheduleToneClass(status: WeeklyScheduleValue) {
+  const tones: Record<WeeklyScheduleValue, string> = {
+    ON: "border-blue-200 bg-blue-50 text-blue-800",
+    OFF_WEEKLY: "border-slate-300 bg-slate-100 text-slate-700",
+    OFF_APPROVED: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    OFF_UNEXPECTED: "border-red-200 bg-red-50 text-red-800",
+    WORKING_REST_DAY: "border-violet-200 bg-violet-50 text-violet-800",
+    NO_PICKUP: "border-amber-200 bg-amber-50 text-amber-800",
+    NO_DELIVERY: "border-orange-200 bg-orange-50 text-orange-800",
+  };
+  return tones[status];
 }
 
 function summarizeDay(date: string, riders: Rider[], logMap: Map<string, AttendanceLog>): WeeklyDaySummary {

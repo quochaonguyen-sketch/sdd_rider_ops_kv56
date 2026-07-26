@@ -38,18 +38,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { WeeklyAttendanceDashboard } from "@/components/attendance/weekly-attendance-dashboard";
+import {
+  WeeklyAttendanceDashboard,
+  type WeeklyScheduleValue,
+} from "@/components/attendance/weekly-attendance-dashboard";
 import { canonicalDistrictShortName, districtMatches } from "@/lib/locations/hcm";
 
-type ScheduleStatus =
-  | ""
-  | "ON"
-  | "OFF_WEEKLY"
-  | "OFF_APPROVED"
-  | "OFF_UNEXPECTED"
-  | "WORKING_REST_DAY"
-  | "NO_PICKUP"
-  | "NO_DELIVERY";
+type ScheduleStatus = "" | WeeklyScheduleValue;
 
 type ScheduleResponse = {
   success: boolean;
@@ -57,6 +52,9 @@ type ScheduleResponse = {
   riders?: Rider[];
   logs?: AttendanceLog[];
   error?: string;
+  sheet_sync?:
+    | { success: true; updated: number; appended: number; cleared: number }
+    | { success: false; error: string };
 };
 
 type ScheduleUpdate = {
@@ -285,7 +283,10 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
     const response = await fetch("/api/attendance/schedule", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ updates }),
+      body: JSON.stringify({
+        updates,
+        sheet_url: window.localStorage.getItem("rider-ops-off-sheet-url") || null,
+      }),
     });
     const result = (await response.json().catch(() => null)) as ScheduleResponse & {
       cleared?: Array<{ rider_id: string; work_date: string }>;
@@ -313,7 +314,15 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
       }),
       ...(result.logs ?? []),
     ]);
-    setSuccess(message ?? "Đã cập nhật lịch rider.");
+    if (result.sheet_sync?.success === false) {
+      setError(`Web đã lưu nhưng Google Sheet chưa đồng bộ: ${result.sheet_sync.error}`);
+    } else {
+      setSuccess(
+        `${message ?? "Đã cập nhật lịch rider."}${
+          result.sheet_sync?.success ? " Đã đồng bộ Google Sheet." : ""
+        }`,
+      );
+    }
     return true;
   }
 
@@ -559,7 +568,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
           onOnlyExceptionsChange={setOnlyWeeklyExceptions}
           onSelectDate={setSelectedDate}
           onChangeWeek={changeWeek}
-          onEditCell={openEditor}
+          onStatusChange={(rider, date, status) => void updateCell(rider, date, status)}
           actions={(
             <>
               <input
@@ -676,12 +685,12 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
           <button type="button" aria-label="Đóng" className="absolute inset-0" onClick={() => setShowSheetSync(false)} />
           <form onSubmit={syncGoogleSheet} className="app-modal-panel relative z-10 w-full max-w-lg space-y-4 rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-2xl">
             <div className="flex items-start justify-between gap-3">
-              <div><h2 className="text-lg font-bold text-slate-950">Đồng bộ Google Sheet</h2><p className="mt-1 text-sm text-slate-500">Web đọc các cột A–D trong tab OFF và cập nhật lịch.</p></div>
+              <div><h2 className="text-lg font-bold text-slate-950">Đồng bộ Google Sheet</h2><p className="mt-1 text-sm text-slate-500">Web đọc tab OFF; sau khi lưu link, mọi lần đổi lịch trên web cũng tự ghi ngược vào Sheet.</p></div>
               <Button type="button" variant="ghost" className="size-9 p-0" onClick={() => setShowSheetSync(false)}><X size={18} /></Button>
             </div>
             <label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Link Google Sheet</span><Input required type="url" value={sheetUrl} onChange={(event) => setSheetUrl(event.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." /></label>
             <div className="grid gap-3 sm:grid-cols-2"><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Phạm vi</span><Select value={sheetSyncRange} onChange={(event) => setSheetSyncRange(event.target.value as "week" | "month")}><option value="week">1 tuần chứa ngày đã chọn</option><option value="month">Toàn bộ tháng đang xem</option></Select></label><label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Khoảng sẽ đồng bộ</span><Input readOnly value={sheetSyncRange === "week" ? `Tuần chứa ${formatSelectedDate(selectedDate)}` : `Tháng ${month}`} /></label></div>
-            <p className="rounded-xl bg-blue-50 p-3 text-xs leading-5 text-blue-800">Sheet vẫn để <strong>Private</strong>. Chỉ chia sẻ quyền Viewer cho Service Account: <strong className="break-all">{serviceAccountEmail}</strong>. Hệ thống chỉ đọc tab <strong>OFF</strong>.</p>
+            <p className="rounded-xl bg-blue-50 p-3 text-xs leading-5 text-blue-800">Sheet vẫn để <strong>Private</strong>. Chia sẻ quyền <strong>Editor</strong> cho Service Account: <strong className="break-all">{serviceAccountEmail}</strong>. Hệ thống chỉ đọc/ghi tab <strong>OFF</strong>.</p>
             <div className="flex justify-end gap-2">{syncingSheet ? <Button type="button" variant="secondary" onClick={() => sheetSyncAbortRef.current?.abort()}>Dừng đồng bộ</Button> : <Button type="button" variant="secondary" onClick={() => setShowSheetSync(false)}>Hủy</Button>}<Button type="submit" disabled={syncingSheet || !sheetUrl}>{syncingSheet ? <RefreshCcw className="animate-spin" size={16} /> : <FileSpreadsheet size={16} />}{syncingSheet ? "Đang đồng bộ..." : "Đồng bộ ngay"}</Button></div>
           </form>
         </div>
