@@ -4,6 +4,8 @@ type ReturningRider = {
   id: string;
   name: string;
   total: number;
+  cots: string[];
+  areas: string[];
 };
 
 type ReturningRiderBoardProps = {
@@ -58,6 +60,16 @@ export function ReturningRiderBoard({ riders, totalOrders }: ReturningRiderBoard
               <div className="returning-rider-identity">
                 <strong>{rider.name || "Chưa có tên rider"}</strong>
                 <span>{rider.id}</span>
+              </div>
+              <div className="returning-rider-assignment">
+                <span>
+                  <strong>COT</strong>
+                  {rider.cots.length ? rider.cots.join(" · ") : "Chưa xác định"}
+                </span>
+                <span>
+                  <strong>KHU VỰC</strong>
+                  {rider.areas.length ? rider.areas.join(" · ") : "Chưa map"}
+                </span>
               </div>
               <div className="returning-rider-load" aria-label={`${rider.total} đơn đang trả`}>
                 <strong>{rider.total.toLocaleString("vi-VN")}</strong>

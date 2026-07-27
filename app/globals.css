@@ -2294,6 +2294,20 @@ select {
   border-inline-start: 3px solid var(--color-accent);
 }
 
+.return-plan-area {
+  display: grid !important;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: var(--space-xs);
+  color: var(--color-ink-2);
+  line-height: 1.4;
+}
+
+.return-plan-area strong {
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
 /* Hallmark · component: returning-rider board · genre: modern-minimal · theme: Cobalt
  * states: assigned · leading · empty · long-name · compact · dark
  * pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: pass (40–41)
@@ -2443,6 +2457,30 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
+.returning-rider-assignment {
+  grid-column: 3 / -1;
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2xs);
+}
+
+.returning-rider-assignment > span {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: var(--space-xs);
+  overflow-wrap: anywhere;
+  color: var(--color-ink-2);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.returning-rider-assignment strong {
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
 .returning-rider-load {
   display: flex;
   align-items: baseline;
@@ -2486,9 +2524,19 @@ select {
   }
 
   .returning-rider-board-list > li {
-    grid-template-columns: 2rem 2.25rem minmax(12rem, 1fr) auto minmax(6rem, 0.5fr);
+    grid-template-columns:
+      2rem
+      2.25rem
+      minmax(10rem, 0.75fr)
+      minmax(12rem, 1fr)
+      auto
+      minmax(6rem, 0.45fr);
     gap: var(--space-sm);
     padding-inline: var(--space-sm);
+  }
+
+  .returning-rider-assignment {
+    grid-column: auto;
   }
 
   .returning-rider-meter {

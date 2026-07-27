@@ -3,6 +3,7 @@ import { ProtectedPage } from "@/components/layout/protected-page";
 import { ReturnOrderFilters } from "@/components/return-orders/return-order-filters";
 import { ReturningRiderBoard } from "@/components/return-orders/returning-rider-board";
 import {
+  getReturnDriverCots,
   getReturnOrders,
   parseReturnOrderFilters,
   RETURN_ORDER_DISTRICTS,
@@ -33,7 +34,13 @@ function statusTone(status: number) {
 
 function ReturnRiders({ status, driverId, driverName, cot1, cot2 }: { status: number; driverId: string; driverName: string; cot1: string; cot2: string }) {
   if (status === 72 && driverId) {
-    return <div className="return-riders is-returning"><span><strong>ĐANG TRẢ</strong>{driverId} · {driverName || "Chưa có tên"}</span></div>;
+    const activeCots = getReturnDriverCots(driverId, driverName, cot1, cot2);
+    return (
+      <div className="return-riders is-returning">
+        <span><strong>ĐANG TRẢ</strong>{driverId} · {driverName || "Chưa có tên"}</span>
+        <span><strong>COT</strong>{activeCots.length ? activeCots.join(" · ") : "Chưa xác định"}</span>
+      </div>
+    );
   }
   if (!cot1 && !cot2) return <span className="return-unassigned">Chưa phân rider</span>;
   return (
@@ -214,6 +221,10 @@ async function ReturnOrdersContent({
                     </td>
                     <td data-label="Kế hoạch trả">
                       <span className={row.return_zone ? "return-zone" : "return-unassigned"}>{row.return_zone || "Chưa phân tuyến"}</span>
+                      <span className="return-plan-area">
+                        <strong>KHU VỰC</strong>
+                        {row.seller_area || "Chưa map khu vực"}
+                      </span>
                       <ReturnRiders status={row.order_status} driverId={row.return_driver_id} driverName={row.return_driver_name} cot1={row.return_riders_cot1} cot2={row.return_riders_cot2} />
                     </td>
                   </tr>

@@ -44,7 +44,13 @@ export type ReturnOrderResult = {
     mapped: number;
     districts: Record<string, number>;
     wardsByDistrict: Record<string, Array<{ ward: string; total: number }>>;
-    returningRiders: Array<{ id: string; name: string; total: number }>;
+    returningRiders: Array<{
+      id: string;
+      name: string;
+      total: number;
+      cots: string[];
+      areas: string[];
+    }>;
   };
 };
 
@@ -81,6 +87,25 @@ export function parseReturnOrderFilters(
 
 function safeSearch(value: string) {
   return value.replace(/[%_,().]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+export function getReturnDriverCots(
+  driverId: string,
+  driverName: string,
+  cot1: string,
+  cot2: string,
+) {
+  const id = driverId.trim().toLocaleLowerCase("vi");
+  const name = driverName.trim().toLocaleLowerCase("vi");
+  const matches = (assignment: string) => {
+    const normalized = assignment.trim().toLocaleLowerCase("vi");
+    return Boolean(normalized && ((id && normalized.includes(id)) || (name && normalized.includes(name))));
+  };
+
+  return [
+    ...(matches(cot1) ? ["COT1"] : []),
+    ...(matches(cot2) ? ["COT2"] : []),
+  ];
 }
 
 export async function getReturnOrders(filters: ReturnOrderFilters): Promise<ReturnOrderResult> {
@@ -161,7 +186,7 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
       .in("seller_area", ["Khu vực 5", "Khu vực 6"]),
     supabase
       .from("return_order_snapshots")
-      .select("return_driver_id,return_driver_name")
+      .select("return_driver_id,return_driver_name,return_riders_cot1,return_riders_cot2,seller_area")
       .eq("snapshot_id", latest.snapshot_id)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
       .eq("order_status", 72)
@@ -193,15 +218,38 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
   const fmHub = fm.count ?? 0;
   const lmHub = lm.count ?? 0;
   const returningCount = returning.count ?? 0;
-  const riderTotals = new Map<string, { id: string; name: string; total: number }>();
+  const riderTotals = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      total: number;
+      cots: Set<string>;
+      areas: Set<string>;
+    }
+  >();
   for (const row of returningRows.data ?? []) {
     const id = String(row.return_driver_id || "").trim();
     if (!id) continue;
     const current = riderTotals.get(id);
+    const cots = current?.cots ?? new Set<string>();
+    const areas = current?.areas ?? new Set<string>();
+    for (const cot of getReturnDriverCots(
+      id,
+      String(row.return_driver_name || "").trim(),
+      String(row.return_riders_cot1 || ""),
+      String(row.return_riders_cot2 || ""),
+    )) {
+      cots.add(cot);
+    }
+    const area = String(row.seller_area || "").trim();
+    if (area) areas.add(area);
     riderTotals.set(id, {
       id,
       name: String(row.return_driver_name || current?.name || "").trim(),
       total: (current?.total ?? 0) + 1,
+      cots,
+      areas,
     });
   }
   const wardCounts = new Map<string, Map<string, number>>();
@@ -237,9 +285,13 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
             .sort((a, b) => b.total - a.total || a.ward.localeCompare(b.ward, "vi")),
         ]),
       ),
-      returningRiders: [...riderTotals.values()].sort(
-        (a, b) => b.total - a.total || a.name.localeCompare(b.name, "vi"),
-      ),
+      returningRiders: [...riderTotals.values()]
+        .map((rider) => ({
+          ...rider,
+          cots: [...rider.cots],
+          areas: [...rider.areas].sort((a, b) => a.localeCompare(b, "vi")),
+        }))
+        .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "vi")),
     },
   };
 }
