@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
 type MemberRole = "admin" | "leader" | "viewer" | "member";
 type Member = {
@@ -27,6 +28,7 @@ export function MemberManagement() {
   const [form, setForm] = useState(initialForm);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading("member-management", loading);
   const [saving, setSaving] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

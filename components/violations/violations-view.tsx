@@ -8,12 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/utils/cn";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
 type ApiResponse = { success: boolean; can_edit?: boolean; violations?: RiderViolationRecord[]; violation?: RiderViolationRecord; error?: string; result?: { attendanceUpdated: number; violationsCreated: number } };
 const initialForm = { rider_id: "", work_date: today(), violation_type: "POLICY", severity: "MEDIUM", zone: "", note: "" };
 
 export function ViolationsView() {
   const [violations, setViolations] = useState<RiderViolationRecord[]>([]); const [riders, setRiders] = useState<Rider[]>([]); const [canEdit, setCanEdit] = useState(false); const [query, setQuery] = useState(""); const [status, setStatus] = useState("all"); const [type, setType] = useState("all"); const [showForm, setShowForm] = useState(false); const [form, setForm] = useState(initialForm); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [error, setError] = useState<string | null>(null); const [success, setSuccess] = useState<string | null>(null);
+  useReportInitialDataLoading("violations", loading);
   const load = useCallback(async () => { setLoading(true); setError(null); const [response, riderResult] = await Promise.all([fetch("/api/violations", { cache: "no-store" }), createClient().from("riders").select("*").eq("status", "active").order("full_name")]); const result = await response.json().catch(() => null) as ApiResponse | null; if (!response.ok || !result?.success) setError(result?.error ?? "Không thể tải vi phạm"); else { setViolations(result.violations ?? []); setCanEdit(Boolean(result.can_edit)); } if (!riderResult.error) setRiders((riderResult.data ?? []) as Rider[]); setLoading(false); }, []);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

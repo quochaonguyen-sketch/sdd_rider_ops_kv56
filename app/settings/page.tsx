@@ -1,14 +1,11 @@
 import { ProtectedPage } from "@/components/layout/protected-page";
 import { Card } from "@/components/ui/card";
 import { MemberManagement } from "@/components/settings/member-management";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUserContext } from "@/lib/auth/current-user";
 
 export default async function SettingsPage() {
-  const client = await createClient();
-  const { data: { user } } = await client.auth.getUser();
-  const { data: profile } = user ? await createAdminClient().from("profiles").select("role").eq("id", user.id).maybeSingle() : { data: null };
-  const isAdmin = profile?.role === "admin";
+  const context = await getCurrentUserContext();
+  const isAdmin = context?.profile.role === "admin";
 
   return (
     <ProtectedPage>

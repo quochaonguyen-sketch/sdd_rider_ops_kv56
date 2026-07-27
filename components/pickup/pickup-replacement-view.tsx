@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/utils/cn";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
 type Replacement = {
   id: string;
@@ -40,6 +41,7 @@ export function PickupReplacementView() {
   const [page, setPage] = useState(1);
   const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading("pickup-replacement", loading);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const days = useMemo(

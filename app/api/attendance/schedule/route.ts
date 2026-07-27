@@ -3,10 +3,12 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { canManageOperations } from "@/lib/auth/permissions";
+import { getCachedAttendanceSchedule, getCachedRiders, invalidateAttendanceCache } from "@/lib/cache/operations-cache";
 import {
   resolveOffScheduleSpreadsheetId,
   syncScheduleUpdatesToGoogleSheet,
 } from "@/lib/google/off-schedule";
+import type { Rider } from "@/types";
 
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -94,33 +96,30 @@ export async function GET(request: Request) {
   const { start, end } = monthRange(parsedMonth.data);
 
   try {
-    const [riders, logs] = await Promise.all([
-      fetchAll((from, to) =>
-        session.admin
-          .from("riders")
-          .select("*")
-          .order("kv")
-          .order("cot")
-          .order("full_name")
-          .range(from, to),
-      ),
-      fetchAll((from, to) =>
-        session.admin
-          .from("attendance_logs")
-          .select("*")
-          .gte("work_date", start)
-          .lte("work_date", end)
-          .neq("status", "ON")
-          .order("updated_at", { ascending: false })
-          .range(from, to),
-      ),
-    ]);
+    const { data, cache } = await getCachedAttendanceSchedule(parsedMonth.data, async () => {
+      const [{ data: riders }, logs] = await Promise.all([
+        getCachedRiders(),
+        fetchAll((from, to) =>
+          session.admin
+            .from("attendance_logs")
+            .select("*")
+            .gte("work_date", start)
+            .lte("work_date", end)
+            .neq("status", "ON")
+            .order("updated_at", { ascending: false })
+            .range(from, to),
+        ),
+      ]);
+
+      return { riders: [...riders].sort(compareScheduleRiders), logs };
+    });
 
     return NextResponse.json({
       success: true,
       can_edit: canManageOperations(session.role),
-      riders,
-      logs,
+      riders: data.riders,
+      logs: data.logs,
+      cache,
     });
   } catch (error) {
     return NextResponse.json(
@@ -243,6 +242,8 @@ export async function PUT(request: Request) {
     },
   });
 
+  parsed.data.updates.forEach((item) => invalidateAttendanceCache(item.work_date.slice(0, 7)));
+
   return NextResponse.json({
     success: true,
     logs: updatedLogs,
@@ -252,4 +253,12 @@ export async function PUT(request: Request) {
     })),
     sheet_sync: sheetSync,
   });
+}
+
+function compareScheduleRiders(a: Rider, b: Rider) {
+  return (
+    String(a.kv ?? "").localeCompare(String(b.kv ?? ""), "vi") ||
+    String(a.cot ?? "").localeCompare(String(b.cot ?? ""), "vi", { numeric: true }) ||
+    String(a.full_name ?? a.rider_code).localeCompare(String(b.full_name ?? b.rider_code), "vi")
+  );
 }

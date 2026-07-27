@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/utils/cn";
 import { compactZoneName, MAP_DISTRICTS } from "@/components/zones/zone-map-types";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
 type RangeKey = "today" | "yesterday" | "7d";
 type VolumeMode = "delivery" | "pickup" | "all";
@@ -29,6 +30,7 @@ export function DashboardView() {
   const [volumeGrouping, setVolumeGrouping] = useState<VolumeGrouping>("week");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading("dashboard", loading);
   const [error, setError] = useState<string | null>(null);
   const dateRange = useMemo(() => getDateRange(range), [range]);
 

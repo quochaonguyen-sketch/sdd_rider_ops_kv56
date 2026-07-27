@@ -7,12 +7,14 @@ import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
 import { Button } from "@/components/ui/button";
 import { HcmZoneMap } from "@/components/zones/hcm-zone-map";
 import type { ZoneRider } from "@/components/zones/zone-map-types";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
 const ZONE_RIDER_COLUMNS = "id,rider_code,full_name,kv,home_district,cot,pickup_district,pickup_ward,delivery_district,delivery_ward,status";
 
 export function ZonesView() {
   const [riders, setRiders] = useState<ZoneRider[]>([]);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading("zones", loading);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {

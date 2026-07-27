@@ -5,6 +5,7 @@ import { addDays, format, startOfWeek, subDays } from "date-fns";
 import { vi } from "date-fns/locale";
 import { Archive, CalendarClock, Check, ChevronLeft, ChevronRight, ExternalLink, Image as ImageIcon, MailCheck, MailWarning, RefreshCcw, Send, ShieldAlert, Undo2, X } from "lucide-react";
 import type { RiderOffRequest } from "@/types";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
 type ApiResponse = { success: boolean; can_edit?: boolean; requests?: RiderOffRequest[]; error?: string };
 
@@ -17,6 +18,7 @@ export function OffScheduleView() {
   const [requests, setRequests] = useState<RiderOffRequest[]>([]);
   const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading("off-schedule", loading);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);

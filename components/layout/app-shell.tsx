@@ -7,7 +7,10 @@ import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, Clip
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/utils/cn";
 import { AppBrand, AppCopyright } from "@/components/layout/app-brand";
+import { AppLoadingOverlay } from "@/components/layout/app-loading-overlay";
+import { NavigationPendingIndicator } from "@/components/layout/navigation-pending-indicator";
 import { RouteReveal } from "@/components/layout/route-reveal";
+import { QuickNoteButton } from "@/components/notes/quick-note-button";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
@@ -105,7 +108,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
   }
 
   if (isEmbedded) {
-    return <main className="app-embedded-main" onClickCapture={preserveEmbeddedNavigation}><RouteReveal key={pathname}>{children}</RouteReveal></main>;
+    return <><main className="app-embedded-main" onClickCapture={preserveEmbeddedNavigation}><RouteReveal key={pathname}>{children}</RouteReveal></main><AppLoadingOverlay /></>;
   }
 
   return (
@@ -118,27 +121,27 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
           {navItems.slice(0, 11).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
-            return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span></Link>;
+            return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span><NavigationPendingIndicator /></Link>;
           })}
           <SidebarDisclosure label="Volume" icon={PackageOpen} open={volumeOpen} active={volumeActive} onToggle={() => setVolumeOpen((current) => !current)}>
             {volumeItems.map((item) => {
               const active = pathname === item.href;
               const Icon = item.icon;
-              return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-sub-link", active && "is-active")}><Icon size={15} aria-hidden="true" /><span>{item.label}</span></Link>;
+              return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-sub-link", active && "is-active")}><Icon size={15} aria-hidden="true" /><span>{item.label}</span><NavigationPendingIndicator /></Link>;
             })}
           </SidebarDisclosure>
           {visibleToolItems.length > 0 ? <SidebarDisclosure label="Tools" icon={PencilRuler} open={toolsOpen} active={toolsActive} onToggle={() => setToolsOpen((current) => !current)}>
             {visibleToolItems.map((item) => {
               const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
               const Icon = item.icon;
-              return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-sub-link", active && "is-active")}><Icon size={15} aria-hidden="true" /><span>{item.label}</span></Link>;
+              return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-sub-link", active && "is-active")}><Icon size={15} aria-hidden="true" /><span>{item.label}</span><NavigationPendingIndicator /></Link>;
             })}
           </SidebarDisclosure> : null}
           <p className="app-nav-eyebrow app-nav-eyebrow-secondary">System</p>
           {navItems.slice(13).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
-            return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span></Link>;
+            return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span><NavigationPendingIndicator /></Link>;
           })}
         </nav>
         <div className="app-sidebar-foot"><span>SDD · KV5 + KV6</span><span>Internal operations</span></div>
@@ -187,7 +190,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
           {moreNavItems.map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
-            return <Link key={item.href} href={item.href} onClick={() => setMoreOpen(false)} aria-current={active ? "page" : undefined} className={cn("app-more-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span></Link>;
+            return <Link key={item.href} href={item.href} onClick={() => setMoreOpen(false)} aria-current={active ? "page" : undefined} className={cn("app-more-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span><NavigationPendingIndicator /></Link>;
           })}
         </div>
         <button type="button" onClick={() => void signOut()} className="app-more-signout"><LogOut size={17} />Sign out</button>
@@ -197,12 +200,14 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
         {mobileNavItems.map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           const Icon = item.icon;
-          return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-taskbar-link", active && "is-active")}><Icon size={19} aria-hidden="true" /><span>{item.label}</span></Link>;
+          return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-taskbar-link", active && "is-active")}><Icon size={19} aria-hidden="true" /><span>{item.label}</span><NavigationPendingIndicator /></Link>;
         })}
         <button type="button" aria-expanded={moreOpen} onClick={() => setMoreOpen((current) => !current)} className={cn("app-taskbar-link", (moreOpen || moreRouteActive) && "is-active")}>
           {moreOpen ? <X size={19} aria-hidden="true" /> : <Menu size={19} aria-hidden="true" />}<span>Thêm</span>
         </button>
       </nav>
+      <AppLoadingOverlay />
+      <QuickNoteButton />
     </div>
   );
 }
