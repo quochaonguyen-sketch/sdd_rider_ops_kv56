@@ -1,0 +1,87 @@
+
+> rider-ops@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.7 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://172.17.32.44:3000
+- Environments: .env
+✓ Ready in 1531ms
+
+ GET /return-orders 200 in 3.7s (next.js: 457ms, application-code: 3.3s)
+[browser] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <SegmentViewNode type="page" pagePath="return-ord...">
+      <SegmentTrieNode>
+      <ReturnOrdersPage>
+        <ProtectedPage>
+          <Suspense fallback={<main>}>
+            ...
+              <div className="app-shell-...">
+                <aside>
+                <div className="app-shell-...">
+                  <header>
+                  <main className="app-main">
+                    <section className="app-primar...">
+                      <RouteReveal>
+                        <div className="relative">
+                          <div className="route-cont...">
+                            <ReturnOrdersContent>
+                              <section className="return-ord...">
+                                <header>
+                                <dl>
+                                <div>
+                                <ReturnOrderFilters>
+                                <div className="return-ledger">
+                                  <header>
+                                  <div className="return-tab...">
+                                    <table
+                                      className="return-table"
+-                                     data-tableconvert-processed="true"
+-                                     data-tableconvert-icon="true"
+                                    >
+                                ...
+                          ...
+                  ...
+                ...
+    ...
+ 
+ GET /return-orders?page=2&pageSize=50 200 in 2.7s (next.js: 9ms, application-code: 2.7s)
+ GET /return-orders?page=1&pageSize=50 200 in 1429ms (next.js: 4ms, application-code: 1425ms)
+✓ Compiled in 276ms
+ GET /return-orders?page=1&pageSize=50 200 in 1066ms (next.js: 5ms, application-code: 1062ms)
+ GET /return-orders?page=1&pageSize=50 200 in 1427ms (next.js: 154ms, application-code: 1273ms)
+✓ Compiled in 226ms
+ GET /return-orders?page=1&pageSize=50 200 in 849ms (next.js: 176ms, application-code: 672ms)
+ GET /return-orders?page=1&pageSize=50 200 in 535ms (next.js: 7ms, application-code: 528ms)
+✓ Compiled in 245ms
+ GET /return-orders?page=1&pageSize=50 200 in 795ms (next.js: 166ms, application-code: 629ms)
+✓ Compiled in 235ms
+ GET /return-orders?page=1&pageSize=50 200 in 773ms (next.js: 141ms, application-code: 631ms)
+ GET /return-orders?page=1&pageSize=50 200 in 517ms (next.js: 14ms, application-code: 503ms)
+ GET /return-orders?page=1&pageSize=50 200 in 4.7s (next.js: 18ms, application-code: 4.7s)
+ GET /return-orders?q=VN2633088690069&page=1&pageSize=50 200 in 2.5s (next.js: 13ms, application-code: 2.5s)
+✓ Compiled in 1026ms
+ GET /return-orders?q=VN2633088690069&page=1&pageSize=50 200 in 1484ms (next.js: 301ms, application-code: 1183ms)
+ GET /return-orders?q=VN2633088690069&page=1&pageSize=50 200 in 848ms (next.js: 34ms, application-code: 813ms)
+ GET /return-orders?q=VN2633088690069&page=1&pageSize=50 200 in 618ms (next.js: 60ms, application-code: 558ms)
+ GET /return-orders?q=VN268100551080I&page=1&pageSize=50 200 in 2.3s (next.js: 10ms, application-code: 2.3s)
+ GET /return-orders?q=VN268100551080IVN2633088690069&page=1&pageSize=50 200 in 2.2s (next.js: 15ms, application-code: 2.2s)
+ GET /return-orders?q=VN2633088690069&page=1&pageSize=50 200 in 1748ms (next.js: 33ms, application-code: 1715ms)
+ GET /return-orders?q=VN261331958962P&page=1&pageSize=50 200 in 1719ms (next.js: 5ms, application-code: 1715ms)
+ GET /return-orders?q=VN267631968138Q&page=1&pageSize=50 200 in 2.2s (next.js: 4ms, application-code: 2.2s)
+ GET /return-orders 307 in 189ms (next.js: 7ms, application-code: 182ms)
+ GET /return-orders?q=VN268300565722X&page=1&pageSize=50 200 in 1804ms (next.js: 6ms, application-code: 1799ms)
+ GET /return-orders?q=VN261876172479J&page=1&pageSize=50 200 in 1938ms (next.js: 12ms, application-code: 1926ms)
+✓ Compiled in 891ms

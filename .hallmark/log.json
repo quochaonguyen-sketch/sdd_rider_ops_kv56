@@ -1,5 +1,12 @@
 [
   {
+    "date": "2026-07-27",
+    "macrostructure": "Split Studio",
+    "theme": "Cobalt",
+    "enrichment": "none",
+    "brief": "Return order lookup operational ledger redesign"
+  },
+  {
     "date": "2026-07-25",
     "macrostructure": "Catalogue",
     "theme": "Coral",
