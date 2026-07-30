@@ -25,6 +25,7 @@ export type ReturnOrderRow = {
   return_riders_cot2: string;
   return_driver_id: string;
   return_driver_name: string;
+  manual_assignment: boolean;
   create_time: string | null;
   receive_time: string | null;
   current_station_received_time: string | null;
@@ -157,7 +158,17 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
   }
 
   const from = (filters.page - 1) * filters.pageSize;
-  const [{ data, error, count }, fm, lm, returning, mapped, returningRows, wardRows, ...districtResults] = await Promise.all([
+  const [
+    { data, error, count },
+    fm,
+    lm,
+    returning,
+    mapped,
+    returningRows,
+    assignmentRows,
+    wardRows,
+    ...districtResults
+  ] = await Promise.all([
     query
       .order("current_station_received_time", { ascending: false, nullsFirst: false })
       .range(from, from + filters.pageSize - 1),
@@ -186,11 +197,13 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
       .in("seller_area", ["Khu vực 5", "Khu vực 6"]),
     supabase
       .from("return_order_snapshots")
-      .select("return_driver_id,return_driver_name,return_riders_cot1,return_riders_cot2,seller_area")
+      .select("shipment_id,return_driver_id,return_driver_name,return_riders_cot1,return_riders_cot2,seller_area")
       .eq("snapshot_id", latest.snapshot_id)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
-      .eq("order_status", 72)
-      .neq("return_driver_id", ""),
+      .eq("order_status", 72),
+    supabase
+      .from("return_order_assignments")
+      .select("shipment_id,rider_code,rider_name,cot"),
     supabase
       .from("return_order_snapshots")
       .select("seller_district,seller_new_ward,seller_ward")
@@ -212,12 +225,25 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
   if (returning.error) throw returning.error;
   if (mapped.error) throw mapped.error;
   if (returningRows.error) throw returningRows.error;
+  if (assignmentRows.error) throw assignmentRows.error;
   if (wardRows.error) throw wardRows.error;
   for (const district of districtResults) if (district.error) throw district.error;
 
   const fmHub = fm.count ?? 0;
   const lmHub = lm.count ?? 0;
   const returningCount = returning.count ?? 0;
+  const assignmentsByShipment = new Map(
+    (assignmentRows.data ?? []).map((assignment) => [assignment.shipment_id, assignment]),
+  );
+  const rows = ((data ?? []) as Omit<ReturnOrderRow, "manual_assignment">[]).map((row) => {
+    const assignment = assignmentsByShipment.get(row.shipment_id);
+    return {
+      ...row,
+      return_driver_id: assignment?.rider_code || row.return_driver_id,
+      return_driver_name: assignment?.rider_name || row.return_driver_name,
+      manual_assignment: Boolean(assignment),
+    };
+  });
   const riderTotals = new Map<
     string,
     {
@@ -229,24 +255,32 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
     }
   >();
   for (const row of returningRows.data ?? []) {
-    const id = String(row.return_driver_id || "").trim();
+    const assignment = assignmentsByShipment.get(row.shipment_id);
+    const id = String(assignment?.rider_code || row.return_driver_id || "").trim();
     if (!id) continue;
     const current = riderTotals.get(id);
     const cots = current?.cots ?? new Set<string>();
     const areas = current?.areas ?? new Set<string>();
-    for (const cot of getReturnDriverCots(
-      id,
-      String(row.return_driver_name || "").trim(),
-      String(row.return_riders_cot1 || ""),
-      String(row.return_riders_cot2 || ""),
-    )) {
-      cots.add(cot);
+    const assignedCot = String(assignment?.cot || "").trim().toLocaleUpperCase("vi");
+    if (["COT1", "1"].includes(assignedCot)) {
+      cots.add("COT1");
+    } else if (["COT2", "2"].includes(assignedCot)) {
+      cots.add("COT2");
+    } else {
+      for (const cot of getReturnDriverCots(
+        id,
+        String(assignment?.rider_name || row.return_driver_name || "").trim(),
+        String(row.return_riders_cot1 || ""),
+        String(row.return_riders_cot2 || ""),
+      )) {
+        cots.add(cot);
+      }
     }
     const area = String(row.seller_area || "").trim();
     if (area) areas.add(area);
     riderTotals.set(id, {
       id,
-      name: String(row.return_driver_name || current?.name || "").trim(),
+      name: String(assignment?.rider_name || row.return_driver_name || current?.name || "").trim(),
       total: (current?.total ?? 0) + 1,
       cots,
       areas,
@@ -263,7 +297,7 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
   }
 
   return {
-    rows: (data ?? []) as ReturnOrderRow[],
+    rows,
     total: count ?? 0,
     page: filters.page,
     pageSize: filters.pageSize,

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ProtectedPage } from "@/components/layout/protected-page";
 import { ReturnOrderFilters } from "@/components/return-orders/return-order-filters";
+import { ReturnRiderAssignment } from "@/components/return-orders/return-rider-assignment";
 import { ReturningRiderBoard } from "@/components/return-orders/returning-rider-board";
 import {
   getReturnDriverCots,
@@ -32,22 +33,31 @@ function statusTone(status: number) {
   return "other";
 }
 
+function assignedRiderCount(value: string) {
+  return value.split(",").map((item) => item.trim()).filter(Boolean).length;
+}
+
 function ReturnRiders({ status, driverId, driverName, cot1, cot2 }: { status: number; driverId: string; driverName: string; cot1: string; cot2: string }) {
   if (status === 72 && driverId) {
     const activeCots = getReturnDriverCots(driverId, driverName, cot1, cot2);
     return (
-      <div className="return-riders is-returning">
-        <span><strong>ĐANG TRẢ</strong>{driverId} · {driverName || "Chưa có tên"}</span>
-        <span><strong>COT</strong>{activeCots.length ? activeCots.join(" · ") : "Chưa xác định"}</span>
+      <div className="return-rider-current">
+        <span>Rider đang trả</span>
+        <strong>{driverId} · {driverName || "Chưa có tên"}</strong>
+        <small>{activeCots.length ? activeCots.join(" · ") : "Chưa xác định COT"}</small>
       </div>
     );
   }
   if (!cot1 && !cot2) return <span className="return-unassigned">Chưa phân rider</span>;
+  const total = assignedRiderCount(cot1) + assignedRiderCount(cot2);
   return (
-    <div className="return-riders">
-      {cot1 ? <span><strong>COT1</strong>{cot1}</span> : null}
-      {cot2 ? <span><strong>COT2</strong>{cot2}</span> : null}
-    </div>
+    <details className="return-cot-roster">
+      <summary>Kế hoạch rider · {total} ứng viên</summary>
+      <div className="return-riders">
+        {cot1 ? <span><strong>COT1</strong>{cot1}</span> : null}
+        {cot2 ? <span><strong>COT2</strong>{cot2}</span> : null}
+      </div>
+    </details>
   );
 }
 
@@ -226,6 +236,15 @@ async function ReturnOrdersContent({
                         {row.seller_area || "Chưa map khu vực"}
                       </span>
                       <ReturnRiders status={row.order_status} driverId={row.return_driver_id} driverName={row.return_driver_name} cot1={row.return_riders_cot1} cot2={row.return_riders_cot2} />
+                      <ReturnRiderAssignment
+                        key={`${row.shipment_id}:${row.manual_assignment}:${row.return_driver_id}`}
+                        shipmentId={row.shipment_id}
+                        currentRiderCode={row.return_driver_id}
+                        currentRiderName={row.return_driver_name}
+                        manualAssignment={row.manual_assignment}
+                        returnZone={row.return_zone}
+                        sellerArea={row.seller_area}
+                      />
                     </td>
                   </tr>
                 );
