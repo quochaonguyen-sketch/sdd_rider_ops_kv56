@@ -26,6 +26,8 @@ export type ReturnOrderRow = {
   return_driver_id: string;
   return_driver_name: string;
   manual_assignment: boolean;
+  return_driver_profile_name: string;
+  return_driver_kv: string;
   create_time: string | null;
   receive_time: string | null;
   current_station_received_time: string | null;
@@ -50,7 +52,7 @@ export type ReturnOrderResult = {
       name: string;
       total: number;
       cots: string[];
-      areas: string[];
+      kv: string;
     }>;
   };
 };
@@ -59,6 +61,7 @@ export type ReturnOrderFilters = {
   q: string;
   status: string;
   district: string;
+  sort: "aging_desc" | "district_ward";
   page: number;
   pageSize: number;
 };
@@ -75,12 +78,18 @@ export function parseReturnOrderFilters(
   const page = Math.max(1, Number.parseInt(get("page"), 10) || 1);
   const pageSize = Math.min(100, Math.max(10, Number.parseInt(get("pageSize"), 10) || 50));
   const district = get("district");
+  const rawStatus = get("status");
   return {
     q: get("q").trim().slice(0, 100),
-    status: ["10", "67", "72"].includes(get("status")) ? get("status") : "",
+    status: rawStatus === "backlog" || ["10", "67"].includes(rawStatus)
+      ? "backlog"
+      : rawStatus === "returning" || rawStatus === "72"
+        ? "returning"
+        : "",
     district: RETURN_ORDER_DISTRICTS.includes(district as (typeof RETURN_ORDER_DISTRICTS)[number])
       ? district
       : "",
+    sort: get("sort") === "aging_desc" ? "aging_desc" : "district_ward",
     page,
     pageSize,
   };
@@ -107,6 +116,99 @@ export function getReturnDriverCots(
     ...(matches(cot1) ? ["COT1"] : []),
     ...(matches(cot2) ? ["COT2"] : []),
   ];
+}
+
+async function loadReturnDashboardContext(
+  supabase: ReturnType<typeof createAdminClient>,
+  snapshotId: string,
+) {
+  const [fm, lm, returning, mapped, returningRows, wardRows, riderProfiles, ...districtResults] = await Promise.all([
+    supabase
+      .from("return_order_snapshots")
+      .select("*", { count: "exact", head: true })
+      .eq("snapshot_id", snapshotId)
+      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .eq("order_status", 67),
+    supabase
+      .from("return_order_snapshots")
+      .select("*", { count: "exact", head: true })
+      .eq("snapshot_id", snapshotId)
+      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .eq("order_status", 10),
+    supabase
+      .from("return_order_snapshots")
+      .select("*", { count: "exact", head: true })
+      .eq("snapshot_id", snapshotId)
+      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .eq("order_status", 72),
+    supabase
+      .from("return_order_snapshots")
+      .select("*", { count: "exact", head: true })
+      .eq("snapshot_id", snapshotId)
+      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("order_status", [10, 67, 72]),
+    supabase
+      .from("return_order_snapshots")
+      .select("shipment_id,return_driver_id,return_driver_name,return_riders_cot1,return_riders_cot2,seller_area")
+      .eq("snapshot_id", snapshotId)
+      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .eq("order_status", 72)
+      .neq("return_driver_id", ""),
+    supabase
+      .from("return_order_snapshots")
+      .select("seller_district,seller_new_ward,seller_ward")
+      .eq("snapshot_id", snapshotId)
+      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("order_status", [10, 67, 72])
+      .in("seller_district", [...RETURN_ORDER_DISTRICTS]),
+    supabase
+      .from("riders")
+      .select("rider_code,full_name,kv"),
+    ...RETURN_ORDER_DISTRICTS.map((district) =>
+      supabase
+        .from("return_order_snapshots")
+        .select("*", { count: "exact", head: true })
+        .eq("snapshot_id", snapshotId)
+        .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+        .in("order_status", [10, 67, 72])
+        .eq("seller_district", district),
+    ),
+  ]);
+  if (fm.error) throw fm.error;
+  if (lm.error) throw lm.error;
+  if (returning.error) throw returning.error;
+  if (mapped.error) throw mapped.error;
+  if (returningRows.error) throw returningRows.error;
+  if (wardRows.error) throw wardRows.error;
+  if (riderProfiles.error) throw riderProfiles.error;
+  for (const district of districtResults) if (district.error) throw district.error;
+  return { fm, lm, returning, mapped, returningRows, wardRows, riderProfiles, districtResults };
+}
+
+type ReturnDashboardContext = Awaited<ReturnType<typeof loadReturnDashboardContext>>;
+const returnDashboardCache = new Map<string, {
+  expiresAt: number;
+  promise: Promise<ReturnDashboardContext>;
+}>();
+const RETURN_DASHBOARD_TTL_MS = 30_000;
+
+async function getCachedReturnDashboardContext(
+  supabase: ReturnType<typeof createAdminClient>,
+  snapshotId: string,
+) {
+  const cached = returnDashboardCache.get(snapshotId);
+  if (cached && cached.expiresAt > Date.now()) return cached.promise;
+  const promise = loadReturnDashboardContext(supabase, snapshotId);
+  returnDashboardCache.set(snapshotId, {
+    expiresAt: Date.now() + RETURN_DASHBOARD_TTL_MS,
+    promise,
+  });
+  try {
+    return await promise;
+  } catch (error) {
+    returnDashboardCache.delete(snapshotId);
+    throw error;
+  }
 }
 
 export async function getReturnOrders(filters: ReturnOrderFilters): Promise<ReturnOrderResult> {
@@ -146,9 +248,11 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
       { count: "exact" },
     )
     .eq("snapshot_id", latest.snapshot_id)
-    .in("seller_area", ["Khu vực 5", "Khu vực 6"]);
+    .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+    .in("order_status", [10, 67, 72]);
 
-  if (filters.status) query = query.eq("order_status", Number(filters.status));
+  if (filters.status === "backlog") query = query.in("order_status", [10, 67]);
+  if (filters.status === "returning") query = query.eq("order_status", 72);
   if (filters.district) query = query.eq("seller_district", filters.district);
   const search = safeSearch(filters.q);
   if (search) {
@@ -158,76 +262,29 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
   }
 
   const from = (filters.page - 1) * filters.pageSize;
+  const orderedQuery = filters.sort === "aging_desc"
+    ? query
+        .order("create_time", { ascending: true, nullsFirst: false })
+        .order("seller_district", { ascending: true, nullsFirst: false })
+        .order("seller_new_ward", { ascending: true, nullsFirst: false })
+    : query
+        .order("seller_district", { ascending: true, nullsFirst: false })
+        .order("seller_new_ward", { ascending: true, nullsFirst: false })
+        .order("seller_ward", { ascending: true, nullsFirst: false })
+        .order("current_station_received_time", { ascending: false, nullsFirst: false });
   const [
     { data, error, count },
-    fm,
-    lm,
-    returning,
-    mapped,
-    returningRows,
+    { fm, lm, returning, mapped, returningRows, wardRows, riderProfiles, districtResults },
     assignmentRows,
-    wardRows,
-    ...districtResults
   ] = await Promise.all([
-    query
-      .order("current_station_received_time", { ascending: false, nullsFirst: false })
-      .range(from, from + filters.pageSize - 1),
-    supabase
-      .from("return_order_snapshots")
-      .select("*", { count: "exact", head: true })
-      .eq("snapshot_id", latest.snapshot_id)
-      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
-      .eq("order_status", 67),
-    supabase
-      .from("return_order_snapshots")
-      .select("*", { count: "exact", head: true })
-      .eq("snapshot_id", latest.snapshot_id)
-      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
-      .eq("order_status", 10),
-    supabase
-      .from("return_order_snapshots")
-      .select("*", { count: "exact", head: true })
-      .eq("snapshot_id", latest.snapshot_id)
-      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
-      .eq("order_status", 72),
-    supabase
-      .from("return_order_snapshots")
-      .select("*", { count: "exact", head: true })
-      .eq("snapshot_id", latest.snapshot_id)
-      .in("seller_area", ["Khu vực 5", "Khu vực 6"]),
-    supabase
-      .from("return_order_snapshots")
-      .select("shipment_id,return_driver_id,return_driver_name,return_riders_cot1,return_riders_cot2,seller_area")
-      .eq("snapshot_id", latest.snapshot_id)
-      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
-      .eq("order_status", 72),
+    orderedQuery.range(from, from + filters.pageSize - 1),
+    getCachedReturnDashboardContext(supabase, latest.snapshot_id),
     supabase
       .from("return_order_assignments")
       .select("shipment_id,rider_code,rider_name,cot"),
-    supabase
-      .from("return_order_snapshots")
-      .select("seller_district,seller_new_ward,seller_ward")
-      .eq("snapshot_id", latest.snapshot_id)
-      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
-      .in("seller_district", [...RETURN_ORDER_DISTRICTS]),
-    ...RETURN_ORDER_DISTRICTS.map((district) =>
-      supabase
-        .from("return_order_snapshots")
-        .select("*", { count: "exact", head: true })
-        .eq("snapshot_id", latest.snapshot_id)
-        .in("seller_area", ["Khu vực 5", "Khu vực 6"])
-        .eq("seller_district", district),
-    ),
   ]);
   if (error) throw error;
-  if (fm.error) throw fm.error;
-  if (lm.error) throw lm.error;
-  if (returning.error) throw returning.error;
-  if (mapped.error) throw mapped.error;
-  if (returningRows.error) throw returningRows.error;
   if (assignmentRows.error) throw assignmentRows.error;
-  if (wardRows.error) throw wardRows.error;
-  for (const district of districtResults) if (district.error) throw district.error;
 
   const fmHub = fm.count ?? 0;
   const lmHub = lm.count ?? 0;
@@ -235,15 +292,54 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
   const assignmentsByShipment = new Map(
     (assignmentRows.data ?? []).map((assignment) => [assignment.shipment_id, assignment]),
   );
-  const rows = ((data ?? []) as Omit<ReturnOrderRow, "manual_assignment">[]).map((row) => {
+  const normalizeIdentity = (value: unknown) =>
+    String(value ?? "").trim().toLocaleLowerCase("vi");
+  const riderByCode = new Map(
+    (riderProfiles.data ?? []).map((rider) => [normalizeIdentity(rider.rider_code), rider]),
+  );
+  const riderByName = new Map(
+    (riderProfiles.data ?? [])
+      .filter((rider) => normalizeIdentity(rider.full_name))
+      .map((rider) => [normalizeIdentity(rider.full_name), rider]),
+  );
+  const riderProfileFor = (id: unknown, name: unknown) =>
+    riderByCode.get(normalizeIdentity(id)) ?? riderByName.get(normalizeIdentity(name));
+  const assignmentWithKv = (assignment: unknown) => {
+    const value = String(assignment ?? "").trim();
+    if (!value) return "";
+    return value
+      .split(/\s*[,;]\s*/)
+      .filter(Boolean)
+      .map((riderAssignment) => {
+        const normalized = normalizeIdentity(riderAssignment);
+        const leadingCode = normalizeIdentity(riderAssignment.split("·")[0]);
+        const profile = riderByCode.get(leadingCode) ?? (riderProfiles.data ?? []).find((rider) => {
+          const name = normalizeIdentity(rider.full_name);
+          return Boolean(name && normalized.includes(name));
+        });
+        const kvNumber = String(profile?.kv ?? "").match(/\d+/)?.[0];
+        return kvNumber ? `${riderAssignment} · KV${kvNumber}` : riderAssignment;
+      })
+      .join(", ");
+  };
+  const rows = (data ?? []).map((row) => {
     const assignment = assignmentsByShipment.get(row.shipment_id);
+    const returnDriverId = String(assignment?.rider_code || row.return_driver_id || "").trim();
+    const returnDriverName = String(assignment?.rider_name || row.return_driver_name || "").trim();
+    const returnDriverProfile = riderProfileFor(returnDriverId, returnDriverName);
     return {
       ...row,
-      return_driver_id: assignment?.rider_code || row.return_driver_id,
-      return_driver_name: assignment?.rider_name || row.return_driver_name,
+      return_riders_cot1: assignmentWithKv(row.return_riders_cot1),
+      return_riders_cot2: assignmentWithKv(row.return_riders_cot2),
+      return_driver_id: returnDriverId,
+      return_driver_name: returnDriverName,
+      return_driver_profile_name: String(
+        returnDriverProfile?.full_name || returnDriverName,
+      ).trim(),
+      return_driver_kv: String(returnDriverProfile?.kv || "").trim(),
       manual_assignment: Boolean(assignment),
     };
-  });
+  }) as ReturnOrderRow[];
   const riderTotals = new Map<
     string,
     {
@@ -251,7 +347,7 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
       name: string;
       total: number;
       cots: Set<string>;
-      areas: Set<string>;
+      kv: string;
     }
   >();
   for (const row of returningRows.data ?? []) {
@@ -260,7 +356,7 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
     if (!id) continue;
     const current = riderTotals.get(id);
     const cots = current?.cots ?? new Set<string>();
-    const areas = current?.areas ?? new Set<string>();
+    const profile = riderProfileFor(id, assignment?.rider_name || row.return_driver_name);
     const assignedCot = String(assignment?.cot || "").trim().toLocaleUpperCase("vi");
     if (["COT1", "1"].includes(assignedCot)) {
       cots.add("COT1");
@@ -276,14 +372,18 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
         cots.add(cot);
       }
     }
-    const area = String(row.seller_area || "").trim();
-    if (area) areas.add(area);
     riderTotals.set(id, {
       id,
-      name: String(assignment?.rider_name || row.return_driver_name || current?.name || "").trim(),
+      name: String(
+        profile?.full_name ||
+        assignment?.rider_name ||
+        row.return_driver_name ||
+        current?.name ||
+        "",
+      ).trim(),
       total: (current?.total ?? 0) + 1,
       cots,
-      areas,
+      kv: String(profile?.kv || current?.kv || "").trim(),
     });
   }
   const wardCounts = new Map<string, Map<string, number>>();
@@ -323,7 +423,6 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
         .map((rider) => ({
           ...rider,
           cots: [...rider.cots],
-          areas: [...rider.areas].sort((a, b) => a.localeCompare(b, "vi")),
         }))
         .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "vi")),
     },

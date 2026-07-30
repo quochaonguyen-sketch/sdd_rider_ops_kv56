@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/select";
 import { hcmDistricts, type DistrictDefinition, type WardDefinition } from "@/lib/locations/hcm";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
 import { cn } from "@/utils/cn";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 import {createPortal} from "react-dom"
 
 type MorningRider = {
@@ -124,6 +125,7 @@ export function MorningDeliveryView() {
   const [emptyWardQuery, setEmptyWardQuery] = useState("");
   const [onlyEmptyDistricts, setOnlyEmptyDistricts] = useState(false);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading("morning-delivery", loading);
   const [saving, setSaving] = useState(false);
   const [savingNoteRiderId, setSavingNoteRiderId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);

@@ -27,7 +27,6 @@ import {
   X,
   ZoomIn,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
 import type { DriverPerformanceDaily, Rider } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -35,6 +34,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 import { RiderAvatarEditor } from "@/components/riders/rider-avatar-editor";
 import { cn } from "@/utils/cn";
 import {
@@ -80,6 +80,13 @@ type RiderPerformanceResponse = {
   error?: string;
 };
 
+type RidersResponse = {
+  success: boolean;
+  riders?: Rider[];
+  cache?: { hit: boolean; expires_at: string | null };
+  error?: string;
+};
+
 type ThiCongPlanSyncResponse = {
   success: boolean;
   synced_riders?: number;
@@ -91,6 +98,8 @@ type ThiCongPlanSyncResponse = {
 
 type RiderSortKey = "name" | "status" | "zone" | "cot" | "updated";
 const RIDERS_PER_PAGE = 20;
+const RIDERS_BROWSER_CACHE_KEY = "rider-ops:riders:v1";
+const RIDERS_BROWSER_CACHE_TTL_MS = 60_000;
 
 const emptyRiderForm: RiderFormState = {
   kv: "KV5",
@@ -133,20 +142,30 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
   const [importIssues, setImportIssues] = useState<ImportIssue[]>([]);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading("riders", loading);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
-    const supabase = createClient();
     setError(null);
-    const riderResult = await supabase.from("riders").select("*").order("updated_at", { ascending: false });
 
-    if (riderResult.error) {
-      setError(riderResult.error.message);
+    const cached = readRidersBrowserCache();
+    if (cached) {
+      setRiders(cached);
+      setSelected((current) => cached.find((rider) => rider.id === current?.id) ?? cached[0] ?? null);
+      setLoading(false);
+    }
+
+    const response = await fetch("/api/riders", { cache: "no-store" });
+    const result = (await response.json().catch(() => null)) as RidersResponse | null;
+
+    if (!response.ok || !result?.success) {
+      setError(result?.error ?? "Không thể tải danh sách rider");
     } else {
-      const nextRiders = (riderResult.data ?? []) as Rider[];
+      const nextRiders = result.riders ?? [];
       setRiders(nextRiders);
       setSelected((current) => nextRiders.find((rider) => rider.id === current?.id) ?? nextRiders[0] ?? null);
+      writeRidersBrowserCache(nextRiders);
     }
     setLoading(false);
   }, []);
@@ -420,7 +439,11 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
   }
 
   function updateRiderInView(updated: Rider) {
-    setRiders((current) => current.map((rider) => (rider.id === updated.id ? updated : rider)));
+    setRiders((current) => {
+      const next = current.map((rider) => (rider.id === updated.id ? updated : rider));
+      writeRidersBrowserCache(next);
+      return next;
+    });
     setSelected(updated);
     setSuccess("Đã cập nhật avatar rider.");
   }
@@ -434,7 +457,11 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
     const result = await response.json().catch(() => null) as { success?: boolean; error?: string } | null;
     setDeletingId(null);
     if (!response.ok || !result?.success) { setError(result?.error ?? "Không thể xóa rider"); return; }
-    setRiders((current) => current.filter((item) => item.id !== rider.id));
+    setRiders((current) => {
+      const next = current.filter((item) => item.id !== rider.id);
+      writeRidersBrowserCache(next);
+      return next;
+    });
     setSelected((current) => current?.id === rider.id ? null : current);
     setCheckedIds((current) => { const next = new Set(current); next.delete(rider.id); return next; });
     setShowDetail(false);
@@ -1249,4 +1276,24 @@ function wardShortLabel(value: string) {
 
 function joinLocation(...parts: Array<string | null | undefined>) {
   return parts.filter(Boolean).join(" / ");
+}
+
+function readRidersBrowserCache() {
+  try {
+    const raw = window.sessionStorage.getItem(RIDERS_BROWSER_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { saved_at?: number; riders?: Rider[] };
+    if (!parsed.saved_at || Date.now() - parsed.saved_at > RIDERS_BROWSER_CACHE_TTL_MS) return null;
+    return Array.isArray(parsed.riders) ? parsed.riders : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRidersBrowserCache(riders: Rider[]) {
+  try {
+    window.sessionStorage.setItem(RIDERS_BROWSER_CACHE_KEY, JSON.stringify({ saved_at: Date.now(), riders }));
+  } catch {
+    // Cache chỉ là tối ưu tốc độ; quota/private mode không được làm hỏng trang.
+  }
 }

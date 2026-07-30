@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
 type ScheduleStatus =
   | ""
@@ -78,6 +79,7 @@ export function RiderMonthView({ riderId, initialMonth }: { riderId: string; ini
   const [logs, setLogs] = useState<AttendanceLog[]>([]);
   const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading("attendance-rider-month", loading);
   const [saving, setSaving] = useState(false);
   const [editor, setEditor] = useState<DayEditor | null>(null);
   const [error, setError] = useState<string | null>(null);

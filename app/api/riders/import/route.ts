@@ -4,6 +4,7 @@ import { canonicalDistrictName } from "@/lib/locations/hcm";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { canManageRiders } from "@/lib/auth/permissions";
+import { invalidateRidersCache } from "@/lib/cache/operations-cache";
 
 type ImportRow = {
   row: number;
@@ -232,5 +233,6 @@ export async function POST(request: Request) {
     );
   }
 
+  invalidateRidersCache();
   return NextResponse.json({ success: true, imported: inserted?.length ?? 0 });
 }

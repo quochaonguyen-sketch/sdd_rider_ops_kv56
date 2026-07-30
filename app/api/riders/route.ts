@@ -4,6 +4,7 @@ import { canonicalDistrictName } from "@/lib/locations/hcm";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { canManageRiders } from "@/lib/auth/permissions";
+import { getCachedRiders, invalidateRidersCache } from "@/lib/cache/operations-cache";
 
 const createRiderSchema = z.object({
   kv: z.string().trim().optional().nullable(),
@@ -47,6 +48,23 @@ async function getRiderManager() {
     .maybeSingle();
 
   return { user, allowed: canManageRiders(profile?.role) };
+}
+
+export async function GET() {
+  const user = await getSignedInUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const { data, cache } = await getCachedRiders();
+    return NextResponse.json({ success: true, riders: data, cache });
+  } catch (error) {
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : "Không thể tải danh sách rider" },
+      { status: 500 },
+    );
+  }
 }
 
 export async function POST(request: Request) {
@@ -115,6 +133,7 @@ export async function POST(request: Request) {
     raw_data: rider,
   });
 
+  invalidateRidersCache();
   return NextResponse.json({ success: true, rider: data });
 }
 
@@ -196,6 +215,7 @@ export async function PATCH(request: Request) {
     raw_data: rider,
   });
 
+  invalidateRidersCache();
   return NextResponse.json({ success: true, rider: data });
 }
 
@@ -220,5 +240,6 @@ export async function DELETE(request: Request) {
   const { error } = await admin.from("riders").delete().eq("id", rider.id);
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 });
   await admin.from("activity_logs").insert({ entity_type: "rider", entity_id: null, action: "deleted", message: `Deleted rider ${rider.rider_code}`, raw_data: rider });
+  invalidateRidersCache();
   return NextResponse.json({ success: true, id: rider.id });
 }

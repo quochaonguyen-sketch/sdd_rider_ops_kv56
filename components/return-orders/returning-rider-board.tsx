@@ -5,7 +5,7 @@ type ReturningRider = {
   name: string;
   total: number;
   cots: string[];
-  areas: string[];
+  kv: string;
 };
 
 type ReturningRiderBoardProps = {
@@ -23,6 +23,11 @@ function initials(name: string) {
   return words.slice(-2).map((word) => word[0]).join("").toLocaleUpperCase("vi");
 }
 
+function kvLabel(value: string) {
+  const number = value.match(/\d+/)?.[0];
+  return number ? `KV${number}` : value.trim() || "Chưa rõ KV";
+}
+
 export function ReturningRiderBoard({ riders, totalOrders }: ReturningRiderBoardProps) {
   if (!riders.length) return null;
   const maxLoad = Math.max(...riders.map((rider) => rider.total), 1);
@@ -32,7 +37,7 @@ export function ReturningRiderBoard({ riders, totalOrders }: ReturningRiderBoard
       <header>
         <div>
           <h2 id="returning-rider-title">Rider đang trả hàng</h2>
-          <p>Phân bổ đơn đang xử lý theo rider · FMHub returning 72</p>
+          <p>Phân bổ đơn thuộc nhóm Đang trả theo từng rider</p>
         </div>
         <dl>
           <div>
@@ -58,17 +63,16 @@ export function ReturningRiderBoard({ riders, totalOrders }: ReturningRiderBoard
                 {initials(rider.name)}
               </span>
               <div className="returning-rider-identity">
-                <strong>{rider.name || "Chưa có tên rider"}</strong>
+                <strong>
+                  {rider.name || "Chưa có tên rider"}
+                  <span className="returning-rider-kv-inline"> · {kvLabel(rider.kv)}</span>
+                </strong>
                 <span>{rider.id}</span>
               </div>
               <div className="returning-rider-assignment">
                 <span>
                   <strong>COT</strong>
                   {rider.cots.length ? rider.cots.join(" · ") : "Chưa xác định"}
-                </span>
-                <span>
-                  <strong>KHU VỰC</strong>
-                  {rider.areas.length ? rider.areas.join(" · ") : "Chưa map"}
                 </span>
               </div>
               <div className="returning-rider-load" aria-label={`${rider.total} đơn đang trả`}>

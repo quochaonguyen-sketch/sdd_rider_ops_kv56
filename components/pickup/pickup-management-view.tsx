@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/utils/cn";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
 type PickupAssignment = {
   id: string;
@@ -43,6 +44,7 @@ export function PickupManagementView() {
   const deferredQuery = useDeferredValue(query);
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading("pickup-management", loading);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);

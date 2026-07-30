@@ -4,6 +4,7 @@ import { readRidersFromThiCongPlan, thiCongPlanConfig } from "@/lib/google/thi-c
 import { canonicalDistrictName } from "@/lib/locations/hcm";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { invalidateRidersCache } from "@/lib/cache/operations-cache";
 
 function normalizedDistrict(value: string | null) {
   return canonicalDistrictName(value) === "Quận Bình Thạnh" ? "Quận Bình Thạnh" : value;
@@ -78,6 +79,7 @@ export async function POST(request: Request) {
       message: `Synced ${result.synced_riders} riders from Thi Công Plan to web`,
       raw_data: result,
     });
+    invalidateRidersCache();
     return NextResponse.json(result);
   } catch (syncError) {
     return NextResponse.json(

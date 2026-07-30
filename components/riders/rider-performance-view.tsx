@@ -7,6 +7,7 @@ import type { DriverPerformanceDaily, Rider } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/utils/cn";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
 type RiderProfile = Pick<Rider, "id" | "rider_code" | "full_name" | "avatar_url" | "kv" | "cot" | "status" | "pickup_district" | "pickup_ward" | "delivery_district" | "delivery_ward">;
 type PerformanceResponse = { success: boolean; rider?: RiderProfile; days?: number; performance?: DriverPerformanceDaily[]; error?: string };
@@ -26,6 +27,7 @@ export function RiderPerformanceView({ riderId }: { riderId: string }) {
   const [rider, setRider] = useState<RiderProfile | null>(null);
   const [performance, setPerformance] = useState<DriverPerformanceDaily[]>([]);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading("rider-performance", loading);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 

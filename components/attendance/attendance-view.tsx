@@ -38,6 +38,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 import {
   WeeklyAttendanceDashboard,
   type WeeklyScheduleValue,
@@ -115,6 +116,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   const [bulkStatus, setBulkStatus] = useState<ScheduleStatus>("ON");
   const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading("attendance", loading);
   const [importing, setImporting] = useState(false);
   const [syncingSheet, setSyncingSheet] = useState(false);
   const [showSheetSync, setShowSheetSync] = useState(false);

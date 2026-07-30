@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/utils/cn";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
 type RealtimeRider = { id: string; driver_id: string; driver_name: string | null; total_assigned: number; delivered: number; delivering: number; failed: number; zone_id: string | null; first_delivery_at: string | null; idle_delivery_seconds: number; snapshot_id: string; snapshot_at: string };
 type RiderProfile = { rider_code: string; full_name: string | null; kv: string | null; delivery_district: string | null; delivery_ward: string | null };
@@ -49,6 +50,7 @@ export function RealtimeDashboardView() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<DisplayRider | null>(null);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading("realtime-dashboard", loading);
   const [error, setError] = useState<string | null>(null);
 
   const loadProfiles = useCallback(async () => {

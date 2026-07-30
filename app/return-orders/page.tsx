@@ -26,25 +26,42 @@ function aging(value: string | null) {
   return { label, tone: days <= 1 ? "fresh" : days <= 5 ? "warning" : "danger" };
 }
 
-function statusTone(status: number) {
-  if (status === 67) return "fm";
-  if (status === 10) return "lm";
-  if (status === 72) return "returning";
-  return "other";
+function kvLabel(value: string) {
+  const number = value.match(/\d+/)?.[0];
+  return number ? `KV${number}` : value.trim() || "Chưa rõ KV";
 }
 
 function assignedRiderCount(value: string) {
-  return value.split(",").map((item) => item.trim()).filter(Boolean).length;
+  return value.split(/\s*[,;]\s*/).filter(Boolean).length;
 }
 
-function ReturnRiders({ status, driverId, driverName, cot1, cot2 }: { status: number; driverId: string; driverName: string; cot1: string; cot2: string }) {
+function RiderAssignment({ value }: { value: string }) {
+  const riders = value.split(/\s*[,;]\s*/).filter(Boolean);
+  return (
+    <span className="return-rider-assignment-list">
+      {riders.map((rider, index) => {
+        const match = rider.match(/^(.*)\s·\s(KV\d+)$/i);
+        return (
+          <span className="return-rider-assignment-item" key={`${rider}:${index}`}>
+            <span>{match?.[1] ?? rider}</span>
+            {match ? <strong className="return-rider-kv-suffix">{match[2].toUpperCase()}</strong> : null}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function ReturnRiders({ status, driverId, driverName, riderKv, cot1, cot2 }: { status: number; driverId: string; driverName: string; riderKv: string; cot1: string; cot2: string }) {
   if (status === 72 && driverId) {
     const activeCots = getReturnDriverCots(driverId, driverName, cot1, cot2);
     return (
-      <div className="return-rider-current">
-        <span>Rider đang trả</span>
-        <strong>{driverId} · {driverName || "Chưa có tên"}</strong>
-        <small>{activeCots.length ? activeCots.join(" · ") : "Chưa xác định COT"}</small>
+      <div className="return-riders is-returning">
+        <div className="return-rider-person">
+          <strong>{driverName || "Chưa có tên rider"} · {kvLabel(riderKv)}</strong>
+          <small>Rider ID · {driverId}</small>
+        </div>
+        <span><strong>COT</strong>{activeCots.length ? activeCots.join(" · ") : "Chưa xác định"}</span>
       </div>
     );
   }
@@ -54,8 +71,8 @@ function ReturnRiders({ status, driverId, driverName, cot1, cot2 }: { status: nu
     <details className="return-cot-roster">
       <summary>Kế hoạch rider · {total} ứng viên</summary>
       <div className="return-riders">
-        {cot1 ? <span><strong>COT1</strong>{cot1}</span> : null}
-        {cot2 ? <span><strong>COT2</strong>{cot2}</span> : null}
+        {cot1 ? <span><strong>COT1</strong><span><RiderAssignment value={cot1} /></span></span> : null}
+        {cot2 ? <span><strong>COT2</strong><span><RiderAssignment value={cot2} /></span></span> : null}
       </div>
     </details>
   );
@@ -99,6 +116,7 @@ async function ReturnOrdersContent({
     if (filters.q) query.set("q", filters.q);
     if (filters.status) query.set("status", filters.status);
     if (filters.district) query.set("district", filters.district);
+    if (filters.sort !== "district_ward") query.set("sort", filters.sort);
     query.set("page", String(page));
     query.set("pageSize", String(filters.pageSize));
     return `/return-orders?${query}`;
@@ -119,26 +137,16 @@ async function ReturnOrdersContent({
         </div>
       </header>
 
-      <dl className="return-stats" aria-label="Tổng quan trạng thái hàng trả">
-        <div>
-          <dt>Đơn trạng thái 67 + 10 + 72</dt>
-          <dd>{result.summary.total.toLocaleString("vi-VN")}</dd>
-        </div>
-        <div className="is-fm">
-          <dt><span aria-hidden="true" />FMHub received · 67</dt>
-          <dd>{result.summary.fmHub.toLocaleString("vi-VN")}</dd>
-        </div>
-        <div className="is-lm">
-          <dt><span aria-hidden="true" />LMHub received · 10</dt>
-          <dd>{result.summary.lmHub.toLocaleString("vi-VN")}</dd>
+      <dl className="return-stats is-two-state" aria-label="Tổng quan hàng tồn và đang trả">
+        <div className="is-backlog">
+          <dt><span aria-hidden="true" />Tồn</dt>
+          <dd>{(result.summary.fmHub + result.summary.lmHub).toLocaleString("vi-VN")}</dd>
+          <small>Đơn đang chờ rider trả</small>
         </div>
         <div className="is-returning">
-          <dt><span aria-hidden="true" />FMHub returning · 72</dt>
+          <dt><span aria-hidden="true" />Đang trả</dt>
           <dd>{result.summary.returning.toLocaleString("vi-VN")}</dd>
-        </div>
-        <div className="is-mapped">
-          <dt><span aria-hidden="true" />Đơn đã map KV5/KV6</dt>
-          <dd>{result.summary.mapped.toLocaleString("vi-VN")}</dd>
+          <small>Đã có rider nhận trả</small>
         </div>
       </dl>
 
@@ -176,10 +184,11 @@ async function ReturnOrdersContent({
       ) : null}
 
       <ReturnOrderFilters
-        key={`${filters.q}:${filters.status}:${filters.district}:${filters.pageSize}`}
+        key={`${filters.q}:${filters.status}:${filters.district}:${filters.sort}:${filters.pageSize}`}
         initialQuery={filters.q}
         initialStatus={filters.status}
         initialDistrict={filters.district}
+        initialSort={filters.sort}
         districtOptions={RETURN_ORDER_DISTRICTS}
         pageSize={filters.pageSize}
       />
@@ -190,17 +199,16 @@ async function ReturnOrdersContent({
             <h2>Sổ đơn trả</h2>
             <p>{result.total.toLocaleString("vi-VN")} kết quả phù hợp</p>
           </div>
-          <span>Trang {result.page}/{pages}</span>
+          <span>{filters.sort === "aging_desc" ? "Aging cao → thấp" : "Quận → Phường"} · Trang {result.page}/{pages}</span>
         </header>
         <div className="return-table-wrap">
           <table className="return-table">
             <thead>
               <tr>
                 <th scope="col">Đơn hàng</th>
-                <th scope="col">Trạng thái</th>
-                <th scope="col">Người bán</th>
-                <th scope="col">Điểm nhận</th>
-                <th scope="col">Kế hoạch trả</th>
+                <th scope="col">Aging</th>
+                <th scope="col">Quận / phường ↑</th>
+                <th scope="col">Rider trả</th>
               </tr>
             </thead>
             <tbody>
@@ -211,36 +219,37 @@ async function ReturnOrdersContent({
                     <td data-label="Đơn hàng">
                       <strong className="return-shipment">{row.shipment_id}</strong>
                       <span>Shopee · {row.shopee_order_sn || "—"}</span>
-                    </td>
-                    <td data-label="Trạng thái">
-                      <span className={`return-status is-${statusTone(row.order_status)}`}>
-                        <strong>{row.order_status}</strong>
-                        {row.status_label || "Chưa có nhãn"}
+                      <span className={`return-order-state ${row.order_status === 72 ? "is-returning" : "is-backlog"}`}>
+                        {row.order_status === 72 ? "Đang trả" : "Tồn"}
                       </span>
+                    </td>
+                    <td data-label="Aging">
                       <span className={`return-aging is-${orderAging.tone}`}>{orderAging.label}</span>
+                      <small>{fmt(row.create_time)}</small>
                     </td>
-                    <td data-label="Người bán">
-                      <strong>{row.seller_new_ward || row.seller_ward || "Chưa xác định phường"}</strong>
-                      <span>{row.seller_district || "Chưa xác định quận"} · {row.seller_area || "Chưa map khu vực"}</span>
+                    <td data-label="Quận / phường">
+                      <strong>{row.seller_district || "Chưa xác định quận"}</strong>
+                      <span>{row.seller_new_ward || row.seller_ward || "Chưa xác định phường"}</span>
                       {row.seller_new_ward && row.seller_ward && row.seller_new_ward !== row.seller_ward ? <small>Phường cũ · {row.seller_ward}</small> : null}
-                      <small>Address ID · {row.lowest_seller_address_id || "—"}</small>
                     </td>
-                    <td data-label="Điểm nhận">
-                      <span className="return-code">{row.pickup_point_id || "Chưa có pickup point"}</span>
-                      <span>{row.pickup_station_name || row.current_station_name || "Chưa có trạm nhận"}</span>
-                    </td>
-                    <td data-label="Kế hoạch trả">
-                      <span className={row.return_zone ? "return-zone" : "return-unassigned"}>{row.return_zone || "Chưa phân tuyến"}</span>
-                      <span className="return-plan-area">
-                        <strong>KHU VỰC</strong>
-                        {row.seller_area || "Chưa map khu vực"}
+                    <td data-label="Rider trả">
+                      <span className="return-zone-note">
+                        <small>Zone trả</small>
+                        <strong>{row.return_zone || "Chưa có zone"}</strong>
                       </span>
-                      <ReturnRiders status={row.order_status} driverId={row.return_driver_id} driverName={row.return_driver_name} cot1={row.return_riders_cot1} cot2={row.return_riders_cot2} />
+                      <ReturnRiders
+                        status={row.order_status}
+                        driverId={row.return_driver_id}
+                        driverName={row.return_driver_profile_name || row.return_driver_name}
+                        riderKv={row.return_driver_kv}
+                        cot1={row.return_riders_cot1}
+                        cot2={row.return_riders_cot2}
+                      />
                       <ReturnRiderAssignment
                         key={`${row.shipment_id}:${row.manual_assignment}:${row.return_driver_id}`}
                         shipmentId={row.shipment_id}
                         currentRiderCode={row.return_driver_id}
-                        currentRiderName={row.return_driver_name}
+                        currentRiderName={row.return_driver_profile_name || row.return_driver_name}
                         manualAssignment={row.manual_assignment}
                         returnZone={row.return_zone}
                         sellerArea={row.seller_area}
@@ -251,7 +260,7 @@ async function ReturnOrdersContent({
               })}
               {!result.rows.length ? (
                 <tr>
-                  <td colSpan={5} className="return-empty">
+                  <td colSpan={4} className="return-empty">
                     <strong>Không tìm thấy đơn phù hợp.</strong>
                     <span>Đổi từ khóa hoặc xóa bộ lọc để xem lại toàn bộ danh sách.</span>
                   </td>

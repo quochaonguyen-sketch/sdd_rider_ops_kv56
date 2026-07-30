@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Archive, Check, FileText, LoaderCircle, Pin, Plus, RefreshCcw, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 import styles from "./notes-view.module.css";
 
 type NoteStatus = "ACTIVE" | "ARCHIVED";
@@ -20,6 +21,7 @@ export function NotesView() {
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading("notes", loading);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);

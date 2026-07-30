@@ -9,6 +9,7 @@ import {
   type DeliveryTrendPoint,
   type DeliveryViewMode,
 } from "@/components/volume/delivery-volume-dashboard";
+import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
 type VolumeKind = "delivery" | "pickup";
 
@@ -53,6 +54,7 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
   const [rows, setRows] = useState<VolumeRow[]>([]);
   const [comparisonRows, setComparisonRows] = useState<VolumeRow[]>([]);
   const [loading, setLoading] = useState(true);
+  useReportInitialDataLoading(`volume-${kind}`, loading);
   const [error, setError] = useState<string | null>(null);
   const [deliveryViewMode, setDeliveryViewMode] = useState<DeliveryViewMode>("day");
 

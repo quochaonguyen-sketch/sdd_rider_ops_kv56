@@ -1,12 +1,15 @@
 "use client";
 
-import { FormEvent, useState, useTransition } from "react";
+import { FormEvent, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+
+type ReturnSort = "aging_desc" | "district_ward";
 
 type ReturnOrderFiltersProps = {
   initialQuery: string;
   initialStatus: string;
   initialDistrict: string;
+  initialSort: ReturnSort;
   districtOptions: readonly string[];
   pageSize: number;
 };
@@ -15,6 +18,7 @@ export function ReturnOrderFilters({
   initialQuery,
   initialStatus,
   initialDistrict,
+  initialSort,
   districtOptions,
   pageSize,
 }: ReturnOrderFiltersProps) {
@@ -23,13 +27,15 @@ export function ReturnOrderFilters({
   const [query, setQuery] = useState(initialQuery);
   const [status, setStatus] = useState(initialStatus);
   const [district, setDistrict] = useState(initialDistrict);
+  const [sort, setSort] = useState<ReturnSort>(initialSort);
 
-  const navigate = (nextQuery: string, nextStatus: string, nextDistrict: string) => {
+  const navigate = (nextQuery: string, nextStatus: string, nextDistrict: string, nextSort: ReturnSort) => {
     const params = new URLSearchParams();
     const cleanQuery = nextQuery.trim();
     if (cleanQuery) params.set("q", cleanQuery);
     if (nextStatus) params.set("status", nextStatus);
     if (nextDistrict) params.set("district", nextDistrict);
+    if (nextSort !== "district_ward") params.set("sort", nextSort);
     params.set("page", "1");
     params.set("pageSize", String(pageSize));
 
@@ -38,36 +44,51 @@ export function ReturnOrderFilters({
     });
   };
 
+  useEffect(() => {
+    const unchanged =
+      query.trim() === initialQuery &&
+      status === initialStatus &&
+      district === initialDistrict &&
+      sort === initialSort;
+    if (unchanged) return;
+    const timer = window.setTimeout(() => {
+      navigate(query, status, district, sort);
+    }, 220);
+    return () => window.clearTimeout(timer);
+    // `navigate` only closes over stable router/startTransition values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [district, initialDistrict, initialQuery, initialSort, initialStatus, query, sort, status]);
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    navigate(query, status, district);
+    navigate(query, status, district, sort);
   };
 
   const handleReset = () => {
     setQuery("");
     setStatus("");
     setDistrict("");
-    navigate("", "", "");
+    setSort("district_ward");
+    navigate("", "", "", "district_ward");
   };
 
   return (
     <form className="return-filters" aria-label="Bộ lọc hàng trả" onSubmit={handleSubmit}>
       <label>
-        <span>Từ khóa</span>
+        <span>Tra cứu rider hoặc đơn</span>
         <input
           name="q"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Mã vận đơn, Shopee, phường, khu vực"
+          placeholder="Tên rider, Rider ID, mã vận đơn, quận, phường"
         />
       </label>
       <label>
-        <span>Trạng thái đơn</span>
+        <span>Trạng thái</span>
         <select name="status" value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="">Tất cả trạng thái</option>
-          <option value="67">67 · FMHub received</option>
-          <option value="10">10 · LMHub received</option>
-          <option value="72">72 · FMHub returning</option>
+          <option value="">Tất cả</option>
+          <option value="backlog">Tồn</option>
+          <option value="returning">Đang trả</option>
         </select>
       </label>
       <label>
@@ -83,11 +104,20 @@ export function ReturnOrderFilters({
           ))}
         </select>
       </label>
+      <label>
+        <span>Sắp xếp</span>
+        <select
+          name="sort"
+          value={sort}
+          onChange={(event) => setSort(event.target.value as ReturnSort)}
+        >
+          <option value="aging_desc">Aging cao → thấp</option>
+          <option value="district_ward">Quận → Phường</option>
+        </select>
+      </label>
       <div className="return-filter-actions">
-        <button type="submit" disabled={isPending} aria-busy={isPending}>
-          {isPending ? "Đang tra cứu…" : "Tra cứu đơn"}
-        </button>
-        {(initialQuery || initialStatus || initialDistrict) ? (
+        {isPending ? <span className="return-filter-pending" role="status">Đang cập nhật…</span> : null}
+        {(query || status || district || sort !== "district_ward") ? (
           <button
             type="button"
             className="return-filter-reset"
