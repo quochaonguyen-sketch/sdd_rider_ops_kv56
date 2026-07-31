@@ -33,6 +33,25 @@ export type ReturnOrderRow = {
   current_station_received_time: string | null;
 };
 
+export type ReturningRiderOrder = {
+  shipmentId: string;
+  shopeeOrderSn: string;
+  zone: string;
+  district: string;
+  ward: string;
+  scannedAt: string | null;
+};
+
+export type ReturningRiderPlanOrder = {
+  shipmentId: string;
+  shopeeOrderSn: string;
+  zone: string;
+  district: string;
+  ward: string;
+  cot: string;
+  assignment: "manual" | "candidate";
+};
+
 export type ReturnOrderResult = {
   rows: ReturnOrderRow[];
   total: number;
@@ -53,6 +72,9 @@ export type ReturnOrderResult = {
       total: number;
       cots: string[];
       kv: string;
+      scannedFrom: string | null;
+      scannedOrders: ReturningRiderOrder[];
+      planOrders: ReturningRiderPlanOrder[];
     }>;
   };
 };
@@ -122,7 +144,7 @@ async function loadReturnDashboardContext(
   supabase: ReturnType<typeof createAdminClient>,
   snapshotId: string,
 ) {
-  const [fm, lm, returning, mapped, returningRows, wardRows, riderProfiles, ...districtResults] = await Promise.all([
+  const [fm, lm, returning, mapped, returningRows, planRows, wardRows, riderProfiles, ...districtResults] = await Promise.all([
     supabase
       .from("return_order_snapshots")
       .select("*", { count: "exact", head: true })
@@ -149,11 +171,21 @@ async function loadReturnDashboardContext(
       .in("order_status", [10, 67, 72]),
     supabase
       .from("return_order_snapshots")
-      .select("shipment_id,return_driver_id,return_driver_name,return_riders_cot1,return_riders_cot2,seller_area")
+      .select(
+        "shipment_id,shopee_order_sn,return_driver_id,return_driver_name,return_riders_cot1,return_riders_cot2,return_zone,seller_area,seller_district,seller_new_ward,seller_ward,current_station_received_time",
+      )
       .eq("snapshot_id", snapshotId)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
       .eq("order_status", 72)
       .neq("return_driver_id", ""),
+    supabase
+      .from("return_order_snapshots")
+      .select(
+        "shipment_id,shopee_order_sn,return_rider_codes,return_riders_cot1,return_riders_cot2,return_zone,seller_area,seller_district,seller_new_ward,seller_ward",
+      )
+      .eq("snapshot_id", snapshotId)
+      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("order_status", [10, 67]),
     supabase
       .from("return_order_snapshots")
       .select("seller_district,seller_new_ward,seller_ward")
@@ -163,7 +195,7 @@ async function loadReturnDashboardContext(
       .in("seller_district", [...RETURN_ORDER_DISTRICTS]),
     supabase
       .from("riders")
-      .select("rider_code,full_name,kv"),
+      .select("rider_code,full_name,kv,cot"),
     ...RETURN_ORDER_DISTRICTS.map((district) =>
       supabase
         .from("return_order_snapshots")
@@ -179,10 +211,11 @@ async function loadReturnDashboardContext(
   if (returning.error) throw returning.error;
   if (mapped.error) throw mapped.error;
   if (returningRows.error) throw returningRows.error;
+  if (planRows.error) throw planRows.error;
   if (wardRows.error) throw wardRows.error;
   if (riderProfiles.error) throw riderProfiles.error;
   for (const district of districtResults) if (district.error) throw district.error;
-  return { fm, lm, returning, mapped, returningRows, wardRows, riderProfiles, districtResults };
+  return { fm, lm, returning, mapped, returningRows, planRows, wardRows, riderProfiles, districtResults };
 }
 
 type ReturnDashboardContext = Awaited<ReturnType<typeof loadReturnDashboardContext>>;
@@ -274,7 +307,7 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
         .order("current_station_received_time", { ascending: false, nullsFirst: false });
   const [
     { data, error, count },
-    { fm, lm, returning, mapped, returningRows, wardRows, riderProfiles, districtResults },
+    { fm, lm, returning, mapped, returningRows, planRows, wardRows, riderProfiles, districtResults },
     assignmentRows,
   ] = await Promise.all([
     orderedQuery.range(from, from + filters.pageSize - 1),
@@ -348,6 +381,8 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
       total: number;
       cots: Set<string>;
       kv: string;
+      scannedOrders: ReturningRiderOrder[];
+      planOrders: ReturningRiderPlanOrder[];
     }
   >();
   for (const row of returningRows.data ?? []) {
@@ -384,7 +419,62 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
       total: (current?.total ?? 0) + 1,
       cots,
       kv: String(profile?.kv || current?.kv || "").trim(),
+      scannedOrders: [
+        ...(current?.scannedOrders ?? []),
+        {
+          shipmentId: row.shipment_id,
+          shopeeOrderSn: String(row.shopee_order_sn || "").trim(),
+          zone: String(row.return_zone || "").trim(),
+          district: String(row.seller_district || "").trim(),
+          ward: String(row.seller_new_ward || row.seller_ward || "").trim(),
+          scannedAt: row.current_station_received_time,
+        },
+      ],
+      planOrders: current?.planOrders ?? [],
     });
+  }
+
+  const splitRiderCodes = (value: unknown) =>
+    String(value ?? "")
+      .split(/\s*[,;]\s*/)
+      .map((code) => normalizeIdentity(code))
+      .filter(Boolean);
+  const cotForRider = (riderId: string, cot1: unknown, cot2: unknown) => {
+    const hasRider = (value: unknown) =>
+      String(value ?? "")
+        .split(/\s*[,;]\s*/)
+        .some((entry) => normalizeIdentity(entry.split("·")[0]) === riderId);
+    if (hasRider(cot1)) return "COT1";
+    if (hasRider(cot2)) return "COT2";
+    const profileCot = String(riderByCode.get(riderId)?.cot || "").trim().toUpperCase();
+    if (["COT1", "1"].includes(profileCot)) return "COT1";
+    if (["COT2", "2"].includes(profileCot)) return "COT2";
+    return "";
+  };
+
+  for (const row of planRows.data ?? []) {
+    const assignment = assignmentsByShipment.get(row.shipment_id);
+    const manuallyAssignedId = normalizeIdentity(assignment?.rider_code);
+    const candidateIds = manuallyAssignedId
+      ? [manuallyAssignedId]
+      : splitRiderCodes(row.return_rider_codes);
+
+    for (const riderId of new Set(candidateIds)) {
+      const rider = riderTotals.get(riderId);
+      if (!rider) continue;
+      const cot = String(assignment?.cot || "").trim().toUpperCase()
+        || cotForRider(riderId, row.return_riders_cot1, row.return_riders_cot2);
+      rider.planOrders.push({
+        shipmentId: row.shipment_id,
+        shopeeOrderSn: String(row.shopee_order_sn || "").trim(),
+        zone: String(row.return_zone || "").trim(),
+        district: String(row.seller_district || "").trim(),
+        ward: String(row.seller_new_ward || row.seller_ward || "").trim(),
+        cot,
+        assignment: manuallyAssignedId ? "manual" : "candidate",
+      });
+      if (cot) rider.cots.add(cot);
+    }
   }
   const wardCounts = new Map<string, Map<string, number>>();
   for (const district of RETURN_ORDER_DISTRICTS) wardCounts.set(district, new Map());
@@ -423,6 +513,16 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
         .map((rider) => ({
           ...rider,
           cots: [...rider.cots],
+          scannedFrom: rider.scannedOrders
+            .map((order) => order.scannedAt)
+            .filter((value): value is string => Boolean(value))
+            .sort((a, b) => a.localeCompare(b))[0] ?? null,
+          scannedOrders: rider.scannedOrders.sort((a, b) =>
+            (b.scannedAt ?? "").localeCompare(a.scannedAt ?? "")),
+          planOrders: rider.planOrders.sort((a, b) =>
+            a.zone.localeCompare(b.zone, "vi")
+            || a.ward.localeCompare(b.ward, "vi")
+            || a.shipmentId.localeCompare(b.shipmentId, "vi")),
         }))
         .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "vi")),
     },
