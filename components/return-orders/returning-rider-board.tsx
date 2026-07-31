@@ -82,7 +82,7 @@ export function ReturningRiderBoard({ riders, totalOrders }: ReturningRiderBoard
       <header>
         <div>
           <h2 id="returning-rider-title">Rider đang trả hàng</h2>
-          <p>Bấm vào rider để xem đơn đã quét trả từ lúc nào và kế hoạch trả theo zone/COT.</p>
+          <p>Bấm vào rider để xem Delivering time của đơn và kế hoạch trả theo zone/COT.</p>
         </div>
         <dl>
           <div>
@@ -121,7 +121,7 @@ export function ReturningRiderBoard({ riders, totalOrders }: ReturningRiderBoard
                     {rider.cots.length ? rider.cots.join(" · ") : "Chưa xác định"}
                   </span>
                   <span>
-                    <strong>QUÉT TỪ</strong>
+                    <strong>DELIVERING TIME</strong>
                     {formatDateTime(rider.scannedFrom, true)}
                   </span>
                 </span>
@@ -177,7 +177,7 @@ export function ReturningRiderBoard({ riders, totalOrders }: ReturningRiderBoard
                 <dd>{selectedRider.scannedOrders.length.toLocaleString("vi-VN")} đơn</dd>
               </div>
               <div>
-                <dt><Clock3 aria-hidden="true" />Quét từ</dt>
+                <dt><Clock3 aria-hidden="true" />Delivering time</dt>
                 <dd>{formatDateTime(selectedRider.scannedFrom)}</dd>
               </div>
               <div>
@@ -190,7 +190,7 @@ export function ReturningRiderBoard({ riders, totalOrders }: ReturningRiderBoard
               <section aria-labelledby="rider-scanned-orders-title">
                 <header>
                   <div>
-                    <p>THỰC TẾ</p>
+                  <p>THỰC TẾ · DELIVERING TIME</p>
                     <h4 id="rider-scanned-orders-title">Đơn đã quét trả</h4>
                   </div>
                   <strong>{selectedRider.scannedOrders.length.toLocaleString("vi-VN")}</strong>
@@ -206,8 +206,8 @@ export function ReturningRiderBoard({ riders, totalOrders }: ReturningRiderBoard
                         <strong>{order.zone || "Chưa có zone"}</strong>
                         <span>{areaLabel(order.district, order.ward)}</span>
                       </div>
-                      <time dateTime={order.scannedAt ?? undefined}>
-                        {formatDateTime(order.scannedAt)}
+                      <time dateTime={order.deliveringAt ?? undefined}>
+                        {formatDateTime(order.deliveringAt)}
                       </time>
                     </li>
                   ))}
@@ -250,7 +250,7 @@ export function ReturningRiderBoard({ riders, totalOrders }: ReturningRiderBoard
             </div>
 
             <footer>
-              <span>Mốc “quét từ” lấy từ thời gian SPX ghi nhận đơn tại trạm (<code>current_station_received_time</code>).</span>
+              <span>Mốc “Delivering time” lấy từ trường SPX <code>delivering_time</code>.</span>
               <button type="button" onClick={closeDialog}>Đóng</button>
             </footer>
           </article>

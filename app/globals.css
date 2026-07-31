@@ -2571,6 +2571,110 @@ select {
   border-block-start: var(--rule-hairline) solid var(--color-rule);
 }
 
+/* Return handover scanner: phone-first camera flow */
+.return-handover-trigger,
+.return-handover-camera-button,
+.return-handover-manual button,
+.return-handover-dialog footer button {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  border: var(--rule-hairline) solid var(--color-rule-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-out), opacity var(--dur-micro) var(--ease-out), transform var(--dur-micro) var(--ease-out);
+}
+
+.return-handover-trigger { width: 100%; padding: var(--space-xs) var(--space-sm); }
+.return-handover-trigger svg,
+.return-handover-camera-button svg,
+.return-handover-manual button svg { width: 1rem; height: 1rem; }
+.return-handover-trigger:active,
+.return-handover-camera-button:active,
+.return-handover-manual button:active,
+.return-handover-dialog footer button:active { transform: translateY(1px); }
+.return-handover-trigger:focus-visible,
+.return-handover-camera-button:focus-visible,
+.return-handover-manual button:focus-visible,
+.return-handover-dialog button:focus-visible,
+.return-handover-dialog select:focus-visible,
+.return-handover-dialog input:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.return-handover-trigger:disabled,
+.return-handover-camera-button:disabled,
+.return-handover-manual button:disabled { opacity: .55; cursor: not-allowed; }
+
+@media (hover: hover) and (pointer: fine) {
+  .return-handover-trigger:hover,
+  .return-handover-manual button:hover,
+  .return-handover-dialog footer button:hover { background: var(--color-graphite); color: var(--color-graphite-ink); }
+  .return-handover-camera-button:hover { background: var(--color-paper-2); }
+}
+
+.return-handover-dialog {
+  width: min(34rem, calc(100% - (var(--space-md) * 2)));
+  max-width: none;
+  max-height: calc(100dvh - (var(--space-md) * 2));
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: var(--rule-hairline) solid var(--color-rule-strong);
+  border-radius: var(--radius-modal);
+  background: var(--color-paper);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-panel);
+}
+.return-handover-dialog::backdrop { background: color-mix(in oklch, var(--color-graphite) 58%, transparent); }
+.return-handover-panel { display: grid; max-height: calc(100dvh - (var(--space-md) * 2)); overflow: auto; }
+.return-handover-panel > header { display: flex; align-items: start; justify-content: space-between; gap: var(--space-sm); padding: var(--space-md); border-block-end: var(--rule-hairline) solid var(--color-rule); }
+.return-handover-panel h2, .return-handover-panel p { margin: 0; }
+.return-handover-panel > header p { color: var(--color-accent); font-size: var(--text-xs); font-weight: 700; letter-spacing: .08em; }
+.return-handover-panel > header h2 { margin-block: var(--space-2xs); font-size: var(--text-md); }
+.return-handover-panel > header span { color: var(--color-muted); font-size: var(--text-xs); line-height: 1.45; }
+.return-handover-panel > header > button { display: grid; width: 2.25rem; height: 2.25rem; flex: 0 0 auto; place-items: center; border: 0; border-radius: 999px; background: transparent; color: var(--color-muted); cursor: pointer; }
+.return-handover-panel > header > button svg { width: 1.1rem; }
+.return-handover-form { display: grid; gap: var(--space-2xs); padding: var(--space-md) var(--space-md) var(--space-sm); }
+.return-handover-form label, .return-handover-manual label { color: var(--color-muted); font-size: var(--text-xs); font-weight: 700; }
+.return-handover-form select, .return-handover-manual input { width: 100%; min-height: 2.75rem; border: var(--rule-hairline) solid var(--color-rule-strong); border-radius: var(--radius-control); background: var(--color-paper); color: var(--color-ink); font: inherit; padding-inline: var(--space-sm); }
+.return-handover-camera-button { width: calc(100% - (var(--space-md) * 2)); min-height: 6rem; margin: 0 var(--space-md) var(--space-md); flex-direction: column; background: var(--color-paper-2); color: var(--color-ink); }
+.return-handover-camera-button svg { width: 1.5rem; height: 1.5rem; }
+.return-handover-camera-wrap { position: relative; margin: 0 var(--space-md) var(--space-md); overflow: hidden; border-radius: var(--radius-control); background: var(--color-graphite); color: var(--color-graphite-ink); }
+.return-handover-camera { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+.return-handover-frame { position: absolute; inset: 22% 12%; border: 2px solid var(--color-accent-ink); border-radius: var(--radius-control); pointer-events: none; }
+.return-handover-camera-wrap p { position: absolute; inset: auto var(--space-sm) var(--space-sm); font-size: var(--text-xs); text-shadow: 0 1px 2px var(--color-graphite); }
+.return-handover-camera-wrap button { position: absolute; top: var(--space-sm); right: var(--space-sm); min-height: 2.25rem; padding-inline: var(--space-sm); border: var(--rule-hairline) solid var(--color-graphite-ink); border-radius: var(--radius-control); background: var(--color-graphite); color: var(--color-graphite-ink); font: inherit; font-size: var(--text-xs); font-weight: 700; cursor: pointer; }
+.return-handover-manual { display: grid; gap: var(--space-2xs); padding: 0 var(--space-md) var(--space-md); }
+.return-handover-manual > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-xs); }
+.return-handover-manual button { padding-inline: var(--space-sm); }
+.return-handover-manual button svg { animation: return-handover-spin 900ms linear infinite; }
+@keyframes return-handover-spin { to { transform: rotate(360deg); } }
+.return-handover-message { margin: 0 var(--space-md) var(--space-md); padding: var(--space-sm); border-radius: var(--radius-control); font-size: var(--text-xs); }
+.return-handover-message.is-success { background: var(--color-success-soft); color: var(--color-ink); }
+.return-handover-message.is-error { background: var(--color-error-soft); color: var(--color-ink); }
+.return-handover-recent { margin: 0 var(--space-md) var(--space-md); border-block-start: var(--rule-hairline) solid var(--color-rule); }
+.return-handover-recent > header { display: flex; justify-content: space-between; padding-block: var(--space-sm); }
+.return-handover-recent h3 { margin: 0; font-size: var(--text-sm); }
+.return-handover-recent > header span { color: var(--color-muted); font-size: var(--text-xs); }
+.return-handover-recent ol { display: grid; gap: var(--space-2xs); margin: 0; padding: 0; list-style: none; }
+.return-handover-recent li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-xs); align-items: center; padding-block: var(--space-xs); border-block-end: var(--rule-hairline) solid var(--color-rule); font-size: var(--text-xs); }
+.return-handover-recent li span, .return-handover-recent li time { color: var(--color-muted); }
+.return-handover-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); padding: var(--space-md); border-block-start: var(--rule-hairline) solid var(--color-rule); }
+.return-handover-dialog footer span { color: var(--color-muted); font-size: var(--text-xs); line-height: 1.4; }
+.return-handover-dialog footer button { padding-inline: var(--space-md); background: var(--color-paper); color: var(--color-ink); }
+@media (max-width: 39.99rem) {
+  .return-handover-manual > div { grid-template-columns: 1fr; }
+  .return-handover-dialog footer { align-items: stretch; flex-direction: column; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .return-handover-trigger, .return-handover-camera-button, .return-handover-manual button, .return-handover-dialog footer button { transition-duration: 0ms; }
+  .return-handover-manual button svg { animation: none; }
+}
+
 .return-riders .return-rider-kv-suffix {
   display: inline-flex;
   margin-inline-start: var(--space-2xs);

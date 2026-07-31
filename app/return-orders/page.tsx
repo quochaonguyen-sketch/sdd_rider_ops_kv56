@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ProtectedPage } from "@/components/layout/protected-page";
 import { ReturnOrderFilters } from "@/components/return-orders/return-order-filters";
 import { ReturnRiderAssignment } from "@/components/return-orders/return-rider-assignment";
+import { ReturnHandoverScanner } from "@/components/return-orders/return-handover-scanner";
 import { ReturningRiderBoard } from "@/components/return-orders/returning-rider-board";
 import {
   getReturnDriverCots,
@@ -33,6 +34,17 @@ function kvLabel(value: string) {
 
 function assignedRiderCount(value: string) {
   return value.split(/\s*[,;]\s*/).filter(Boolean).length;
+}
+
+function errorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const details = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    return [details.message, details.details, details.hint, details.code ? `code ${details.code}` : null]
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .join(" · ");
+  }
+  return "Lỗi không xác định";
 }
 
 function RiderAssignment({ value }: { value: string }) {
@@ -105,7 +117,7 @@ async function ReturnOrdersContent({
       <section className="return-orders-page">
         <div className="return-error" role="alert">
           <strong>Không tải được dữ liệu hàng trả.</strong>
-          <span>{error instanceof Error ? error.message : "Lỗi không xác định"}</span>
+          <span>{errorMessage(error)}</span>
         </div>
       </section>
     );
@@ -134,6 +146,7 @@ async function ReturnOrdersContent({
           <span>Dữ liệu snapshot</span>
           <strong>{fmt(result.snapshotAt)}</strong>
           <small>Phường và khu vực suy từ địa chỉ người bán.</small>
+          <ReturnHandoverScanner riders={result.summary.returningRiders.map((rider) => ({ id: rider.id, name: rider.name, kv: rider.kv }))} />
         </div>
       </header>
 

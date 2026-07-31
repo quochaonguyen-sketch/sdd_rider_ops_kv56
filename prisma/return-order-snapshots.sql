@@ -28,6 +28,7 @@ create table if not exists public.return_order_snapshots (
   return_driver_name text not null default '',
   create_time timestamptz,
   receive_time timestamptz,
+  delivering_time timestamptz,
   current_station_received_time timestamptz
 );
 
@@ -39,6 +40,7 @@ alter table public.return_order_snapshots add column if not exists return_riders
 alter table public.return_order_snapshots add column if not exists return_riders_cot2 text not null default '';
 alter table public.return_order_snapshots add column if not exists return_driver_id text not null default '';
 alter table public.return_order_snapshots add column if not exists return_driver_name text not null default '';
+alter table public.return_order_snapshots add column if not exists delivering_time timestamptz;
 
 create index if not exists return_order_snapshots_latest_idx
   on public.return_order_snapshots (snapshot_at desc);

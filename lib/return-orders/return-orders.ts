@@ -30,6 +30,7 @@ export type ReturnOrderRow = {
   return_driver_kv: string;
   create_time: string | null;
   receive_time: string | null;
+  delivering_time: string | null;
   current_station_received_time: string | null;
 };
 
@@ -39,7 +40,7 @@ export type ReturningRiderOrder = {
   zone: string;
   district: string;
   ward: string;
-  scannedAt: string | null;
+  deliveringAt: string | null;
 };
 
 export type ReturningRiderPlanOrder = {
@@ -172,7 +173,7 @@ async function loadReturnDashboardContext(
     supabase
       .from("return_order_snapshots")
       .select(
-        "shipment_id,shopee_order_sn,return_driver_id,return_driver_name,return_riders_cot1,return_riders_cot2,return_zone,seller_area,seller_district,seller_new_ward,seller_ward,current_station_received_time",
+        "shipment_id,shopee_order_sn,return_driver_id,return_driver_name,return_riders_cot1,return_riders_cot2,return_zone,seller_area,seller_district,seller_new_ward,seller_ward,delivering_time",
       )
       .eq("snapshot_id", snapshotId)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
@@ -277,7 +278,7 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
   let query = supabase
     .from("return_order_snapshots")
     .select(
-      "shipment_id,sls_tracking_number,shopee_order_sn,order_status,status_label,lowest_seller_address_id,seller_district,seller_ward,seller_new_ward,seller_area,seller_zone_id,order_zone_id,current_station_name,pickup_station_name,pickup_point_id,return_zone,return_rider_codes,return_rider_names,return_riders_cot1,return_riders_cot2,return_driver_id,return_driver_name,create_time,receive_time,current_station_received_time",
+      "shipment_id,sls_tracking_number,shopee_order_sn,order_status,status_label,lowest_seller_address_id,seller_district,seller_ward,seller_new_ward,seller_area,seller_zone_id,order_zone_id,current_station_name,pickup_station_name,pickup_point_id,return_zone,return_rider_codes,return_rider_names,return_riders_cot1,return_riders_cot2,return_driver_id,return_driver_name,create_time,receive_time,delivering_time,current_station_received_time",
       { count: "exact" },
     )
     .eq("snapshot_id", latest.snapshot_id)
@@ -427,7 +428,7 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
           zone: String(row.return_zone || "").trim(),
           district: String(row.seller_district || "").trim(),
           ward: String(row.seller_new_ward || row.seller_ward || "").trim(),
-          scannedAt: row.current_station_received_time,
+          deliveringAt: row.delivering_time,
         },
       ],
       planOrders: current?.planOrders ?? [],
@@ -514,11 +515,11 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
           ...rider,
           cots: [...rider.cots],
           scannedFrom: rider.scannedOrders
-            .map((order) => order.scannedAt)
+            .map((order) => order.deliveringAt)
             .filter((value): value is string => Boolean(value))
             .sort((a, b) => a.localeCompare(b))[0] ?? null,
           scannedOrders: rider.scannedOrders.sort((a, b) =>
-            (b.scannedAt ?? "").localeCompare(a.scannedAt ?? "")),
+            (b.deliveringAt ?? "").localeCompare(a.deliveringAt ?? "")),
           planOrders: rider.planOrders.sort((a, b) =>
             a.zone.localeCompare(b.zone, "vi")
             || a.ward.localeCompare(b.ward, "vi")
