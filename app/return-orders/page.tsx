@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ProtectedPage } from "@/components/layout/protected-page";
 import { ReturnOrderFilters } from "@/components/return-orders/return-order-filters";
+import { ReturnOrderLookupScanner } from "@/components/return-orders/return-order-lookup-scanner";
 import { ReturnRiderAssignment } from "@/components/return-orders/return-rider-assignment";
 import { ReturnHandoverScanner } from "@/components/return-orders/return-handover-scanner";
 import { ReturningRiderBoard } from "@/components/return-orders/returning-rider-board";
@@ -146,7 +147,10 @@ async function ReturnOrdersContent({
           <span>Dữ liệu snapshot</span>
           <strong>{fmt(result.snapshotAt)}</strong>
           <small>Phường và khu vực suy từ địa chỉ người bán.</small>
-          <ReturnHandoverScanner riders={result.summary.returningRiders.map((rider) => ({ id: rider.id, name: rider.name, kv: rider.kv }))} />
+          <div className="return-scan-actions">
+            <ReturnOrderLookupScanner />
+            <ReturnHandoverScanner riders={result.summary.returningRiders.map((rider) => ({ id: rider.id, name: rider.name, kv: rider.kv }))} />
+          </div>
         </div>
       </header>
 
