@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, ChevronRight, CircleAlert, Clock3, MapPin, PackageCheck, PackageOpen, PackageX, RefreshCcw, Truck } from "lucide-react";
+import { Activity, ChevronRight, CircleAlert, Clock3, MapPin, PackageCheck, PackageOpen, PackageX, RefreshCcw, TimerOff, Truck, UserRoundX } from "lucide-react";
 import { format, subDays } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
@@ -19,9 +19,13 @@ type VolumeGrouping = "week" | "month";
 type VolumeRow = { report_date: string | null; district: string | null; area: string | null; total_orders: number | null };
 type DailyVolumeRecord = { date: string; volume: number; type: "delivery" | "pickup" };
 type RealtimeRow = { work_date: string; driver_id: string; total_assigned: number; delivered: number; delivering: number; failed: number; idle_delivery_seconds: number; snapshot_id: string; snapshot_at: string };
-type DashboardState = { riders: Rider[]; activity: ActivityLog[]; delivery: VolumeRow[]; pickup: VolumeRow[]; realtime: RealtimeRow[] };
+type ReturnOverdueOrder = { shipmentId: string; startedAt: string; ageHours: number; zone: string; district: string; ward: string };
+type ReturnOverdueRider = { riderCode: string; riderName: string; kv: string; cot: string; totalOrders: number; oldestHours: number; oldestAt: string; orders: ReturnOverdueOrder[] };
+type ReturnOverdueState = { thresholdHours: number; totalOrders: number; missingStartedAt: number; snapshotAt: string | null; riders: ReturnOverdueRider[] };
+type DashboardState = { riders: Rider[]; activity: ActivityLog[]; delivery: VolumeRow[]; pickup: VolumeRow[]; realtime: RealtimeRow[]; returnOverdue: ReturnOverdueState };
 type FailedLeader = { riderCode: string; riderName: string; district: string; failed: number; assigned: number };
-const emptyState: DashboardState = { riders: [], activity: [], delivery: [], pickup: [], realtime: [] };
+const emptyReturnOverdue: ReturnOverdueState = { thresholdHours: 48, totalOrders: 0, missingStartedAt: 0, snapshotAt: null, riders: [] };
+const emptyState: DashboardState = { riders: [], activity: [], delivery: [], pickup: [], realtime: [], returnOverdue: emptyReturnOverdue };
 
 export function DashboardView() {
   const [state, setState] = useState<DashboardState>(emptyState);
@@ -39,18 +43,20 @@ export function DashboardView() {
     setLoading(true);
     setError(null);
     const historyStart = monthStartOffset(dateRange.end, -11);
-    const [riders, activity, delivery, pickup, realtime] = await Promise.all([
+    const [riders, activity, delivery, pickup, realtime, returnOverdue] = await Promise.all([
       supabase.from("riders").select("*, zones(id,name,area,hub)").order("updated_at", { ascending: false }),
       supabase.from("activity_logs").select("*").order("created_at", { ascending: false }).limit(10),
       fetchVolumeRows(supabase, "delivery_order", historyStart, dateRange.end),
       fetchVolumeRows(supabase, "pickup_volume", historyStart, dateRange.end),
       fetchRealtimeHistory(supabase, dateRange.end),
+      fetchReturnOverdue(),
     ]);
     const results = [riders, activity, delivery, pickup, realtime];
     const firstError = results.find((result) => result.error)?.error;
     if (firstError) setError(firstError.message ?? "Không thể tải dữ liệu dashboard");
     else {
-      setState({ riders: (riders.data ?? []) as Rider[], activity: (activity.data ?? []) as ActivityLog[], delivery: (delivery.data ?? []) as VolumeRow[], pickup: (pickup.data ?? []) as VolumeRow[], realtime: (realtime.data ?? []) as RealtimeRow[] });
+      setState({ riders: (riders.data ?? []) as Rider[], activity: (activity.data ?? []) as ActivityLog[], delivery: (delivery.data ?? []) as VolumeRow[], pickup: (pickup.data ?? []) as VolumeRow[], realtime: (realtime.data ?? []) as RealtimeRow[], returnOverdue: returnOverdue.data ?? emptyReturnOverdue });
+      if (returnOverdue.error) setError(`Không thể tải cảnh báo đơn trả quá hạn: ${returnOverdue.error.message}`);
       setLastUpdated(new Date());
     }
     setLoading(false);
@@ -104,9 +110,14 @@ export function DashboardView() {
       </div>
     </section>
 
+    <section aria-labelledby="return-overdue" className="space-y-3">
+      <DashboardSectionHeading id="return-overdue" index="02" title="Cảnh báo đơn trả quá 2 ngày" description="Tính đủ 48 giờ từ lúc rider bắt đầu giữ đơn; loại các đơn đã quét bàn giao trả." />
+      <ReturnOverdueCard data={state.returnOverdue} loading={loading} />
+    </section>
+
     <section aria-labelledby="volume-trend" className="space-y-3">
       <div className="dashboard-section-row">
-        <DashboardSectionHeading id="volume-trend" index="02" title="Volume trend" description="Chỉ gồm các dòng có area KV5/KV6 hoặc quận thuộc phạm vi vận hành." />
+        <DashboardSectionHeading id="volume-trend" index="03" title="Volume trend" description="Chỉ gồm các dòng có area KV5/KV6 hoặc quận thuộc phạm vi vận hành." />
         <div className="dashboard-chart-filters"><Select value={volumeMode} onChange={(event) => setVolumeMode(event.target.value as VolumeMode)} aria-label="Chế độ volume"><option value="all">Delivery + Pickup</option><option value="delivery">Delivery</option><option value="pickup">Pickup</option></Select><Select value={volumeGrouping} onChange={(event) => setVolumeGrouping(event.target.value as VolumeGrouping)} aria-label="Nhóm volume"><option value="week">Theo tuần</option><option value="month">Theo tháng</option></Select></div>
       </div>
       <div className="grid grid-cols-12 gap-3">
@@ -116,12 +127,12 @@ export function DashboardView() {
     </section>
 
     <section aria-labelledby="district-average" className="space-y-3">
-      <DashboardSectionHeading id="district-average" index="03" title="Monthly daily average by district" description="Tổng volume trong tháng chia cho số ngày thực tế có dữ liệu, tách riêng Delivery và Pickup." />
+      <DashboardSectionHeading id="district-average" index="04" title="Monthly daily average by district" description="Tổng volume trong tháng chia cho số ngày thực tế có dữ liệu, tách riêng Delivery và Pickup." />
       <div className="grid gap-3 lg:grid-cols-2"><DistrictDonutCard title="Delivery average" icon={Truck} data={districtAverages.delivery} loading={loading} /><DistrictDonutCard title="Pickup average" icon={PackageOpen} data={districtAverages.pickup} loading={loading} /></div>
     </section>
 
     <section aria-labelledby="failed-ranking" className="space-y-3">
-      <DashboardSectionHeading id="failed-ranking" index="04" title="Top rider Failed (On Hold)" description="Xếp hạng rider KV5/KV6 theo số đơn Failed; mỗi ngày chỉ lấy snapshot cuối ngày để không đếm trùng." />
+      <DashboardSectionHeading id="failed-ranking" index="05" title="Top rider Failed (On Hold)" description="Xếp hạng rider KV5/KV6 theo số đơn Failed; mỗi ngày chỉ lấy snapshot cuối ngày để không đếm trùng." />
       <div className="grid gap-3 lg:grid-cols-2"><FailedLeaderboard title="Selected day" subtitle={formatDate(dateRange.end)} rows={failedLeaders.day} loading={loading} /><FailedLeaderboard title="Last 7 days" subtitle={`${formatDate(shiftDate(dateRange.end, -6))}–${formatDate(dateRange.end)}`} rows={failedLeaders.week} loading={loading} /></div>
     </section>
 
@@ -184,6 +195,19 @@ async function fetchRealtimeHistory(supabase: ReturnType<typeof createClient>, e
   return { data: dailyResults.flatMap((result) => result.data), error };
 }
 
+async function fetchReturnOverdue(): Promise<{ data: ReturnOverdueState | null; error: { message: string } | null }> {
+  try {
+    const response = await fetch("/api/dashboard/return-overdue", { cache: "no-store" });
+    const result = (await response.json().catch(() => null)) as { success?: boolean; error?: string; overdue?: ReturnOverdueState } | null;
+    if (!response.ok || !result?.success || !result.overdue) {
+      return { data: null, error: { message: result?.error ?? "Không thể tải thống kê đơn trả quá hạn" } };
+    }
+    return { data: result.overdue, error: null };
+  } catch (error) {
+    return { data: null, error: { message: error instanceof Error ? error.message : "Không thể tải thống kê đơn trả quá hạn" } };
+  }
+}
+
 export const KpiCard = memo(function KpiCard({ href, icon: Icon, label, value, context, tone, loading, className }: { href: string; icon: typeof Activity; label: string; value: number | string; context: string; tone: "blue" | "green" | "red" | "slate"; loading: boolean; className?: string }) { return <Link href={href} className={cn("dashboard-kpi-card", `is-${tone}`, className)}><div className="dashboard-kpi-heading"><p>{label}</p><Icon size={17} /></div><p className="dashboard-kpi-value">{loading ? "—" : typeof value === "number" ? value.toLocaleString("vi-VN") : value}</p><p className="dashboard-kpi-context">{context}</p></Link>; });
 
 function DashboardSectionHeading({ id, index, title, description }: { id: string; index: string; title: string; description: string }) {
@@ -222,6 +246,27 @@ function FailedLeaderboard({ title, subtitle, rows, loading }: { title: string; 
       {loading ? Array.from({ length: 5 }, (_, index) => <div key={index} className="dashboard-hold-row is-loading" />) : rows.map((row, index) => <Link href="/realtime-dashboard" key={row.riderCode} className="dashboard-hold-row"><span className="dashboard-hold-rank">{String(index + 1).padStart(2, "0")}</span><div className="min-w-0"><strong>{row.riderName}</strong><p><MapPin size={11} />{row.riderCode} · {row.district}</p></div><div className="dashboard-hold-value"><strong>{row.failed.toLocaleString("vi-VN")} Failed</strong><span>{row.assigned.toLocaleString("vi-VN")} assigned</span></div></Link>)}
       {!loading && rows.length === 0 ? <Empty text="Không có đơn Failed trong snapshot." /> : null}
     </div>
+  </article>;
+}
+
+function ReturnOverdueCard({ data, loading }: { data: ReturnOverdueState; loading: boolean }) {
+  return <article className={cn("dashboard-return-overdue", data.totalOrders > 0 && "has-overdue")}>
+    <header>
+      <div className="dashboard-card-title"><span><TimerOff size={17} /></span><div><h3>Rider chưa trả hàng sau 48 giờ</h3><p>Snapshot {data.snapshotAt ? formatDashboardDateTime(data.snapshotAt) : "chưa có dữ liệu"}</p></div></div>
+      <div className="dashboard-return-overdue-summary"><strong>{loading ? "—" : data.totalOrders.toLocaleString("vi-VN")}</strong><span>đơn quá hạn · {loading ? "—" : data.riders.length.toLocaleString("vi-VN")} rider</span></div>
+    </header>
+    <div className="dashboard-return-overdue-list">
+      {loading ? Array.from({ length: 3 }, (_, index) => <div key={index} className="dashboard-return-overdue-row is-loading" />) : data.riders.map((rider) => (
+        <Link key={rider.riderCode} href={`/return-orders?q=${encodeURIComponent(rider.riderCode)}&status=returning&sort=aging_desc&page=1&pageSize=50`} className="dashboard-return-overdue-row">
+          <span className="dashboard-return-overdue-icon"><UserRoundX size={17} /></span>
+          <div className="min-w-0"><strong>{rider.riderName || rider.riderCode}</strong><p>{rider.riderCode}{rider.kv ? ` · ${formatKv(rider.kv)}` : ""}{rider.cot ? ` · ${rider.cot}` : ""}</p></div>
+          <div className="dashboard-return-overdue-value"><strong>{rider.totalOrders.toLocaleString("vi-VN")} đơn</strong><span>Lâu nhất {formatOverdueHours(rider.oldestHours)}</span></div>
+          <ChevronRight size={15} aria-hidden="true" />
+        </Link>
+      ))}
+      {!loading && data.riders.length === 0 ? <Empty text="Không có rider giữ đơn trả quá 48 giờ trong snapshot mới nhất." /> : null}
+    </div>
+    {!loading && data.missingStartedAt > 0 ? <p className="dashboard-return-overdue-missing"><CircleAlert size={14} />{data.missingStartedAt.toLocaleString("vi-VN")} đơn đang trả thiếu mốc delivering_time nên chưa thể đánh giá quá hạn.</p> : null}
   </article>;
 }
 
@@ -332,7 +377,7 @@ function buildFailedLeaders(state: DashboardState, endDate: string) {
   return { day: rank(eligible.filter((row) => row.work_date.slice(0, 10) === endDate)), week: rank(eligible) };
 }
 
-function buildAlerts(_state: DashboardState, summary: ReturnType<typeof buildSummary>) { const alerts: Array<{ title: string; description: string; severity: "critical" | "warning"; href: string }> = []; if (summary.failed > 0) alerts.push({ title: `${summary.failed} Failed deliveries`, description: "Kiểm tra rider và quận trong snapshot KV5/KV6 mới nhất.", severity: "critical", href: "/realtime-dashboard" }); if (summary.idleRiders > 0) alerts.push({ title: `${summary.idleRiders} riders idle trên 1 giờ`, description: "Rider vẫn còn đơn Delivering nhưng không có tiến triển.", severity: "critical", href: "/realtime-dashboard" }); return alerts; }
+function buildAlerts(state: DashboardState, summary: ReturnType<typeof buildSummary>) { const alerts: Array<{ title: string; description: string; severity: "critical" | "warning"; href: string }> = []; if (state.returnOverdue.totalOrders > 0) alerts.push({ title: `${state.returnOverdue.totalOrders} đơn trả quá 48 giờ`, description: `${state.returnOverdue.riders.length} rider đang giữ đơn nhưng chưa quét bàn giao trả.`, severity: "critical", href: "/return-orders?status=returning&sort=aging_desc&page=1&pageSize=50" }); if (state.returnOverdue.missingStartedAt > 0) alerts.push({ title: `${state.returnOverdue.missingStartedAt} đơn trả thiếu mốc thời gian`, description: "Chưa thể xác định các đơn này có vượt 48 giờ hay không.", severity: "warning", href: "/return-orders?status=returning&page=1&pageSize=50" }); if (summary.failed > 0) alerts.push({ title: `${summary.failed} Failed deliveries`, description: "Kiểm tra rider và quận trong snapshot KV5/KV6 mới nhất.", severity: "critical", href: "/realtime-dashboard" }); if (summary.idleRiders > 0) alerts.push({ title: `${summary.idleRiders} riders idle trên 1 giờ`, description: "Rider vẫn còn đơn Delivering nhưng không có tiến triển.", severity: "critical", href: "/realtime-dashboard" }); return alerts; }
 function normalizeRiderCode(value: string) { return value.trim().toUpperCase(); }
 function isKv56(value: string | null | undefined) { return /^(?:(?:kv|khu).*?)?[56]$/i.test(normalizeText(value ?? "").replace(/\s+/g, " ")); }
 function normalizeText(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim(); }
@@ -351,3 +396,6 @@ function isoWeekKey(value: string) { const date = new Date(`${value}T00:00:00Z`)
 function startOfIsoWeek(value: string) { const date = new Date(`${value}T00:00:00Z`); const day = date.getUTCDay() || 7; date.setUTCDate(date.getUTCDate() - day + 1); return date.toISOString().slice(0, 10); }
 function shiftDate(value: string, days: number) { const date = new Date(`${value}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); }
 function todayInVietnamDate() { return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
+function formatOverdueHours(hours: number) { const days = Math.floor(hours / 24); const remainingHours = hours % 24; return remainingHours ? `${days} ngày ${remainingHours} giờ` : `${days} ngày`; }
+function formatKv(value: string) { const number = value.match(/\d+/)?.[0]; return number ? `KV${number}` : value; }
+function formatDashboardDateTime(value: string) { return new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Ho_Chi_Minh" }).format(new Date(value)); }
