@@ -18,6 +18,10 @@ const chatRequestSchema = z.object({
     .max(20),
   includeData: z.boolean().optional().default(true),
   pagePath: z.string().trim().min(1).max(300).regex(/^\//).optional().default("/dashboard"),
+  aiConfig: z.object({
+    baseUrl: z.string().trim().max(500).optional().default(""),
+    model: z.string().trim().min(1).max(120).optional().default("qwen3:4b-instruct"),
+  }).optional(),
 });
 
 const SYSTEM_PROMPT = `Bạn là trợ lý AI nội bộ của Rider Operations KV5 + KV6.
@@ -43,8 +47,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "Nội dung trò chuyện không hợp lệ." }, { status: 400 });
   }
 
-  const baseUrl = (process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/$/, "");
-  const model = process.env.OLLAMA_CHAT_MODEL ?? "qwen3:4b-instruct";
+  const configuredUrl = parsed.data.aiConfig?.baseUrl || process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
+  const baseUrl = normalizeAiUrl(configuredUrl);
+  if (!baseUrl) return NextResponse.json({ success: false, error: "URL máy chủ AI không hợp lệ." }, { status: 400 });
+  const model = parsed.data.aiConfig?.model || process.env.OLLAMA_CHAT_MODEL || "qwen3:4b-instruct";
 
   try {
     const admin = createAdminClient();
@@ -138,5 +144,15 @@ export async function POST(request: Request) {
       },
       { status: 503 },
     );
+  }
+}
+
+function normalizeAiUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return null;
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return null;
   }
 }

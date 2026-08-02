@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Bot, Database, LoaderCircle, RotateCcw, Send, Sparkles, X } from "lucide-react";
 import { cn } from "@/utils/cn";
+import { useBrowserAiConfig } from "@/lib/ai/browser-config";
 
 type ChatRole = "user" | "assistant";
 type ChatMessage = {
@@ -37,6 +38,7 @@ export function OllamaChatbox() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [includeData, setIncludeData] = useState(true);
+  const aiConfig = useBrowserAiConfig();
 
   useEffect(() => {
     if (!open) return;
@@ -91,6 +93,7 @@ export function OllamaChatbox() {
           messages: conversation.map(({ role, content: value }) => ({ role, content: value })),
           includeData,
           pagePath: `${window.location.pathname}${window.location.search}`,
+          aiConfig,
         }),
         signal: controller.signal,
       });
@@ -172,7 +175,7 @@ export function OllamaChatbox() {
               <h2 id="ollama-chat-title" className="mt-1 flex items-center gap-2 text-base font-semibold leading-6">
                 <Bot size={18} aria-hidden="true" /> Rider Ops AI
               </h2>
-              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Qwen3 4B · dữ liệu không rời máy chủ Ollama</p>
+              <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{aiConfig.model} · {aiConfig.baseUrl ? "máy chủ tùy chỉnh" : "máy chủ mặc định"}</p>
             </div>
             <div className="flex shrink-0 items-center gap-1">
               <button type="button" onClick={resetChat} className="grid size-9 place-items-center rounded-full text-slate-500 outline-none transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-emerald-500 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white" aria-label="Tạo cuộc trò chuyện mới" title="Tạo cuộc trò chuyện mới">
