@@ -11,6 +11,7 @@ import { AppLoadingOverlay } from "@/components/layout/app-loading-overlay";
 import { NavigationPendingIndicator } from "@/components/layout/navigation-pending-indicator";
 import { RouteReveal } from "@/components/layout/route-reveal";
 import { QuickNoteButton } from "@/components/notes/quick-note-button";
+import { OllamaChatbox } from "@/components/ai/ollama-chatbox";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
@@ -207,6 +208,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
         </button>
       </nav>
       <AppLoadingOverlay />
+      <OllamaChatbox />
       <QuickNoteButton />
     </div>
   );
