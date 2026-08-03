@@ -51,6 +51,7 @@ export async function POST(request: Request) {
   if (!apiKey) return NextResponse.json({ success: false, error: "Chưa cấu hình SHOPAIKEY_API_KEY trên máy chủ." }, { status: 503 });
   const baseUrl = (process.env.SHOPAIKEY_BASE_URL ?? "https://api.shopaikey.com/v1").replace(/\/$/, "");
   const model = process.env.SHOPAIKEY_MODEL || parsed.data.aiConfig?.model || "gpt-4.1-mini";
+  const maxTokens = getMaxTokens();
 
   try {
     const admin = createAdminClient();
@@ -100,7 +101,7 @@ export async function POST(request: Request) {
           ...parsed.data.messages,
         ],
         temperature: 0.2,
-        max_tokens: 96,
+        max_tokens: maxTokens,
       }),
       cache: "no-store",
       signal: AbortSignal.timeout(parsed.data.includeData ? 180_000 : 90_000),
@@ -196,4 +197,10 @@ function getProviderError(detail: string) {
   } catch {
     return detail.trim().slice(0, 300) || null;
   }
+}
+
+function getMaxTokens() {
+  const parsed = Number.parseInt(process.env.SHOPAIKEY_MAX_TOKENS ?? "", 10);
+  if (!Number.isFinite(parsed)) return 768;
+  return Math.min(Math.max(parsed, 16), 4096);
 }
