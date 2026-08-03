@@ -47,10 +47,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "Nội dung trò chuyện không hợp lệ." }, { status: 400 });
   }
 
-  const configuredUrl = parsed.data.aiConfig?.baseUrl || process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
-  const baseUrl = normalizeAiUrl(configuredUrl);
-  if (!baseUrl) return NextResponse.json({ success: false, error: "URL máy chủ AI không hợp lệ." }, { status: 400 });
-  const model = parsed.data.aiConfig?.model || process.env.OLLAMA_CHAT_MODEL || "qwen3:4b-instruct";
+  const apiKey = process.env.SHOPAIKEY_API_KEY;
+  if (!apiKey) return NextResponse.json({ success: false, error: "Chưa cấu hình SHOPAIKEY_API_KEY trên máy chủ." }, { status: 503 });
+  const baseUrl = (process.env.SHOPAIKEY_BASE_URL ?? "https://api.shopaikey.com/v1").replace(/\/$/, "");
+  const model = process.env.SHOPAIKEY_MODEL || parsed.data.aiConfig?.model || "gpt-4.1-mini";
 
   try {
     const admin = createAdminClient();
@@ -84,24 +84,23 @@ export async function POST(request: Request) {
       void auditError;
     }
 
-    const upstream = await fetch(`${baseUrl}/api/chat`, {
+    const upstream = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({
         model,
         stream: true,
-        think: false,
-        keep_alive: "10m",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           ...(contextMessage ? [contextMessage] : []),
           ...parsed.data.messages,
         ],
-        options: {
-          temperature: 0.2,
-          num_ctx: 4096,
-          num_predict: 96,
-        },
+        temperature: 0.2,
+        max_tokens: 96,
       }),
       cache: "no-store",
       signal: AbortSignal.timeout(parsed.data.includeData ? 180_000 : 90_000),
@@ -109,18 +108,17 @@ export async function POST(request: Request) {
 
     if (!upstream.ok || !upstream.body) {
       const detail = await upstream.text().catch(() => "");
+      const providerError = getProviderError(detail);
       return NextResponse.json(
         {
           success: false,
-          error: detail.includes("not found")
-            ? `Model ${model} chưa có trên máy chạy Ollama.`
-            : "Ollama không thể xử lý yêu cầu lúc này.",
+          error: providerError ?? "ShopAIKey không thể xử lý yêu cầu lúc này.",
         },
         { status: 502 },
       );
     }
 
-    return new Response(upstream.body, {
+    return new Response(toNdjsonStream(upstream.body), {
       status: 200,
       headers: {
         "Content-Type": "application/x-ndjson; charset=utf-8",
@@ -140,19 +138,62 @@ export async function POST(request: Request) {
         success: false,
         error: timedOut
           ? "AI phản hồi quá lâu. Vui lòng thử câu hỏi ngắn hơn."
-          : "Không kết nối được Ollama. Hãy kiểm tra Ollama đang chạy trên máy chủ ứng dụng.",
+          : "Không kết nối được ShopAIKey. Hãy kiểm tra API key và số dư.",
       },
       { status: 503 },
     );
   }
 }
 
-function normalizeAiUrl(value: string) {
+function toNdjsonStream(body: ReadableStream<Uint8Array>) {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = "";
+  let finished = false;
+  const reader = body.getReader();
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (finished) return;
+      try {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const data = line.trim().replace(/^data:\s*/, "");
+          if (!data) continue;
+          if (data === "[DONE]") {
+            finished = true;
+            controller.close();
+            void reader.cancel();
+            return;
+          }
+          const chunk = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> };
+          const content = chunk.choices?.[0]?.delta?.content;
+          if (content) controller.enqueue(encoder.encode(`${JSON.stringify({ message: { role: "assistant", content } })}\n`));
+        }
+        if (done) {
+          finished = true;
+          controller.close();
+        }
+      } catch (error) {
+        finished = true;
+        controller.error(error);
+      }
+    },
+    cancel() {
+      finished = true;
+      void reader.cancel();
+    },
+  });
+}
+
+function getProviderError(detail: string) {
   try {
-    const url = new URL(value);
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return null;
-    return url.toString().replace(/\/$/, "");
+    const payload = JSON.parse(detail) as { error?: { message?: string } };
+    return payload.error?.message?.trim() || null;
   } catch {
-    return null;
+    return detail.trim().slice(0, 300) || null;
   }
 }

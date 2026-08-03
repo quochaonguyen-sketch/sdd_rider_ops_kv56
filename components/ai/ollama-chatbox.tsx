@@ -170,7 +170,7 @@ export function OllamaChatbox() {
           <header className="flex items-start justify-between gap-4 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
             <div className="min-w-0">
               <p className="flex items-center gap-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">
-                <span className="size-2 rounded-full bg-emerald-500" aria-hidden="true" /> Local LLM
+                <span className="size-2 rounded-full bg-emerald-500" aria-hidden="true" /> ShopAIKey API
               </p>
               <h2 id="ollama-chat-title" className="mt-1 flex items-center gap-2 text-base font-semibold leading-6">
                 <Bot size={18} aria-hidden="true" /> Rider Ops AI

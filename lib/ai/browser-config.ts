@@ -12,7 +12,7 @@ export type BrowserAiConfig = {
 
 export const DEFAULT_BROWSER_AI_CONFIG: BrowserAiConfig = {
   baseUrl: "",
-  model: "qwen3:4b-instruct",
+  model: "gpt-4.1-mini",
 };
 
 export function readBrowserAiConfig(): BrowserAiConfig {
