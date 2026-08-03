@@ -37,7 +37,7 @@ export function OllamaChatbox() {
   const [messages, setMessages] = useState<ChatMessage[]>([greeting]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [includeData, setIncludeData] = useState(true);
+  const [includeData, setIncludeData] = useState(false);
   const aiConfig = useBrowserAiConfig();
 
   useEffect(() => {
@@ -249,9 +249,10 @@ export function OllamaChatbox() {
         aria-controls="ollama-chat-panel"
         title="Rider Ops AI"
         onClick={() => setOpen((current) => !current)}
-        className="group relative grid size-14 place-items-center rounded-2xl border border-emerald-400/50 bg-emerald-600 text-white shadow-[0_16px_40px_rgba(5,150,105,0.28)] outline-none transition-[background-color,box-shadow,transform] duration-150 hover:-translate-y-0.5 hover:bg-emerald-700 active:translate-y-px focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 dark:border-emerald-400/50 dark:bg-emerald-500 dark:text-slate-950 dark:hover:bg-emerald-400 dark:focus-visible:ring-offset-slate-950"
+        className="group relative inline-flex h-12 items-center gap-2 rounded-2xl border border-emerald-400/50 bg-emerald-600 px-4 text-sm font-semibold text-white shadow-[0_16px_40px_rgba(5,150,105,0.28)] outline-none transition-[background-color,box-shadow,transform] duration-150 hover:-translate-y-0.5 hover:bg-emerald-700 active:translate-y-px focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 dark:border-emerald-400/50 dark:bg-emerald-500 dark:text-slate-950 dark:hover:bg-emerald-400 dark:focus-visible:ring-offset-slate-950"
       >
         {open ? <X size={22} aria-hidden="true" /> : <Sparkles size={22} aria-hidden="true" />}
+        <span>{open ? "Đóng AI" : "Bật AI"}</span>
         <span className="absolute -right-1 -top-1 size-3 rounded-full bg-emerald-300 ring-2 ring-white dark:ring-slate-950" aria-hidden="true" />
         <span className="sr-only">{open ? "Đóng Rider Ops AI" : "Mở Rider Ops AI"}</span>
       </button>

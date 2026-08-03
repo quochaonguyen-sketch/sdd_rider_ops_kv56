@@ -16,7 +16,7 @@ const chatRequestSchema = z.object({
     )
     .min(1)
     .max(20),
-  includeData: z.boolean().optional().default(true),
+  includeData: z.boolean().optional().default(false),
   pagePath: z.string().trim().min(1).max(300).regex(/^\//).optional().default("/dashboard"),
   aiConfig: z.object({
     baseUrl: z.string().trim().max(500).optional().default(""),
@@ -104,7 +104,7 @@ export async function POST(request: Request) {
         },
       }),
       cache: "no-store",
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(parsed.data.includeData ? 180_000 : 90_000),
     });
 
     if (!upstream.ok || !upstream.body) {
