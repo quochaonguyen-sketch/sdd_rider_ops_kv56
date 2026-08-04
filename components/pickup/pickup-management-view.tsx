@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { Check, ChevronDown, Download, ListChecks, RefreshCcw, Search, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
@@ -10,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/utils/cn";
 import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
-type PickupAssignment = {
+export type PickupAssignment = {
   id: string;
   assignment_key: string;
   assigned_at: string | null;
@@ -36,6 +37,15 @@ type RouteSummary = {
 const PAGE_SIZE = 1000;
 const ROW_PAGE_SIZE = 80;
 const ACCENT = "#f97316";
+
+const PickupZoneMap = dynamic(
+  () => import("@/components/pickup/pickup-zone-map").then((module) => module.PickupZoneMap),
+  { ssr: false, loading: () => <div className="h-[520px] animate-pulse rounded-xl bg-slate-100" /> },
+);
+const PickupGovapZoneTest = dynamic(
+  () => import("@/components/pickup/pickup-govap-zone-test").then((module) => module.PickupGovapZoneTest),
+  { ssr: false, loading: () => <div className="h-[560px] animate-pulse rounded-xl bg-slate-100" /> },
+);
 
 export function PickupManagementView() {
   const [rows, setRows] = useState<PickupAssignment[]>([]);
@@ -205,6 +215,18 @@ export function PickupManagementView() {
         <MetricCard label="Dang hien thi" value={selectedRows.length} loading={loading} />
         <MetricCard label="Chua co tuyen" value={rows.filter((row) => routeName(row.route_name) === "Chua co tuyen").length} loading={loading} />
       </div>
+
+      <PickupZoneMap
+        rows={selectedRows}
+        allRows={rows}
+        selectedRoute={selectedRoute}
+        onSelectRoute={(route) => {
+          setSelectedRoute(route);
+          setCurrentPage(1);
+        }}
+      />
+
+      <PickupGovapZoneTest />
 
       <Card className="space-y-4">
         <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide" style={{ color: ACCENT }}>
@@ -505,11 +527,11 @@ function summarizeRoutes(rows: PickupAssignment[]): RouteSummary[] {
   })).sort((a, b) => b.count - a.count || a.route.localeCompare(b.route, "vi", { numeric: true }));
 }
 
-function routeName(value: string | null | undefined) {
+export function routeName(value: string | null | undefined) {
   return value?.trim() || "Chua co tuyen";
 }
 
-function pickupCode(row: PickupAssignment) {
+export function pickupCode(row: PickupAssignment) {
   return row.pup_code?.trim() || row.pickup_point_id?.trim() || "-";
 }
 
