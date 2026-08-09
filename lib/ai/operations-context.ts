@@ -50,6 +50,7 @@ export type AiOperationsContext = {
 };
 
 const offStatuses = new Set(["OFF_WEEKLY", "OFF_APPROVED", "OFF_UNEXPECTED"]);
+const OFF_DETAIL_LIMIT = 100;
 
 export async function loadAiOperationsContext({
   admin,
@@ -123,19 +124,34 @@ export async function loadAiOperationsContext({
     .slice(0, 5)
     .map((rider) => riderDetail(rider, realtimeByCode.get(rider.rider_code) ?? null));
 
-  const offRiders = attendance
+  const allOffRiders = attendance
     .filter((row) => offStatuses.has(row.status))
-    .map((row) => (row.rider_id ? riderById.get(row.rider_id) : undefined) ?? riderByCode.get(row.rider_code))
-    .filter((rider): rider is RiderRow => Boolean(rider))
-    .slice(0, 10)
-    .map((rider) => ({
-      rider_code: rider.rider_code,
-      full_name: rider.full_name,
-      cot: rider.cot,
-      district: rider.delivery_district ?? rider.pickup_district,
-      ward: rider.delivery_ward ?? rider.pickup_ward,
-      off_status: attendance.find((row) => row.rider_id === rider.id || row.rider_code === rider.rider_code)?.status ?? null,
-    }));
+    .map((attendanceRow) => {
+      const rider =
+        (attendanceRow.rider_id ? riderById.get(attendanceRow.rider_id) : undefined) ??
+        riderByCode.get(attendanceRow.rider_code);
+      if (!rider || rider.status !== "active") return null;
+      const area = operatingArea(rider);
+      return {
+        rider_code: rider.rider_code,
+        full_name: rider.full_name,
+        cot: rider.cot,
+        district: area.district,
+        ward: area.ward,
+        area_source: area.source,
+        off_status: attendanceRow.status,
+      };
+    })
+    .filter((rider): rider is NonNullable<typeof rider> => rider !== null);
+  const requestedOffScope = resolveOffScope(questionNormalized, riders);
+  const scopedOffRiders = allOffRiders
+    .filter((rider) => matchesOffScope(rider, requestedOffScope))
+    .sort(
+      (a, b) =>
+        (a.ward ?? "").localeCompare(b.ward ?? "", "vi") ||
+        a.rider_code.localeCompare(b.rider_code, "vi"),
+    );
+  const offRiders = scopedOffRiders.slice(0, OFF_DETAIL_LIMIT);
 
   const realtimeTotals = realtime.reduce(
     (total, row) => ({
@@ -174,9 +190,14 @@ export async function loadAiOperationsContext({
     },
     attendance: {
       status_counts: countBy(attendance, (row) => row.status),
-      off_rider_count: attendance.filter((row) => offStatuses.has(row.status)).length,
-      off_riders_sample: offRiders,
-      off_riders_truncated: attendance.filter((row) => offStatuses.has(row.status)).length > offRiders.length,
+      active_off_rider_count: allOffRiders.length,
+      requested_scope: requestedOffScope,
+      scoped_off_rider_count: scopedOffRiders.length,
+      off_riders: offRiders,
+      off_riders_returned: offRiders.length,
+      off_riders_truncated: scopedOffRiders.length > offRiders.length,
+      included_off_statuses: Array.from(offStatuses),
+      definition: "Chỉ tính rider active. COT1 ưu tiên khu vực pickup; COT khác ưu tiên khu vực delivery và chỉ fallback khi thiếu.",
     },
     realtime_delivery: {
       snapshot_id: latestSnapshot?.snapshot_id ?? null,
@@ -205,10 +226,80 @@ export async function loadAiOperationsContext({
     generated_at: new Date().toISOString(),
     work_date: workDate,
     page_path: pagePath,
-    scope_note: "Dữ liệu theo work_date; realtime chỉ dùng snapshot_id mới nhất. Danh sách chi tiết đã giới hạn, còn aggregate được tính trên toàn bộ dòng tải về.",
+    scope_note: `Dữ liệu theo work_date; realtime chỉ dùng snapshot_id mới nhất. Danh sách OFF được lọc theo quận/COT nhắc trong câu hỏi trước khi giới hạn ${OFF_DETAIL_LIMIT} dòng. Chỉ gọi danh sách là đầy đủ khi off_riders_truncated=false.`,
     sources,
     data,
   };
+}
+
+type OffScope = {
+  district: string | null;
+  cot: string | null;
+};
+
+function operatingArea(rider: RiderRow) {
+  if (isCotOne(rider.cot)) {
+    return {
+      district: rider.pickup_district ?? rider.delivery_district,
+      ward: rider.pickup_ward ?? rider.delivery_ward,
+      source: rider.pickup_district || rider.pickup_ward ? "pickup" : "delivery_fallback",
+    };
+  }
+  return {
+    district: rider.delivery_district ?? rider.pickup_district,
+    ward: rider.delivery_ward ?? rider.pickup_ward,
+    source: rider.delivery_district || rider.delivery_ward ? "delivery" : "pickup_fallback",
+  };
+}
+
+function resolveOffScope(questionNormalized: string, riders: RiderRow[]): OffScope {
+  const cotNumber = questionNormalized.match(/\bcot\s*([12])\b/)?.[1] ?? null;
+  const mentionedDistricts = Array.from(
+    new Set(
+      riders
+        .flatMap((rider) => [rider.delivery_district, rider.pickup_district])
+        .filter((district): district is string => Boolean(district?.trim())),
+    ),
+  )
+    .filter((district) => questionMentionsDistrict(questionNormalized, district))
+    .sort((a, b) => normalizeSearch(b).length - normalizeSearch(a).length);
+
+  return {
+    district: mentionedDistricts[0] ?? null,
+    cot: cotNumber ? `COT${cotNumber}` : null,
+  };
+}
+
+function questionMentionsDistrict(questionNormalized: string, district: string) {
+  const normalizedDistrict = normalizeSearch(district);
+  const districtNumber = normalizedDistrict.match(/^(?:quan|q)\s*0*(\d{1,2})$/)?.[1];
+  if (districtNumber) {
+    return new RegExp(`\\b(?:quan|q)\\s*0*${districtNumber}\\b`).test(questionNormalized);
+  }
+  return normalizedDistrict.length >= 3 && questionNormalized.includes(normalizedDistrict);
+}
+
+function matchesOffScope(
+  rider: { district: string | null; cot: string | null },
+  scope: OffScope,
+) {
+  const districtMatches = !scope.district || normalizeDistrict(rider.district) === normalizeDistrict(scope.district);
+  const cotMatches = !scope.cot || normalizeCot(rider.cot) === normalizeCot(scope.cot);
+  return districtMatches && cotMatches;
+}
+
+function normalizeDistrict(value: string | null | undefined) {
+  const normalized = normalizeSearch(value).replace(/[^a-z0-9]/g, "");
+  const districtNumber = normalized.match(/^(?:quan|q)0*(\d{1,2})$/)?.[1];
+  return districtNumber ? `quan${Number(districtNumber)}` : normalized;
+}
+
+function normalizeCot(value: string | null | undefined) {
+  return normalizeSearch(value).replace(/[^a-z0-9]/g, "");
+}
+
+function isCotOne(value: string | null | undefined) {
+  return normalizeCot(value) === "cot1" || normalizeCot(value) === "1";
 }
 
 function riderDetail(rider: RiderRow, realtime: RealtimeRow | null) {

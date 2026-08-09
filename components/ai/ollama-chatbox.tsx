@@ -37,7 +37,7 @@ export function OllamaChatbox() {
   const [messages, setMessages] = useState<ChatMessage[]>([greeting]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [includeData, setIncludeData] = useState(false);
+  const [includeData, setIncludeData] = useState(true);
   const aiConfig = useBrowserAiConfig();
 
   useEffect(() => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, RefreshCcw, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileSpreadsheet, RefreshCcw, Search } from "lucide-react";
 import type { AttendanceLog, Rider } from "@/types";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -25,11 +25,23 @@ type ApiResponse = {
   can_edit?: boolean;
   replacements?: Replacement[];
   replacement?: Replacement;
+  sheet_sync?: {
+    success: boolean;
+    error?: string;
+    imported?: number;
+    skipped?: number;
+    verified?: boolean;
+  };
+  error?: string;
+};
+type RiderApiResponse = {
+  success: boolean;
+  riders?: Rider[];
   error?: string;
 };
 
 export function PickupReplacementView() {
-  const [riders, setRiders] = useState<Rider[]>([]);
+  const [activeRiders, setActiveRiders] = useState<Rider[]>([]);
   const [attendance, setAttendance] = useState<AttendanceLog[]>([]);
   const [replacements, setReplacements] = useState<Replacement[]>([]);
   const [rangeStart, setRangeStart] = useState(today());
@@ -43,7 +55,9 @@ export function PickupReplacementView() {
   const [loading, setLoading] = useState(true);
   useReportInitialDataLoading("pickup-replacement", loading);
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [syncingSheet, setSyncingSheet] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sheetStatus, setSheetStatus] = useState<{ success: boolean; message: string } | null>(null);
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, index) => shiftDate(rangeStart, index)),
     [rangeStart],
@@ -53,13 +67,8 @@ export function PickupReplacementView() {
     setLoading(true);
     setError(null);
     const client = createClient();
-    const [riderResult, attendanceResult, response] = await Promise.all([
-      client
-        .from("riders")
-        .select("*")
-        .eq("status", "active")
-        .order("cot")
-        .order("full_name"),
+    const [riderResponse, attendanceResult, response] = await Promise.all([
+      fetch("/api/riders", { cache: "no-store" }),
       client
         .from("attendance_logs")
         .select("*")
@@ -69,12 +78,23 @@ export function PickupReplacementView() {
         cache: "no-store",
       }),
     ]);
+    const riderResult = (await riderResponse.json().catch(() => null)) as RiderApiResponse | null;
     const result = (await response
       .json()
       .catch(() => null)) as ApiResponse | null;
-    if (riderResult.error) setError(riderResult.error.message);
-    else
-      setRiders(((riderResult.data ?? []) as Rider[]).filter(hasPickupRoute));
+    if (!riderResponse.ok || !riderResult?.success) {
+      setError(riderResult?.error ?? "Không thể tải danh sách rider active");
+    } else {
+      setActiveRiders(
+        (riderResult.riders ?? [])
+          .filter((rider) => rider.status === "active")
+          .sort(
+            (a, b) =>
+              (a.cot ?? "").localeCompare(b.cot ?? "", "vi", { numeric: true }) ||
+              (a.full_name ?? a.rider_code).localeCompare(b.full_name ?? b.rider_code, "vi"),
+          ),
+      );
+    }
     if (attendanceResult.error) setError(attendanceResult.error.message);
     else setAttendance((attendanceResult.data ?? []) as AttendanceLog[]);
     if (!response.ok || !result?.success)
@@ -82,6 +102,15 @@ export function PickupReplacementView() {
     else {
       setReplacements(result.replacements ?? []);
       setCanEdit(Boolean(result.can_edit));
+      setSheetStatus(result.sheet_sync?.success
+        ? {
+            success: true,
+            message: `Đã đọc ${result.sheet_sync.imported ?? 0} lịch pick thay từ Google Sheet auto_assign_pick${result.sheet_sync.skipped ? ` · bỏ qua ${result.sheet_sync.skipped} rider không còn active` : ""}.`,
+          }
+        : {
+            success: false,
+            message: `Supabase đã tải, nhưng Google Sheet chưa đồng bộ: ${result.sheet_sync?.error ?? "không rõ lỗi"}`,
+          });
     }
     setLoading(false);
   }, [rangeEnd, rangeStart]);
@@ -109,17 +138,21 @@ export function PickupReplacementView() {
       ),
     [attendance],
   );
+  const pickupRiders = useMemo(
+    () => activeRiders.filter(hasPickupRoute),
+    [activeRiders],
+  );
   const cots = useMemo(
-    () => unique(riders.map((rider) => rider.cot)),
-    [riders],
+    () => unique(pickupRiders.map((rider) => rider.cot)),
+    [pickupRiders],
   );
   const districts = useMemo(
-    () => unique(riders.map((rider) => rider.pickup_district)),
-    [riders],
+    () => unique(pickupRiders.map((rider) => rider.pickup_district)),
+    [pickupRiders],
   );
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return riders
+    return pickupRiders
       .filter((rider) =>
         (!q ||
           `${rider.rider_code} ${rider.full_name} ${rider.pickup_district} ${rider.pickup_ward} ${rider.point_name}`
@@ -137,16 +170,17 @@ export function PickupReplacementView() {
         || (a.point_name ?? "").localeCompare(b.point_name ?? "", "vi", { numeric: true })
         || a.rider_code.localeCompare(b.rider_code, "vi", { numeric: true }),
       );
-  }, [attendanceMap, cot, district, offFilterDate, offOnly, query, riders]);
+  }, [attendanceMap, cot, district, offFilterDate, offOnly, pickupRiders, query]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / 30));
   const safePage = Math.min(page, pageCount);
   const visibleRiders = filtered.slice((safePage - 1) * 30, safePage * 30);
   async function update(rider: Rider, date: string, value: string) {
-    const replacement = riders.find((item) => item.id === value);
+    const replacement = activeRiders.find((item) => item.id === value);
     const missing = value === "__missing__";
     if (!missing && !replacement) return;
     const key = `${rider.rider_code}:${date}`;
     setSavingKey(key);
+    setError(null);
     const response = await fetch("/api/pickup-replacements", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -173,6 +207,25 @@ export function PickupReplacementView() {
       ),
       result.replacement!,
     ]);
+    if (!result.sheet_sync?.success) {
+      setSheetStatus({
+        success: false,
+        message: `Web đã lưu nhưng Google Sheet chưa đồng bộ: ${result.sheet_sync?.error ?? "không rõ lỗi"}`,
+      });
+    } else {
+      setSheetStatus({
+        success: true,
+        message: "Đã đồng bộ và kiểm tra ID pick thay trên Google Sheet auto_assign_pick.",
+      });
+    }
+  }
+  async function syncGoogleSheet() {
+    setSyncingSheet(true);
+    try {
+      await load();
+    } finally {
+      setSyncingSheet(false);
+    }
   }
   return (
     <div className="space-y-5">
@@ -185,7 +238,7 @@ export function PickupReplacementView() {
             Lịch thế pick
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Phân rider thay theo từng ngày, khu vực và điểm pick.
+            Phân rider thay theo từng ngày; mọi thay đổi tự động đồng bộ sang Google Sheet.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -234,18 +287,26 @@ export function PickupReplacementView() {
           <Button
             type="button"
             variant="secondary"
-            className="size-10 p-0"
-            onClick={() => void load()}
+            disabled={loading || syncingSheet}
+            onClick={() => void syncGoogleSheet()}
           >
-            <RefreshCcw
-              size={16}
-              className={loading ? "animate-spin" : undefined}
-            />
+            {syncingSheet ? <RefreshCcw size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+            {syncingSheet ? "Đang đồng bộ..." : "Đồng bộ Google Sheet"}
           </Button>
         </div>
       </header>
       {error ? (
         <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>
+      ) : null}
+      {sheetStatus ? (
+        <p className={cn(
+          "rounded-lg border px-3 py-2 text-sm",
+          sheetStatus.success
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : "border-amber-200 bg-amber-50 text-amber-800",
+        )}>
+          {sheetStatus.message}
+        </p>
       ) : null}
       <section className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-2 xl:grid-cols-[1fr_150px_180px_210px_190px]">
         <label className="relative">
@@ -418,12 +479,8 @@ export function PickupReplacementView() {
                     const item = map.get(key);
                     const offLog = attendanceMap.get(`${normalize(rider.rider_code)}:${day}`);
                     const off = isPickupOff(offLog);
-                    const replacementCandidates = riders.filter(
-                      (candidate) =>
-                        candidate.id !== rider.id &&
-                        !isPickupOff(
-                          attendanceMap.get(`${normalize(candidate.rider_code)}:${day}`),
-                        ),
+                    const replacementCandidates = activeRiders.filter(
+                      (candidate) => candidate.id !== rider.id,
                     );
                     return (
                       <td
