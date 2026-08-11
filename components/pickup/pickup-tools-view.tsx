@@ -1,10 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ListChecks, Repeat2 } from "lucide-react";
 import { PickupManagementView } from "@/components/pickup/pickup-management-view";
 import { PickupReplacementView } from "@/components/pickup/pickup-replacement-view";
 import { cn } from "@/utils/cn";
+import styles from "./pickup-tools-view.module.css";
 
-export function PickupToolsView() { const [tab, setTab] = useState<"assignments" | "replacement">("assignments"); return <div className="space-y-5"><div className="inline-flex rounded-xl border border-slate-200 bg-white p-1"><Tab active={tab === "assignments"} onClick={() => setTab("assignments")} icon={<ListChecks size={16} />} label="Quản lý PUP" /><Tab active={tab === "replacement"} onClick={() => setTab("replacement")} icon={<Repeat2 size={16} />} label="Thế pick" /></div>{tab === "assignments" ? <PickupManagementView /> : <PickupReplacementView />}</div>; }
-function Tab({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) { return <button type="button" onClick={onClick} className={cn("flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition", active ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100")}>{icon}{label}</button>; }
+export function PickupToolsView() {
+  const searchParams = useSearchParams();
+  const view = searchParams.get("view") === "replacement" ? "replacement" : "assignments";
+
+  return (
+    <div className={styles.layout}>
+      <nav className={styles.mobileSwitcher} aria-label="Chức năng Pickup">
+        <ToolLink href="/pickup-management" active={view === "assignments"} icon={<ListChecks size={16} />} label="Quản lý PUP" />
+        <ToolLink href="/pickup-management?view=replacement" active={view === "replacement"} icon={<Repeat2 size={16} />} label="Thế pick" />
+      </nav>
+      {view === "assignments" ? <PickupManagementView /> : <PickupReplacementView />}
+    </div>
+  );
+}
+
+function ToolLink({ href, active, icon, label }: { href: string; active: boolean; icon: React.ReactNode; label: string }) {
+  return (
+    <Link href={href} scroll={false} aria-current={active ? "page" : undefined} className={cn(styles.toolLink, active && styles.activeToolLink)}>
+      {icon}
+      <span>{label}</span>
+    </Link>
+  );
+}

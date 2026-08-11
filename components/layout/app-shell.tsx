@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, ClipboardCheck, Columns2, ListChecks, ListTodo, LogOut, MapPinned, Menu, Moon, NotebookPen, PackageOpen, PackagePlus, PackageSearch, PanelLeftClose, PanelLeftOpen, PencilRuler, Sun, Truck, Upload, UsersRound, X } from "lucide-react";
+import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, ClipboardCheck, Columns2, ListChecks, ListTodo, LogOut, MapPinned, Menu, Moon, NotebookPen, PackageOpen, PackagePlus, PackageSearch, PanelLeftClose, PanelLeftOpen, PencilRuler, Repeat2, Sun, Truck, Upload, UsersRound, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/utils/cn";
 import { AppBrand, AppCopyright } from "@/components/layout/app-brand";
@@ -36,9 +36,12 @@ const volumeItems = [
   { href: "/volume/delivery", label: "Delivery", icon: Truck },
   { href: "/volume/pickup", label: "Pickup", icon: PackagePlus },
 ];
+const pickupItems = [
+  { href: "/pickup-management", view: null, label: "Quản lý PUP", icon: ListChecks },
+  { href: "/pickup-management?view=replacement", view: "replacement", label: "Thế pick", icon: Repeat2 },
+];
 const toolItems = [
   { href: "/zone-builder", label: "Zone Builder", icon: PencilRuler },
-  { href: "/pickup-management", label: "Pickup Management", icon: ListChecks },
 ];
 const memberHiddenItems = new Set(["/zone-builder", "/pickup-management"]);
 const morePaths = ["/notes", "/performance", "/attendance", "/off-schedule", "/morning-delivery", "/return-orders", "/zones", "/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"];
@@ -67,13 +70,22 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
   const [theme, setTheme] = useState<ThemeMode>("light");
   const memberToolRestricted = user.role === "member";
   const visibleToolItems = memberToolRestricted ? [] : toolItems;
-  const moreNavItems = [...volumeItems, ...navItems.slice(4).filter((item) => !memberToolRestricted || !memberHiddenItems.has(item.href))];
+  const visiblePickupItems = memberToolRestricted ? [] : pickupItems;
+  const moreNavItems = [
+    ...volumeItems,
+    ...navItems.slice(4).filter((item) => item.href !== "/pickup-management" && (!memberToolRestricted || !memberHiddenItems.has(item.href))),
+    ...visiblePickupItems,
+  ];
   const volumeActive = pathname.startsWith("/volume");
   const [volumeOpen, setVolumeOpen] = useState(volumeActive);
+  const pickupActive = pathname.startsWith("/pickup-management");
+  const [pickupOpen, setPickupOpen] = useState(pickupActive);
   const toolsActive = visibleToolItems.some((item) => pathname.startsWith(item.href));
   const [toolsOpen, setToolsOpen] = useState(toolsActive);
   const moreRouteActive = morePaths.some((path) => pathname.startsWith(path));
-  const currentPage = [...navItems, ...volumeItems].find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+  const currentPage = pickupActive
+    ? pickupItems.find((item) => item.view === searchParams.get("view")) ?? pickupItems[0]
+    : [...navItems, ...volumeItems].find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
   const splitItems = [...navItems.filter((item) => !memberToolRestricted || !memberHiddenItems.has(item.href)), ...volumeItems]
     .filter((item) => item.href !== pathname);
   const activeSplitRoute = splitRoute === pathname ? (splitItems[0]?.href ?? "/dashboard") : splitRoute;
@@ -131,6 +143,13 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
               return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-sub-link", active && "is-active")}><Icon size={15} aria-hidden="true" /><span>{item.label}</span><NavigationPendingIndicator /></Link>;
             })}
           </SidebarDisclosure>
+          {visiblePickupItems.length > 0 ? <SidebarDisclosure label="Pickup" icon={ListChecks} open={pickupOpen} active={pickupActive} onToggle={() => setPickupOpen((current) => !current)}>
+            {visiblePickupItems.map((item) => {
+              const active = isNavigationItemActive(item, pathname, searchParams.get("view"));
+              const Icon = item.icon;
+              return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-sub-link", active && "is-active")}><Icon size={15} aria-hidden="true" /><span>{item.label}</span><NavigationPendingIndicator /></Link>;
+            })}
+          </SidebarDisclosure> : null}
           {visibleToolItems.length > 0 ? <SidebarDisclosure label="Tools" icon={PencilRuler} open={toolsOpen} active={toolsActive} onToggle={() => setToolsOpen((current) => !current)}>
             {visibleToolItems.map((item) => {
               const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -161,6 +180,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
             </div>
           </div>
           <div className="app-header-account">
+            <OllamaChatbox />
             <button type="button" className={cn("app-split-toggle", splitOpen && "is-active")} aria-pressed={splitOpen} aria-label={splitOpen ? "Tắt chia màn hình" : "Chia màn hình"} title={splitOpen ? "Tắt chia màn hình" : "Chia màn hình"} onClick={() => setSplitOpen((current) => !current)}>
               <Columns2 size={17} aria-hidden="true" /><span>{splitOpen ? "Đóng chia màn hình" : "Chia màn hình"}</span>
             </button>
@@ -189,7 +209,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
         <div className="app-more-heading"><div><span>Navigation index</span><h2>Operations menu</h2></div><button type="button" aria-label="Đóng menu" onClick={() => setMoreOpen(false)}><X size={18} /></button></div>
         <div className="app-more-grid">
           {moreNavItems.map((item) => {
-            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const active = isNavigationItemActive(item, pathname, searchParams.get("view"));
             const Icon = item.icon;
             return <Link key={item.href} href={item.href} onClick={() => setMoreOpen(false)} aria-current={active ? "page" : undefined} className={cn("app-more-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span><NavigationPendingIndicator /></Link>;
           })}
@@ -208,10 +228,16 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
         </button>
       </nav>
       <AppLoadingOverlay />
-      <OllamaChatbox />
       <QuickNoteButton />
     </div>
   );
+}
+
+function isNavigationItemActive(item: { href: string; view?: string | null }, pathname: string, currentView: string | null) {
+  const itemPath = item.href.split("?")[0];
+  if (itemPath !== pathname && !pathname.startsWith(`${itemPath}/`)) return false;
+  if (itemPath !== "/pickup-management") return true;
+  return (item.view ?? null) === (currentView === "replacement" ? "replacement" : null);
 }
 
 function SidebarDisclosure({ label, icon: Icon, open, active, onToggle, children }: { label: string; icon: typeof PackageOpen; open: boolean; active: boolean; onToggle: () => void; children: React.ReactNode }) {

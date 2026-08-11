@@ -1,5 +1,12 @@
 [
   {
+    "date": "2026-08-11",
+    "macrostructure": "Map / Diagram",
+    "theme": "Cobalt adapted",
+    "enrichment": "none",
+    "brief": "Weekly pickup replacement matrix and searchable rider combobox"
+  },
+  {
     "date": "2026-07-27",
     "macrostructure": "Split Studio",
     "theme": "Cobalt",

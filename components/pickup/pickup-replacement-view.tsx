@@ -1,14 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, FileSpreadsheet, RefreshCcw, Search } from "lucide-react";
+import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import {
+  CalendarDays,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  FileSpreadsheet,
+  LoaderCircle,
+  RefreshCcw,
+  Search,
+  UserRoundX,
+} from "lucide-react";
 import type { AttendanceLog, Rider } from "@/types";
 import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { cn } from "@/utils/cn";
 import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
+import styles from "./pickup-replacement-view.module.css";
 
 type Replacement = {
   id: string;
@@ -177,46 +189,42 @@ export function PickupReplacementView() {
   async function update(rider: Rider, date: string, value: string) {
     const replacement = activeRiders.find((item) => item.id === value);
     const missing = value === "__missing__";
-    if (!missing && !replacement) return;
+    if (!missing && !replacement) return false;
     const key = `${rider.rider_code}:${date}`;
     setSavingKey(key);
     setError(null);
-    const response = await fetch("/api/pickup-replacements", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        rider_id: rider.id,
-        rider_code: rider.rider_code,
-        work_date: date,
-        replacement_rider_id: replacement?.id ?? null,
-        replacement_rider_code: replacement?.rider_code ?? null,
-        status: missing ? "MISSING" : "ASSIGNED",
-        note: missing ? "Chưa có pick thay" : null,
-      }),
-    });
-    const result = (await response
-      .json()
-      .catch(() => null)) as ApiResponse | null;
-    setSavingKey(null);
-    if (!response.ok || !result?.replacement)
-      return setError(result?.error ?? "Không thể cập nhật");
-    setReplacements((current) => [
-      ...current.filter(
-        (item) =>
-          !(item.rider_code === rider.rider_code && item.work_date === date),
-      ),
-      result.replacement!,
-    ]);
-    if (!result.sheet_sync?.success) {
-      setSheetStatus({
-        success: false,
-        message: `Web đã lưu nhưng Google Sheet chưa đồng bộ: ${result.sheet_sync?.error ?? "không rõ lỗi"}`,
+    try {
+      const response = await fetch("/api/pickup-replacements", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rider_id: rider.id,
+          rider_code: rider.rider_code,
+          work_date: date,
+          replacement_rider_id: replacement?.id ?? null,
+          replacement_rider_code: replacement?.rider_code ?? null,
+          status: missing ? "MISSING" : "ASSIGNED",
+          note: missing ? "Chưa có pick thay" : null,
+        }),
       });
-    } else {
-      setSheetStatus({
-        success: true,
-        message: "Đã đồng bộ và kiểm tra ID pick thay trên Google Sheet auto_assign_pick.",
-      });
+      const result = (await response.json().catch(() => null)) as ApiResponse | null;
+      if (!response.ok || !result?.replacement) {
+        setError(result?.error ?? "Không thể cập nhật rider thay. Hãy thử lại.");
+        return false;
+      }
+      setReplacements((current) => [
+        ...current.filter((item) => !(item.rider_code === rider.rider_code && item.work_date === date)),
+        result.replacement!,
+      ]);
+      setSheetStatus(result.sheet_sync?.success
+        ? { success: true, message: "Đã đồng bộ và kiểm tra ID pick thay trên Google Sheet auto_assign_pick." }
+        : { success: false, message: `Web đã lưu nhưng Google Sheet chưa đồng bộ: ${result.sheet_sync?.error ?? "không rõ lỗi"}` });
+      return true;
+    } catch {
+      setError("Kết nối cập nhật rider thay bị gián đoạn. Hãy thử lại.");
+      return false;
+    } finally {
+      setSavingKey(null);
     }
   }
   async function syncGoogleSheet() {
@@ -227,25 +235,44 @@ export function PickupReplacementView() {
       setSyncingSheet(false);
     }
   }
+  const assignedCount = replacements.filter((item) => item.status === "ASSIGNED").length;
+  const missingCount = replacements.filter((item) => item.status === "MISSING").length;
+
   return (
-    <div className="space-y-5">
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">
-            Pickup workforce
-          </p>
-          <h1 className="mt-1 text-2xl font-bold text-slate-950">
-            Lịch thế pick
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Phân rider thay theo từng ngày; mọi thay đổi tự động đồng bộ sang Google Sheet.
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <div className={styles.headingBlock}>
+          <div className={styles.orientation}>
+            <span className={styles.orientationMark} aria-hidden="true" />
+            Điều phối rider pick theo tuần
+          </div>
+          <h1 className={styles.title}>Lịch thế pick</h1>
+          <p className={styles.lede}>
+            Chọn rider thay ngay trên ma trận ngày. Thay đổi được lưu vào Supabase và đối chiếu với Google Sheet.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
+        <dl className={styles.weekSummary} aria-label="Tóm tắt lịch thế pick">
+          <div>
+            <dt>Đã bố trí</dt>
+            <dd>{assignedCount}</dd>
+          </div>
+          <div>
+            <dt>Chưa có người</dt>
+            <dd>{missingCount}</dd>
+          </div>
+          <div>
+            <dt>Rider đang lọc</dt>
+            <dd>{filtered.length}</dd>
+          </div>
+        </dl>
+      </header>
+
+      <section className={styles.weekRail} aria-label="Điều hướng tuần">
+        <div className={styles.weekPicker}>
+          <button
             type="button"
-            variant="secondary"
-            className="size-10 p-0"
+            className={styles.iconButton}
+            aria-label="Xem tuần trước"
             onClick={() => {
               const next = shiftDate(rangeStart, -7);
               setRangeStart(next);
@@ -253,15 +280,17 @@ export function PickupReplacementView() {
               setPage(1);
             }}
           >
-            <ChevronLeft size={16} />
-          </Button>
-          <div className="min-w-44 rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-sm font-semibold">
-            {formatDate(rangeStart)} – {formatDate(rangeEnd)}
+            <ChevronLeft size={18} />
+          </button>
+          <div className={styles.weekLabel}>
+            <CalendarDays size={17} aria-hidden="true" />
+            <span className={styles.weekLabelFull}>{formatDate(rangeStart)} – {formatDate(rangeEnd)}</span>
+            <span className={styles.weekLabelCompact}>{formatShortDate(rangeStart)} – {formatShortDate(rangeEnd)}</span>
           </div>
-          <Button
+          <button
             type="button"
-            variant="secondary"
-            className="size-10 p-0"
+            className={styles.iconButton}
+            aria-label="Xem tuần sau"
             onClick={() => {
               const next = shiftDate(rangeStart, 7);
               setRangeStart(next);
@@ -269,11 +298,13 @@ export function PickupReplacementView() {
               setPage(1);
             }}
           >
-            <ChevronRight size={16} />
-          </Button>
-          <Button
+            <ChevronRight size={18} />
+          </button>
+        </div>
+        <div className={styles.weekActions}>
+          <button
             type="button"
-            variant="secondary"
+            className={styles.secondaryButton}
             disabled={rangeStart === today()}
             onClick={() => {
               const currentDate = today();
@@ -283,111 +314,80 @@ export function PickupReplacementView() {
             }}
           >
             Hôm nay
-          </Button>
-          <Button
+          </button>
+          <button
             type="button"
-            variant="secondary"
+            className={styles.secondaryButton}
             disabled={loading || syncingSheet}
+            aria-busy={syncingSheet}
             onClick={() => void syncGoogleSheet()}
           >
-            {syncingSheet ? <RefreshCcw size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
-            {syncingSheet ? "Đang đồng bộ..." : "Đồng bộ Google Sheet"}
-          </Button>
+            {syncingSheet ? <RefreshCcw size={16} className={styles.spinner} /> : <FileSpreadsheet size={16} />}
+            {syncingSheet ? "Đang đồng bộ…" : "Đồng bộ Sheet"}
+          </button>
         </div>
-      </header>
+      </section>
+
       {error ? (
-        <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>
+        <p className={styles.errorBanner} role="alert"><CircleAlert size={17} />{error}</p>
       ) : null}
       {sheetStatus ? (
-        <p className={cn(
-          "rounded-lg border px-3 py-2 text-sm",
-          sheetStatus.success
-            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-            : "border-amber-200 bg-amber-50 text-amber-800",
-        )}>
+        <p className={cn(styles.statusBanner, sheetStatus.success ? styles.statusSuccess : styles.statusWarning)} role="status">
+          {sheetStatus.success ? <Check size={17} /> : <CircleAlert size={17} />}
           {sheetStatus.message}
         </p>
       ) : null}
-      <section className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-2 xl:grid-cols-[1fr_150px_180px_210px_190px]">
-        <label className="relative">
-          <Search
-            size={17}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-          />
-          <Input
-            className="pl-9"
+
+      <section className={styles.filters} aria-label="Bộ lọc rider">
+        <label className={cn(styles.field, styles.searchField)}>
+          <span>Tìm rider hoặc điểm pick</span>
+          <div className={styles.inputShell}>
+            <Search size={17} aria-hidden="true" />
+            <input
+            type="search"
             placeholder="Tìm ID, tên, quận, phường, point"
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
               setPage(1);
             }}
-          />
+            />
+          </div>
         </label>
-        <Select
-          value={cot}
-          onChange={(event) => {
-            setCot(event.target.value);
-            setPage(1);
-          }}
-        >
+        <FilterSelect label="COT" value={cot} onChange={(value) => { setCot(value); setPage(1); }}>
           <option value="all">Tất cả COT</option>
-          {cots.map((item) => (
-            <option key={item}>{item}</option>
-          ))}
-        </Select>
-        <Select
-          aria-label="Ngày lọc rider OFF"
-          value={offFilterDate}
-          onChange={(event) => {
-            setOffFilterDate(event.target.value);
-            setPage(1);
-          }}
-        >
-          {days.map((day, index) => (
-            <option key={day} value={day}>
-              {day === today()
-                ? "Hôm nay"
-                : rangeStart === today() && index === 1
-                  ? "Ngày mai"
-                  : rangeStart === today() && index === 2
-                    ? "Ngày mốt"
-                    : formatWeekdayDate(day)}
-            </option>
-          ))}
-        </Select>
-        <button
-          type="button"
-          aria-pressed={offOnly}
-          onClick={() => {
-            setOffOnly((value) => !value);
-            setPage(1);
-          }}
-          className={cn(
-            "flex h-10 items-center justify-center rounded-xl border px-3 text-sm font-semibold transition",
-            offOnly
-              ? "border-amber-200 bg-amber-50 text-amber-800"
-              : "border-slate-200 bg-white text-slate-600",
-          )}
-        >
-          {offOnly ? `OFF ngày ${formatShortDate(offFilterDate)}` : "Tất cả rider có tuyến"}
-        </button>
-        <Select
-          value={district}
-          onChange={(event) => {
-            setDistrict(event.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="all">Tất cả quận pick</option>
-          {districts.map((item) => (
-            <option key={item}>{item}</option>
-          ))}
-        </Select>
+          {cots.map((item) => <option key={item}>{item}</option>)}
+        </FilterSelect>
+        <FilterSelect label="Ngày cần thế" value={offFilterDate} onChange={(value) => { setOffFilterDate(value); setPage(1); }}>
+          {days.map((day, index) => <option key={day} value={day}>{day === today() ? "Hôm nay" : rangeStart === today() && index === 1 ? "Ngày mai" : rangeStart === today() && index === 2 ? "Ngày mốt" : formatWeekdayDate(day)}</option>)}
+        </FilterSelect>
+        <FilterSelect label="Quận pick" value={district} onChange={(value) => { setDistrict(value); setPage(1); }}>
+          <option value="all">Tất cả quận</option>
+          {districts.map((item) => <option key={item}>{item}</option>)}
+        </FilterSelect>
+        <label className={styles.toggleField}>
+          <span>Phạm vi hiển thị</span>
+          <button type="button" aria-pressed={offOnly} onClick={() => { setOffOnly((value) => !value); setPage(1); }} className={cn(styles.toggle, offOnly && styles.toggleActive)}>
+            <span className={styles.toggleDot} aria-hidden="true" />
+            {offOnly ? `Chỉ rider OFF ${formatShortDate(offFilterDate)}` : "Tất cả rider có tuyến"}
+          </button>
+        </label>
       </section>
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <div className="max-h-[calc(100vh-330px)] min-h-[480px] overflow-auto">
-          <table className="w-[1940px] min-w-full table-fixed border-separate border-spacing-0 text-left text-sm">
+
+      <section className={styles.matrix} aria-label="Ma trận thế pick theo tuần">
+        <div className={styles.matrixIntro}>
+          <div>
+            <h2>Rider × ngày</h2>
+            <p>Ô có nền vàng là rider OFF. Mở dropdown để chọn người thay.</p>
+          </div>
+          <div className={styles.legend} aria-label="Chú thích trạng thái">
+            <span><i className={styles.legendOff} />Cần bố trí</span>
+            <span><i className={styles.legendAssigned} />Đã bố trí</span>
+            <span><i className={styles.legendMissing} />Chưa có người</span>
+          </div>
+        </div>
+        <div className={styles.tableViewport}>
+          <table className={styles.table}>
             <colgroup>
               <col className="w-[72px]" />
               <col className="w-[88px]" />
@@ -395,84 +395,47 @@ export function PickupReplacementView() {
               <col className="w-[120px]" />
               <col className="w-[100px]" />
               <col className="w-[180px]" />
-              <col className="w-[80px]" />
               {days.map((day) => (
-                <col key={day} className="w-[160px]" />
+                <col key={day} className="w-[190px]" />
               ))}
             </colgroup>
-            <thead className="sticky top-0 z-30">
-              <tr className="h-14 bg-blue-100 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                <th className="sticky left-0 z-40 border-b border-r border-blue-200 bg-blue-100 px-3 py-3 whitespace-nowrap">
-                  COT
-                </th>
-                <th className="sticky left-[72px] z-40 border-b border-r border-blue-200 bg-blue-100 px-3 py-3 whitespace-nowrap">
-                  ID
-                </th>
-                <th className="sticky left-[160px] z-40 border-b border-r border-blue-200 bg-blue-100 px-3 py-3 whitespace-nowrap shadow-[4px_0_8px_-6px_rgba(15,23,42,0.45)]">
-                  Driver Name
-                </th>
-                <th className="border-b border-r border-blue-200 px-3 py-3 whitespace-nowrap">
-                  District
-                </th>
-                <th className="border-b border-r border-blue-200 px-3 py-3 whitespace-nowrap">
-                  Ward
-                </th>
-                <th className="border-b border-r border-blue-200 px-3 py-3 whitespace-nowrap">
-                  Point name
-                </th>
-                <th className="border-b border-r border-blue-200 px-3 py-3 text-center whitespace-nowrap">
-                  Auto assign
-                </th>
+            <thead>
+              <tr>
+                <th className={cn(styles.stickyCot, styles.identityHead)}>COT</th>
+                <th className={cn(styles.stickyId, styles.identityHead)}>ID</th>
+                <th className={cn(styles.stickyName, styles.identityHead)}>Tên rider</th>
+                <th>Quận</th>
+                <th>Phường</th>
+                <th>Point name</th>
                 {days.map((day) => (
-                  <th
-                    key={day}
-                    className={cn(
-                      "border-b border-r border-blue-200 px-3 py-3 text-center whitespace-nowrap",
-                      day === today() && "bg-emerald-100 text-emerald-800",
-                    )}
-                  >
-                    {formatDate(day)}{day === today() ? " · Hôm nay" : ""}
+                  <th key={day} className={cn(styles.dayHead, day === today() && styles.todayHead)}>
+                    <span>{formatWeekday(day)}</span>
+                    <strong>{formatShortDate(day)}</strong>
+                    {day === today() ? <em>Hôm nay</em> : null}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {visibleRiders.map((rider, index) => (
-                <tr
-                  key={rider.id}
-                  className={cn("h-14", index % 2 ? "bg-slate-50" : "bg-white")}
-                >
-                  <td className="sticky left-0 z-20 border-b border-r border-slate-200 bg-inherit px-3 py-2 font-semibold whitespace-nowrap">
+                <tr key={rider.id} className={index % 2 ? styles.altRow : undefined}>
+                  <td className={cn(styles.stickyCot, styles.identityCell)}>
                     {rider.cot ?? "—"}
                   </td>
-                  <td className="sticky left-[72px] z-20 border-b border-r border-slate-200 bg-inherit px-3 py-2 font-mono tabular-nums whitespace-nowrap">
+                  <td className={cn(styles.stickyId, styles.identityCell, styles.mono)}>
                     {rider.rider_code}
                   </td>
-                  <td className="sticky left-[160px] z-20 border-b border-r border-slate-200 bg-inherit px-3 py-2 font-semibold shadow-[4px_0_8px_-6px_rgba(15,23,42,0.4)]">
-                    <p className="truncate" title={rider.full_name ?? ""}>
-                      {rider.full_name ?? "—"}
-                    </p>
+                  <td className={cn(styles.stickyName, styles.identityCell, styles.riderName)} title={rider.full_name ?? ""}>
+                    {rider.full_name ?? "—"}
                   </td>
-                  <td className="border-b border-r border-slate-200 px-3 py-2">
-                    <p className="truncate" title={rider.pickup_district ?? ""}>
-                      {rider.pickup_district ?? "—"}
-                    </p>
+                  <td title={rider.pickup_district ?? ""}>
+                    <span className={styles.truncate}>{rider.pickup_district ?? "—"}</span>
                   </td>
-                  <td className="border-b border-r border-slate-200 px-3 py-2">
-                    <p className="truncate" title={rider.pickup_ward ?? ""}>
-                      {rider.pickup_ward ?? "—"}
-                    </p>
+                  <td title={rider.pickup_ward ?? ""}>
+                    <span className={styles.truncate}>{rider.pickup_ward ?? "—"}</span>
                   </td>
-                  <td className="border-b border-r border-slate-200 px-3 py-2">
-                    <p
-                      className="truncate font-mono text-xs"
-                      title={rider.point_name ?? ""}
-                    >
-                      {rider.point_name ?? "—"}
-                    </p>
-                  </td>
-                  <td className="border-b border-r border-slate-200 px-3 py-2 text-center text-xs font-bold">
-                    {autoAssign(rider) ? "TRUE" : "FALSE"}
+                  <td className={styles.mono} title={rider.point_name ?? ""}>
+                    <span className={styles.truncate}>{rider.point_name ?? "—"}</span>
                   </td>
                   {days.map((day) => {
                     const key = `${rider.rider_code}:${day}`;
@@ -486,33 +449,26 @@ export function PickupReplacementView() {
                       <td
                         key={day}
                         className={cn(
-                          "border-b border-r border-slate-200 p-2",
-                          !off
-                            ? "bg-slate-50"
-                            : item?.status === "ASSIGNED"
-                            ? "bg-blue-100"
-                            : item?.status === "MISSING"
-                              ? "bg-red-100"
-                              : "bg-white",
+                          styles.assignmentCell,
+                          !off ? styles.workingCell : item?.status === "ASSIGNED" ? styles.assignedCell : item?.status === "MISSING" ? styles.missingCell : styles.offCell,
                         )}
                       >
                         {!off ? (
-                          <div className="flex h-12 items-center justify-center rounded-lg bg-slate-100 text-xs font-semibold text-slate-400">
-                            Đi làm
-                          </div>
+                          <span className={styles.workingLabel}>Đi làm</span>
                         ) : (
-                          <div className="space-y-1.5">
-                            <p className="truncate px-1 text-[10px] font-bold uppercase text-amber-700" title={pickupOffLabel(offLog)}>
+                          <div className={styles.assignmentControl}>
+                            <p className={styles.offLabel} title={pickupOffLabel(offLog)}>
                               {pickupOffLabel(offLog)}
                             </p>
                             <ReplacementRiderInput
                               key={`${item?.status ?? "empty"}-${item?.replacement_rider_id ?? "none"}`}
                               id={`replacement-${rider.id}-${day}`}
                               candidates={replacementCandidates}
-                              disabled={!canEdit || savingKey === key}
+                              disabled={!canEdit}
+                              loading={savingKey === key}
                               status={item?.status}
                               selectedRiderId={item?.replacement_rider_id ?? null}
-                              onSelect={(value) => void update(rider, day, value)}
+                              onSelect={(value) => update(rider, day, value)}
                             />
                           </div>
                         )}
@@ -523,38 +479,37 @@ export function PickupReplacementView() {
               ))}
               {!loading && filtered.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={14}
-                    className="h-64 text-center text-sm text-slate-500"
-                  >
-                    Không có rider phù hợp.
+                  <td colSpan={13} className={styles.emptyState}>
+                    <UserRoundX size={22} />
+                    <strong>Không có rider phù hợp</strong>
+                    <span>Đổi ngày OFF hoặc nới bộ lọc để xem thêm rider.</span>
                   </td>
                 </tr>
               ) : null}
             </tbody>
           </table>
         </div>
-        <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3">
-          <span className="text-sm text-slate-500">
+        <div className={styles.pagination}>
+          <span>
             {filtered.length} rider · Trang {safePage}/{pageCount}
           </span>
-          <div className="flex gap-2">
-            <Button
+          <div>
+            <button
               type="button"
-              variant="secondary"
+              className={styles.secondaryButton}
               disabled={safePage <= 1}
               onClick={() => setPage((value) => Math.max(1, value - 1))}
             >
               Trước
-            </Button>
-            <Button
+            </button>
+            <button
               type="button"
-              variant="secondary"
+              className={styles.secondaryButton}
               disabled={safePage >= pageCount}
               onClick={() => setPage((value) => Math.min(pageCount, value + 1))}
             >
               Sau
-            </Button>
+            </button>
           </div>
         </div>
       </section>
@@ -562,10 +517,35 @@ export function PickupReplacementView() {
   );
 }
 
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <label className={styles.field}>
+      <span>{label}</span>
+      <div className={styles.selectShell}>
+        <select value={value} onChange={(event) => onChange(event.target.value)}>
+          {children}
+        </select>
+        <ChevronDown size={16} aria-hidden="true" />
+      </div>
+    </label>
+  );
+}
+
 function ReplacementRiderInput({
   id,
   candidates,
   disabled,
+  loading,
   status,
   selectedRiderId,
   onSelect,
@@ -573,65 +553,161 @@ function ReplacementRiderInput({
   id: string;
   candidates: Rider[];
   disabled: boolean;
+  loading: boolean;
   status: Replacement["status"] | undefined;
   selectedRiderId: string | null;
-  onSelect: (value: string) => void;
+  onSelect: (value: string) => Promise<boolean>;
 }) {
   const selected = candidates.find((rider) => rider.id === selectedRiderId);
   const selectedLabel = status === "MISSING"
     ? "Chưa có pick thay"
     : selected ? replacementRiderLabel(selected) : "";
-  const [value, setValue] = useState(selectedLabel);
+  const [query, setQuery] = useState(selectedLabel);
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [position, setPosition] = useState<{ left: number; top?: number; bottom?: number; width: number } | null>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const normalizedQuery = normalize(query === selectedLabel ? "" : query);
+  const filteredCandidates = useMemo(() => candidates
+    .filter((rider) => !normalizedQuery || normalize(`${replacementRiderLabel(rider)} ${rider.pickup_district ?? ""} ${rider.pickup_ward ?? ""} ${rider.point_name ?? ""}`).includes(normalizedQuery))
+    .slice(0, 12), [candidates, normalizedQuery]);
+  const options = useMemo(() => ["__missing__", ...filteredCandidates.map((rider) => rider.id)], [filteredCandidates]);
 
-  function resolve(input: string) {
-    const normalized = normalize(input);
-    if (!normalized) return;
-    if (normalized === normalize("Chưa có pick thay")) {
-      onSelect("__missing__");
-      return;
-    }
-    const match = candidates.find((rider) =>
-      normalize(rider.rider_code) === normalized
-      || normalize(replacementRiderLabel(rider)) === normalized,
-    );
-    if (match) onSelect(match.id);
+  const updatePosition = useCallback(() => {
+    const rect = anchorRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = Math.min(360, Math.max(280, window.innerWidth - 24));
+    const left = Math.min(Math.max(12, rect.left), window.innerWidth - width - 12);
+    const spaceBelow = window.innerHeight - rect.bottom;
+    setPosition(spaceBelow >= 310 || rect.top < spaceBelow
+      ? { left, top: rect.bottom + 6, width }
+      : { left, bottom: window.innerHeight - rect.top + 6, width });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updatePosition();
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!anchorRef.current?.contains(target) && !(target instanceof Element && target.closest(`[data-pick-listbox="${id}"]`))) setOpen(false);
+    };
+    window.addEventListener("pointerdown", closeOnPointerDown);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnPointerDown);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [id, open, updatePosition]);
+
+  async function choose(value: string) {
+    if (loading) return;
+    const rider = candidates.find((candidate) => candidate.id === value);
+    const nextLabel = value === "__missing__" ? "Chưa có pick thay" : rider ? replacementRiderLabel(rider) : "";
+    setQuery(nextLabel);
+    setOpen(false);
+    const saved = await onSelect(value);
+    if (!saved) setQuery(selectedLabel);
   }
 
   return (
-    <>
+    <div
+      ref={anchorRef}
+      className={styles.combobox}
+      data-state={loading ? "loading" : status === "ASSIGNED" ? "success" : status === "MISSING" ? "missing" : "default"}
+    >
       <input
+        ref={inputRef}
         type="text"
-        list={`${id}-options`}
-        value={value}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={`${id}-listbox`}
+        aria-activedescendant={open ? `${id}-option-${activeIndex}` : undefined}
+        aria-busy={loading}
+        value={query}
         disabled={disabled}
-        placeholder="Tìm ID / tên"
-        className={cn(
-          "h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60",
-          status === "ASSIGNED" && "border-blue-200 bg-blue-50 font-bold text-blue-800",
-          status === "MISSING" && "border-red-200 bg-red-50 font-semibold text-red-700",
-        )}
+        readOnly={loading}
+        placeholder="Tìm ID hoặc tên"
+        className={styles.comboboxInput}
+        onFocus={() => { if (!disabled && !loading) { setOpen(true); updatePosition(); } }}
+        onClick={() => { if (!disabled && !loading) setOpen(true); }}
         onChange={(event) => {
-          const next = event.target.value;
-          setValue(next);
-          resolve(next);
+          setQuery(event.target.value);
+          setOpen(true);
+          setActiveIndex(0);
         }}
         onKeyDown={(event) => {
-          if (event.key === "Enter") {
+          if (event.key === "ArrowDown") {
             event.preventDefault();
-            resolve(value);
+            setOpen(true);
+            setActiveIndex((value) => Math.min(options.length - 1, value + 1));
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setActiveIndex((value) => Math.max(0, value - 1));
+          } else if (event.key === "Enter" && open && options[activeIndex]) {
+            event.preventDefault();
+            void choose(options[activeIndex]);
+          } else if (event.key === "Escape") {
+            setOpen(false);
+            setQuery(selectedLabel);
           }
         }}
-        onBlur={() => {
-          if (value && value !== selectedLabel) resolve(value);
-        }}
       />
-      <datalist id={`${id}-options`}>
-        <option value="Chưa có pick thay" />
-        {candidates.map((rider) => (
-          <option key={rider.id} value={replacementRiderLabel(rider)} />
-        ))}
-      </datalist>
-    </>
+      <span className={styles.comboboxState} aria-hidden="true">
+        {loading ? <LoaderCircle size={15} className={styles.spinner} /> : status === "ASSIGNED" ? <Check size={15} /> : status === "MISSING" ? <CircleAlert size={15} /> : <ChevronDown size={15} />}
+      </span>
+      {open && position ? createPortal(
+        <div
+          id={`${id}-listbox`}
+          role="listbox"
+          data-pick-listbox={id}
+          className={styles.dropdown}
+          style={position}
+        >
+          <div className={styles.dropdownHeader}>
+            <span>Chọn rider thay</span>
+            <span>{filteredCandidates.length}/{candidates.length}</span>
+          </div>
+          <button
+            id={`${id}-option-0`}
+            type="button"
+            role="option"
+            aria-selected={status === "MISSING"}
+            className={cn(styles.option, styles.missingOption, activeIndex === 0 && styles.activeOption)}
+            onMouseDown={(event) => event.preventDefault()}
+            onMouseEnter={() => setActiveIndex(0)}
+            onClick={() => void choose("__missing__")}
+          >
+            <CircleAlert size={16} />
+            <span><strong>Chưa có pick thay</strong><small>Đánh dấu để tiếp tục xử lý</small></span>
+          </button>
+          <div className={styles.optionList}>
+            {filteredCandidates.map((rider, index) => (
+              <button
+                id={`${id}-option-${index + 1}`}
+                key={rider.id}
+                type="button"
+                role="option"
+                aria-selected={rider.id === selectedRiderId}
+                className={cn(styles.option, activeIndex === index + 1 && styles.activeOption)}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setActiveIndex(index + 1)}
+                onClick={() => void choose(rider.id)}
+              >
+                <span className={styles.riderCode}>{rider.rider_code}</span>
+                <span><strong>{rider.full_name?.trim() || "Chưa có tên"}</strong><small>{[rider.pickup_district, rider.pickup_ward].filter(Boolean).join(" · ") || "Chưa có tuyến pick"}</small></span>
+                {rider.id === selectedRiderId ? <Check size={16} /> : null}
+              </button>
+            ))}
+            {filteredCandidates.length === 0 ? <p className={styles.noOptions}>Không tìm thấy rider phù hợp.</p> : null}
+          </div>
+        </div>,
+        document.body,
+      ) : null}
+    </div>
   );
 }
 
@@ -662,12 +738,6 @@ function pickupOffLabel(log: AttendanceLog | undefined) {
 }
 function normalize(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toLowerCase().trim();
-}
-function autoAssign(rider: Rider) {
-  const value = rider.raw_data?.auto_assign;
-  return value === undefined
-    ? true
-    : value === true || value === "TRUE" || value === 1;
 }
 function today() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -701,4 +771,9 @@ function formatWeekdayDate(value: string) {
     day: "2-digit",
     month: "2-digit",
   }).format(new Date(`${value}T00:00:00`));
+}
+function formatWeekday(value: string) {
+  return new Intl.DateTimeFormat("vi-VN", { weekday: "short" })
+    .format(new Date(`${value}T00:00:00`))
+    .replace("Th ", "T");
 }

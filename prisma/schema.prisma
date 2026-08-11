@@ -153,3 +153,56 @@ model PersonalNote {
   @@index([userId, isPinned, updatedAt])
   @@map("personal_notes")
 }
+
+model AiUserPreference {
+  userId        String   @id @map("user_id") @db.Uuid
+  memoryEnabled Boolean  @default(true) @map("memory_enabled")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("ai_user_preferences")
+}
+
+model AiConversation {
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  title     String      @default("Cuộc trò chuyện mới")
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  messages  AiMessage[]
+
+  @@unique([id, userId])
+  @@index([userId, updatedAt])
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String         @map("conversation_id") @db.Uuid
+  userId         String         @map("user_id") @db.Uuid
+  role           String
+  content        String
+  pagePath       String?        @map("page_path")
+  metadata       Json           @default("{}")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  conversation   AiConversation @relation(fields: [conversationId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([conversationId, createdAt])
+  @@map("ai_messages")
+}
+
+model AiPendingAction {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  actionType String    @map("action_type")
+  status     String    @default("PENDING")
+  payload    Json
+  expiresAt  DateTime  @default(dbgenerated("now() + interval '10 minutes'")) @map("expires_at") @db.Timestamptz(6)
+  executedAt DateTime? @map("executed_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([userId, createdAt])
+  @@map("ai_pending_actions")
+}

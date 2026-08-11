@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeSearch } from "@/lib/gpt-actions/server";
+import { resolveWorkDateScope, type WorkDateScope } from "@/lib/ai/work-date";
 
 type RiderRow = {
   id: string;
@@ -18,6 +19,14 @@ type AttendanceRow = {
   rider_id: string | null;
   rider_code: string;
   status: string;
+  work_date: string;
+};
+
+type OffRequestRow = {
+  rider_id: string;
+  rider_code: string;
+  request_type: "WEEKLY" | "PLANNED" | "EMERGENCY";
+  off_date: string;
 };
 
 type RealtimeRow = {
@@ -43,6 +52,7 @@ export type AiOperationsContext = {
   context_version: 1;
   generated_at: string;
   work_date: string;
+  date_scope: WorkDateScope;
   page_path: string;
   scope_note: string;
   sources: string[];
@@ -50,6 +60,11 @@ export type AiOperationsContext = {
 };
 
 const offStatuses = new Set(["OFF_WEEKLY", "OFF_APPROVED", "OFF_UNEXPECTED"]);
+const offRequestStatus = {
+  WEEKLY: "OFF_WEEKLY",
+  PLANNED: "OFF_APPROVED",
+  EMERGENCY: "OFF_UNEXPECTED",
+} as const;
 const OFF_DETAIL_LIMIT = 100;
 
 export async function loadAiOperationsContext({
@@ -61,16 +76,29 @@ export async function loadAiOperationsContext({
   pagePath: string;
   question: string;
 }): Promise<AiOperationsContext> {
-  const workDate = resolveWorkDate(question);
+  const dateScope = resolveWorkDateScope(question);
+  const workDate = dateScope.referenceDate;
   const includeVolume = /volume|pickup|delivery|đơn|don/i.test(question);
 
-  const [riderResult, attendanceResult, latestRealtimeResult, deliveryVolumeResult, pickupVolumeResult] = await Promise.all([
+  const [riderResult, attendanceResult, offRequestResult, latestRealtimeResult, deliveryVolumeResult, pickupVolumeResult] = await Promise.all([
     admin
       .from("riders")
       .select("id,rider_code,full_name,kv,cot,status,delivery_district,delivery_ward,pickup_district,pickup_ward")
       .order("rider_code")
       .limit(2000),
-    admin.from("attendance_logs").select("rider_id,rider_code,status").eq("work_date", workDate).limit(2000),
+    admin
+      .from("attendance_logs")
+      .select("rider_id,rider_code,status,work_date")
+      .gte("work_date", dateScope.start)
+      .lte("work_date", dateScope.end)
+      .limit(5000),
+    admin
+      .from("rider_off_requests")
+      .select("rider_id,rider_code,request_type,off_date")
+      .gte("off_date", dateScope.start)
+      .lte("off_date", dateScope.end)
+      .eq("status", "APPROVED")
+      .limit(5000),
     admin
       .from("realtime_delivery_riders")
       .select("snapshot_id,snapshot_at")
@@ -79,16 +107,17 @@ export async function loadAiOperationsContext({
       .limit(1)
       .maybeSingle(),
     includeVolume
-      ? admin.from("delivery_order").select("district,area,total_orders").eq("report_date", workDate).limit(2000)
+      ? admin.from("delivery_order").select("district,area,total_orders").gte("report_date", dateScope.start).lte("report_date", dateScope.end).limit(5000)
       : Promise.resolve({ data: [], error: null }),
     includeVolume
-      ? admin.from("pickup_volume").select("district,area,total_orders").eq("report_date", workDate).limit(2000)
+      ? admin.from("pickup_volume").select("district,area,total_orders").gte("report_date", dateScope.start).lte("report_date", dateScope.end).limit(5000)
       : Promise.resolve({ data: [], error: null }),
   ]);
 
   const firstError =
     riderResult.error ??
     attendanceResult.error ??
+    offRequestResult.error ??
     latestRealtimeResult.error ??
     deliveryVolumeResult.error ??
     pickupVolumeResult.error;
@@ -96,6 +125,7 @@ export async function loadAiOperationsContext({
 
   const riders = (riderResult.data ?? []) as RiderRow[];
   const attendance = (attendanceResult.data ?? []) as AttendanceRow[];
+  const approvedOffRequests = (offRequestResult.data ?? []) as OffRequestRow[];
   const latestSnapshot = latestRealtimeResult.data ?? null;
   let realtime: RealtimeRow[] = [];
 
@@ -124,34 +154,69 @@ export async function loadAiOperationsContext({
     .slice(0, 5)
     .map((rider) => riderDetail(rider, realtimeByCode.get(rider.rider_code) ?? null));
 
-  const allOffRiders = attendance
-    .filter((row) => offStatuses.has(row.status))
-    .map((attendanceRow) => {
-      const rider =
-        (attendanceRow.rider_id ? riderById.get(attendanceRow.rider_id) : undefined) ??
-        riderByCode.get(attendanceRow.rider_code);
-      if (!rider || rider.status !== "active") return null;
-      const area = operatingArea(rider);
-      return {
-        rider_code: rider.rider_code,
-        full_name: rider.full_name,
-        cot: rider.cot,
-        district: area.district,
-        ward: area.ward,
-        area_source: area.source,
-        off_status: attendanceRow.status,
-      };
-    })
-    .filter((rider): rider is NonNullable<typeof rider> => rider !== null);
   const requestedOffScope = resolveOffScope(questionNormalized, riders);
+  const offRows = [
+    ...attendance
+      .filter((row) => offStatuses.has(row.status))
+      .map((row) => ({ ...row, source: "attendance_logs" as const })),
+    ...approvedOffRequests.map((row) => ({
+      rider_id: row.rider_id,
+      rider_code: row.rider_code,
+      status: offRequestStatus[row.request_type],
+      work_date: row.off_date,
+      source: "rider_off_requests" as const,
+    })),
+  ];
+  const offByRiderDate = new Map<string, {
+    rider_code: string;
+    full_name: string | null;
+    cot: string | null;
+    work_date: string;
+    district: string | null;
+    ward: string | null;
+    area_source: string;
+    off_status: string;
+    sources: string[];
+  }>();
+  for (const offRow of offRows) {
+    const rider =
+      (offRow.rider_id ? riderById.get(offRow.rider_id) : undefined) ??
+      riderByCode.get(offRow.rider_code);
+    if (!rider || rider.status !== "active") continue;
+    const area = areaForScope(rider, requestedOffScope.area_mode);
+    const entryKey = `${rider.rider_code}|${offRow.work_date}`;
+    const existing = offByRiderDate.get(entryKey);
+    if (existing) {
+      if (!existing.sources.includes(offRow.source)) existing.sources.push(offRow.source);
+      if (offStatusPriority(offRow.status) > offStatusPriority(existing.off_status)) existing.off_status = offRow.status;
+      continue;
+    }
+    offByRiderDate.set(entryKey, {
+      rider_code: rider.rider_code,
+      full_name: rider.full_name,
+      cot: rider.cot,
+      work_date: offRow.work_date,
+      district: area.district,
+      ward: area.ward,
+      area_source: area.source,
+      off_status: offRow.status,
+      sources: [offRow.source],
+    });
+  }
+  const allOffRiders = Array.from(offByRiderDate.values());
   const scopedOffRiders = allOffRiders
     .filter((rider) => matchesOffScope(rider, requestedOffScope))
     .sort(
       (a, b) =>
+        a.work_date.localeCompare(b.work_date) ||
         (a.ward ?? "").localeCompare(b.ward ?? "", "vi") ||
         a.rider_code.localeCompare(b.rider_code, "vi"),
     );
   const offRiders = scopedOffRiders.slice(0, OFF_DETAIL_LIMIT);
+  const matchedRiderCodes = new Set(matchedRiders.map((rider) => rider.rider_code));
+  const matchedRiderOffSchedule = allOffRiders
+    .filter((entry) => matchedRiderCodes.has(entry.rider_code))
+    .sort((a, b) => a.work_date.localeCompare(b.work_date) || a.rider_code.localeCompare(b.rider_code, "vi"));
 
   const realtimeTotals = realtime.reduce(
     (total, row) => ({
@@ -190,14 +255,20 @@ export async function loadAiOperationsContext({
     },
     attendance: {
       status_counts: countBy(attendance, (row) => row.status),
-      active_off_rider_count: allOffRiders.length,
+      date_scope: dateScope,
+      active_off_rider_count: new Set(allOffRiders.map((row) => row.rider_code)).size,
+      off_entry_count: allOffRiders.length,
       requested_scope: requestedOffScope,
-      scoped_off_rider_count: scopedOffRiders.length,
+      scoped_off_rider_count: new Set(scopedOffRiders.map((row) => row.rider_code)).size,
+      scoped_off_entry_count: scopedOffRiders.length,
+      scoped_off_status_counts: offStatusCounts(scopedOffRiders),
+      matched_rider_off_schedule: matchedRiderOffSchedule,
       off_riders: offRiders,
       off_riders_returned: offRiders.length,
       off_riders_truncated: scopedOffRiders.length > offRiders.length,
       included_off_statuses: Array.from(offStatuses),
-      definition: "Chỉ tính rider active. COT1 ưu tiên khu vực pickup; COT khác ưu tiên khu vực delivery và chỉ fallback khi thiếu.",
+      included_sources: ["attendance_logs", "approved rider_off_requests"],
+      definition: "Chỉ tính rider active và khử trùng theo rider_code + work_date. Câu hỏi theo tuần dùng đủ thứ Hai–Chủ nhật và giữ từng ngày OFF. Nếu câu hỏi nói giao/delivery thì lọc delivery district; nói pickup/lấy hàng thì lọc pickup district; nếu không nói rõ mới dùng khu vực vận hành mặc định.",
     },
     realtime_delivery: {
       snapshot_id: latestSnapshot?.snapshot_id ?? null,
@@ -212,7 +283,7 @@ export async function loadAiOperationsContext({
     matched_riders: matchedRiders,
   };
 
-  const sources = ["riders", "attendance_logs", "realtime_delivery_riders"];
+  const sources = ["riders", "attendance_logs", "rider_off_requests", "realtime_delivery_riders"];
   if (includeVolume) {
     data.volume = {
       delivery: summarizeVolume((deliveryVolumeResult.data ?? []) as VolumeRow[]),
@@ -225,8 +296,9 @@ export async function loadAiOperationsContext({
     context_version: 1,
     generated_at: new Date().toISOString(),
     work_date: workDate,
+    date_scope: dateScope,
     page_path: pagePath,
-    scope_note: `Dữ liệu theo work_date; realtime chỉ dùng snapshot_id mới nhất. Danh sách OFF được lọc theo quận/COT nhắc trong câu hỏi trước khi giới hạn ${OFF_DETAIL_LIMIT} dòng. Chỉ gọi danh sách là đầy đủ khi off_riders_truncated=false.`,
+    scope_note: `Dữ liệu lịch theo date_scope ${dateScope.label}; realtime chỉ dùng ngày tham chiếu ${workDate}. Danh sách OFF hợp nhất OFF tuần, OFF phép và OFF đột xuất từ attendance_logs với yêu cầu OFF đã duyệt, sau đó khử trùng theo rider + ngày. Câu hỏi nhắc tên rider phải dùng attendance.matched_rider_off_schedule. Chỉ gọi danh sách là đầy đủ khi off_riders_truncated=false.`,
     sources,
     data,
   };
@@ -235,7 +307,18 @@ export async function loadAiOperationsContext({
 type OffScope = {
   district: string | null;
   cot: string | null;
+  area_mode: "delivery" | "pickup" | "operating";
 };
+
+function areaForScope(rider: RiderRow, mode: OffScope["area_mode"]) {
+  if (mode === "delivery") {
+    return { district: rider.delivery_district, ward: rider.delivery_ward, source: "delivery" };
+  }
+  if (mode === "pickup") {
+    return { district: rider.pickup_district, ward: rider.pickup_ward, source: "pickup" };
+  }
+  return operatingArea(rider);
+}
 
 function operatingArea(rider: RiderRow) {
   if (isCotOne(rider.cot)) {
@@ -254,6 +337,11 @@ function operatingArea(rider: RiderRow) {
 
 function resolveOffScope(questionNormalized: string, riders: RiderRow[]): OffScope {
   const cotNumber = questionNormalized.match(/\bcot\s*([12])\b/)?.[1] ?? null;
+  const areaMode: OffScope["area_mode"] = /\b(giao|delivery)\b/.test(questionNormalized)
+    ? "delivery"
+    : /\b(pickup|lay\s+hang|layhang)\b/.test(questionNormalized)
+      ? "pickup"
+      : "operating";
   const mentionedDistricts = Array.from(
     new Set(
       riders
@@ -267,7 +355,27 @@ function resolveOffScope(questionNormalized: string, riders: RiderRow[]): OffSco
   return {
     district: mentionedDistricts[0] ?? null,
     cot: cotNumber ? `COT${cotNumber}` : null,
+    area_mode: areaMode,
   };
+}
+
+function offStatusPriority(status: string) {
+  if (status === "OFF_UNEXPECTED") return 3;
+  if (status === "OFF_APPROVED") return 2;
+  if (status === "OFF_WEEKLY") return 1;
+  return 0;
+}
+
+function offStatusCounts(rows: Array<{ off_status: string }>) {
+  const counts = {
+    OFF_WEEKLY: 0,
+    OFF_APPROVED: 0,
+    OFF_UNEXPECTED: 0,
+  };
+  for (const row of rows) {
+    if (row.off_status in counts) counts[row.off_status as keyof typeof counts] += 1;
+  }
+  return counts;
 }
 
 function questionMentionsDistrict(questionNormalized: string, district: string) {
@@ -373,27 +481,4 @@ function summarizeVolume(rows: VolumeRow[]) {
     row_count: scoped.length,
     by_district: Array.from(byDistrict, ([district, total_orders]) => ({ district, total_orders })).sort((a, b) => b.total_orders - a.total_orders).slice(0, 20),
   };
-}
-
-function resolveWorkDate(question: string) {
-  const explicitDate = question.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
-  if (explicitDate && !Number.isNaN(new Date(`${explicitDate}T00:00:00Z`).getTime())) return explicitDate;
-  const today = todayInVietnam();
-  if (normalizeSearch(question).includes("hom qua")) return shiftDate(today, -1);
-  return today;
-}
-
-function todayInVietnam() {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-}
-
-function shiftDate(value: string, days: number) {
-  const date = new Date(`${value}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
 }
