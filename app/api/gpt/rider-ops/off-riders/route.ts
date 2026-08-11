@@ -361,8 +361,14 @@ export async function GET(request: Request) {
       riderResult,
       attendanceResult,
     ] = await Promise.all([
-      riderQuery,
-      attendanceQuery,
+      riderQuery.overrideTypes<
+        RiderRow[],
+        { merge: false }
+      >(),
+      attendanceQuery.overrideTypes<
+        AttendanceRow[],
+        { merge: false }
+      >(),
     ]);
 
     const firstError =
@@ -387,12 +393,10 @@ export async function GET(request: Request) {
       filters.cot,
     );
 
-    const riders =
-      (riderResult.data ?? []) as RiderRow[];
+    const riders = riderResult.data ?? [];
 
     const attendance =
-      (attendanceResult.data ??
-        []) as AttendanceRow[];
+      attendanceResult.data ?? [];
 
     /*
      * ============================
