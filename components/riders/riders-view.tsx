@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import {
   ArrowDown,
   ArrowUp,
@@ -92,7 +93,10 @@ type ThiCongPlanSyncResponse = {
 };
 
 type RiderSortKey = "name" | "status" | "zone" | "cot" | "updated";
+type RiderRealtimeRow = Partial<Rider> & Record<string, unknown>;
 const RIDERS_PER_PAGE = 20;
+const RIDER_SEARCH_DEBOUNCE_MS = 250;
+const REALTIME_ECHO_TTL_MS = 2_000;
 
 const emptyRiderForm: RiderFormState = {
   kv: "KV5",
@@ -121,7 +125,8 @@ export function RidersView({
   const [registry, setRegistry] = useState<RiderRegistryData>(initialData);
   const [riders, setRiders] = useState<Rider[]>(initialData.riders);
   const [query, setQuery] = useState("");
-  const deferredQuery = useDeferredValue(query);
+  const debouncedQuery = useDebouncedValue(query, RIDER_SEARCH_DEBOUNCE_MS);
+  const isDesktopLayout = useDesktopLayout();
   const [kv, setKv] = useState("all");
   const [cot, setCot] = useState("all");
   const [pickupDistrict, setPickupDistrict] = useState("all");
@@ -150,11 +155,13 @@ export function RidersView({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const skipInitialRequestRef = useRef(true);
   const requestSequenceRef = useRef(0);
+  const suppressedRealtimeKeysRef = useRef(new Map<string, number>());
+  const muteRealtimeUntilRef = useRef(0);
 
   const registryUrl = useMemo(
     () =>
       buildRiderRegistryUrl({
-        query: deferredQuery,
+        query: debouncedQuery,
         kv,
         cot,
         pickupDistrict,
@@ -168,7 +175,7 @@ export function RidersView({
       }),
     [
       cot,
-      deferredQuery,
+      debouncedQuery,
       deliveryDistrict,
       deliveryWard,
       kv,
@@ -267,7 +274,43 @@ export function RidersView({
     void load();
   }, [load]);
 
-  useSupabaseRealtime({ table: "riders", onChange: refresh });
+  const suppressRealtimeEcho = useCallback((...keys: Array<string | null | undefined>) => {
+    const now = Date.now();
+    for (const [key, expiresAt] of suppressedRealtimeKeysRef.current) {
+      if (expiresAt <= now) suppressedRealtimeKeysRef.current.delete(key);
+    }
+    const expiresAt = now + REALTIME_ECHO_TTL_MS;
+    for (const key of keys) {
+      if (key) suppressedRealtimeKeysRef.current.set(key, expiresAt);
+    }
+  }, []);
+
+  const muteBulkRealtime = useCallback((untilRequestCompletes = false) => {
+    muteRealtimeUntilRef.current = untilRequestCompletes
+      ? Number.POSITIVE_INFINITY
+      : Date.now() + REALTIME_ECHO_TTL_MS;
+  }, []);
+
+  const handleRealtimeChange = useCallback(
+    (payload: RealtimePostgresChangesPayload<RiderRealtimeRow>) => {
+      const now = Date.now();
+      if (now < muteRealtimeUntilRef.current) return;
+
+      const row = payload.eventType === "DELETE" ? payload.old : payload.new;
+      const keys = [typeof row.id === "string" ? row.id : null, typeof row.rider_code === "string" ? row.rider_code : null];
+      for (const key of keys) {
+        if (!key) continue;
+        const expiresAt = suppressedRealtimeKeysRef.current.get(key) ?? 0;
+        suppressedRealtimeKeysRef.current.delete(key);
+        if (expiresAt > now) return;
+      }
+
+      refresh();
+    },
+    [refresh],
+  );
+
+  useSupabaseRealtime<RiderRealtimeRow>({ table: "riders", onChange: handleRealtimeChange });
 
   const districtOptions = useMemo(() => districts.map((district) => district.name), [districts]);
   const cotOptions = registry.options.cots;
@@ -287,6 +330,7 @@ export function RidersView({
 
   async function saveRider(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    suppressRealtimeEcho(editingId, form.rider_code);
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -305,6 +349,7 @@ export function RidersView({
       return;
     }
 
+    suppressRealtimeEcho(result?.rider?.id, result?.rider?.rider_code, editingId, form.rider_code);
     setForm(emptyRiderForm);
     setShowAddForm(false);
     setEditingId(null);
@@ -314,6 +359,7 @@ export function RidersView({
   }
 
   async function syncRidersFromPlan() {
+    muteBulkRealtime(true);
     setPlanSyncing(true);
     setError(null);
     setSuccess(null);
@@ -323,13 +369,17 @@ export function RidersView({
     const result = await response.json().catch(() => null) as ThiCongPlanSyncResponse | null;
     setPlanSyncing(false);
     if (!response.ok || !result?.success) {
+      muteRealtimeUntilRef.current = 0;
       setError(result?.error ?? "Không thể đồng bộ Thi Công Plan");
       return;
     }
     setSuccess(`Đã lấy ${result.synced_riders ?? 0} rider từ Thi Công Plan về web: thêm ${result.inserted_riders ?? 0}, cập nhật ${result.updated_riders ?? 0}${result.skipped_rows ? `; bỏ qua ${result.skipped_rows} dòng không có ID` : ""}.`);
+    muteBulkRealtime();
+    await load();
   }
 
   async function importExcel(file: File) {
+    muteBulkRealtime(true);
     setImporting(true);
     setError(null);
     setSuccess(null);
@@ -346,12 +396,14 @@ export function RidersView({
     if (fileInputRef.current) fileInputRef.current.value = "";
 
     if (!response.ok) {
+      muteRealtimeUntilRef.current = 0;
       setError(result?.error ?? "Không thể import file Excel");
       setImportIssues(result?.errors ?? []);
       return;
     }
 
     setSuccess(`Đã import ${result?.imported ?? 0} rider thành công.`);
+    muteBulkRealtime();
     await load();
   }
 
@@ -434,6 +486,7 @@ export function RidersView({
   }
 
   function updateRiderInView(updated: Rider) {
+    suppressRealtimeEcho(updated.id, updated.rider_code);
     setRiders((current) => {
       return current.map((rider) => (rider.id === updated.id ? mergeRiderUpdate(rider, updated) : rider));
     });
@@ -444,12 +497,14 @@ export function RidersView({
   async function deleteRider(rider: Rider) {
     const name = rider.full_name ?? rider.rider_code;
     if (!window.confirm(`Xóa vĩnh viễn rider ${name} (${rider.rider_code})? Lịch sử chấm công và vi phạm vẫn được giữ lại.`)) return;
+    suppressRealtimeEcho(rider.id, rider.rider_code);
     setDeletingId(rider.id);
     setError(null);
     const response = await fetch("/api/riders", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rider.id }) });
     const result = await response.json().catch(() => null) as { success?: boolean; error?: string } | null;
     setDeletingId(null);
     if (!response.ok || !result?.success) { setError(result?.error ?? "Không thể xóa rider"); return; }
+    suppressRealtimeEcho(rider.id, rider.rider_code);
     setSelected((current) => current?.id === rider.id ? null : current);
     setCheckedIds((current) => { const next = new Set(current); next.delete(rider.id); return next; });
     setShowDetail(false);
@@ -654,7 +709,7 @@ export function RidersView({
             <div><h2>Rider registry</h2><p aria-live="polite">{registry.total} kết quả · Chọn rider để mở hồ sơ</p></div>
             {canManageRiders && checkedIds.size > 0 ? <div className="flex items-center gap-2"><span className="text-sm font-semibold text-blue-700">Đã chọn {checkedIds.size}</span>{checkedIds.size === 1 ? <Button type="button" variant="secondary" className="h-9" onClick={() => { const rider = riders.find((item) => checkedIds.has(item.id)); if (rider) beginEdit(rider); }}><Pencil size={15} />Sửa</Button> : null}<Button type="button" variant="ghost" className="h-9" onClick={() => setCheckedIds(new Set())}>Bỏ chọn</Button></div> : null}
           </div>
-          <div className="riders-mobile-list lg:hidden">
+          {!isDesktopLayout ? <div className="riders-mobile-list lg:hidden">
             {loading
               ? Array.from({ length: 6 }, (_, index) => <div key={index} className="rider-mobile-skeleton" />)
               : paginated.map((rider) => (
@@ -670,13 +725,13 @@ export function RidersView({
                   />
                 ))}
             {!loading && paginated.length === 0 ? <EmptyRiders /> : null}
-          </div>
-          <div className="riders-table-frame hidden lg:block">
+          </div> : null}
+          {isDesktopLayout ? <div className="riders-table-frame hidden lg:block">
             <table className="w-full min-w-[860px] table-fixed text-left text-sm">
               <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-600 shadow-[0_1px_0_#e2e8f0]"><tr>{canManageRiders ? <th className="w-12 px-4 py-3"><input type="checkbox" aria-label="Chọn tất cả rider trên trang" checked={paginated.length > 0 && visibleChecked === paginated.length} onChange={toggleVisible} /></th> : null}<SortableRiderHeader label="Rider" sortKey="name" current={sort} onSort={changeSort} className="w-[30%]" /><SortableRiderHeader label="Trạng thái" sortKey="status" current={sort} onSort={changeSort} className="w-[14%]" /><SortableRiderHeader label="Khu vực" sortKey="zone" current={sort} onSort={changeSort} /><SortableRiderHeader label="COT" sortKey="cot" current={sort} onSort={changeSort} /><SortableRiderHeader label="Cập nhật" sortKey="updated" current={sort} onSort={changeSort} align="right" />{canManageRiders ? <th className="w-16" /> : null}</tr></thead>
-              <tbody className="divide-y divide-slate-100">{loading ? Array.from({ length: 8 }, (_, index) => <tr key={index} className="h-16 animate-pulse"><td colSpan={canManageRiders ? 7 : 5} className="px-4"><div className="h-4 rounded bg-slate-100" /></td></tr>) : paginated.map((rider) => <tr key={rider.id} className={cn("rider-table-row h-16 cursor-pointer", checkedIds.has(rider.id) && "is-checked")} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(rider); setShowDetail(true); } }} onClick={() => { setSelected(rider); setShowDetail(true); }}>{canManageRiders ? <td className="px-4" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Chọn ${rider.full_name ?? rider.rider_code}`} checked={checkedIds.has(rider.id)} onChange={() => toggleChecked(rider.id)} /></td> : null}<td className="px-4 py-2"><div className="flex min-w-0 items-center gap-3"><RiderAvatar rider={rider} size="sm" /><div className="min-w-0"><p className="truncate font-semibold text-slate-950">{rider.full_name ?? "Chưa có tên"}</p><p className="truncate font-mono text-xs text-slate-500">{rider.rider_code}{riderPhone(rider) ? ` · ${riderPhone(rider)}` : ""}</p></div></div></td><td className="px-4"><RiderStatusBadge status={rider.status} /></td><td className="px-4"><p className="truncate font-medium text-slate-800">{districtDisplayName(rider.delivery_district, districts) || "Chưa gán"}</p><p className="truncate text-xs text-slate-500">{rider.delivery_ward ?? rider.kv ?? "—"}</p></td><td className="px-4 font-semibold text-slate-700">{rider.cot ?? "—"}</td><td className="px-4 text-right"><p className="text-sm tabular-nums text-slate-700">{formatRelativeTime(rider.updated_at)}</p><p className="text-xs tabular-nums text-slate-400">{formatShortDate(rider.updated_at)}</p></td>{canManageRiders ? <td className="pr-3 text-right"><Button type="button" variant="ghost" aria-label={`Sửa ${rider.full_name ?? rider.rider_code}`} className="size-9 p-0" onClick={(event) => { event.stopPropagation(); beginEdit(rider); }}><Pencil size={15} /></Button></td> : null}</tr>)}{!loading && paginated.length === 0 ? <tr><td colSpan={canManageRiders ? 7 : 5} className="h-80 text-center text-sm text-slate-500">Không có rider nào khớp bộ lọc hiện tại.</td></tr> : null}</tbody>
+              <tbody className="divide-y divide-slate-100">{loading ? Array.from({ length: 8 }, (_, index) => <tr key={index} className="h-16 animate-pulse"><td colSpan={canManageRiders ? 7 : 5} className="px-4"><div className="h-4 rounded bg-slate-100" /></td></tr>) : paginated.map((rider) => <RiderDesktopRow key={rider.id} rider={rider} districts={districts} checked={checkedIds.has(rider.id)} canManageRiders={canManageRiders} onCheck={() => toggleChecked(rider.id)} onOpen={() => { setSelected(rider); setShowDetail(true); }} onEdit={() => beginEdit(rider)} />)}{!loading && paginated.length === 0 ? <tr><td colSpan={canManageRiders ? 7 : 5} className="h-80 text-center text-sm text-slate-500">Không có rider nào khớp bộ lọc hiện tại.</td></tr> : null}</tbody>
             </table>
-          </div>
+          </div> : null}
           <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3"><p className="text-sm text-slate-500">Trang <strong className="text-slate-700">{safePage}/{pageCount}</strong></p><div className="flex gap-2"><Button type="button" variant="secondary" className="size-9 p-0" aria-label="Trang trước" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}><ChevronLeft size={16} /></Button><Button type="button" variant="secondary" className="size-9 p-0" aria-label="Trang sau" disabled={safePage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}><ChevronRight size={16} /></Button></div></div>
         </section>
       </div>
@@ -688,7 +743,49 @@ export function RidersView({
   );
 }
 
-function RiderMobileCard({ rider, districts, checked, canManageRiders, onCheck, onOpen, onEdit }: { rider: Rider; districts: DistrictDefinition[]; checked: boolean; canManageRiders: boolean; onCheck: () => void; onOpen: () => void; onEdit: () => void }) {
+type RiderListItemProps = {
+  rider: Rider;
+  districts: DistrictDefinition[];
+  checked: boolean;
+  canManageRiders: boolean;
+  onCheck: () => void;
+  onOpen: () => void;
+  onEdit: () => void;
+};
+
+const RiderDesktopRow = memo(function RiderDesktopRow({
+  rider,
+  districts,
+  checked,
+  canManageRiders,
+  onCheck,
+  onOpen,
+  onEdit,
+}: RiderListItemProps) {
+  return (
+    <tr
+      className={cn("rider-table-row h-16 cursor-pointer", checked && "is-checked")}
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      onClick={onOpen}
+    >
+      {canManageRiders ? <td className="px-4" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Chọn ${rider.full_name ?? rider.rider_code}`} checked={checked} onChange={onCheck} /></td> : null}
+      <td className="px-4 py-2"><div className="flex min-w-0 items-center gap-3"><RiderAvatar rider={rider} size="sm" /><div className="min-w-0"><p className="truncate font-semibold text-slate-950">{rider.full_name ?? "Chưa có tên"}</p><p className="truncate font-mono text-xs text-slate-500">{rider.rider_code}{riderPhone(rider) ? ` · ${riderPhone(rider)}` : ""}</p></div></div></td>
+      <td className="px-4"><RiderStatusBadge status={rider.status} /></td>
+      <td className="px-4"><p className="truncate font-medium text-slate-800">{districtDisplayName(rider.delivery_district, districts) || "Chưa gán"}</p><p className="truncate text-xs text-slate-500">{rider.delivery_ward ?? rider.kv ?? "—"}</p></td>
+      <td className="px-4 font-semibold text-slate-700">{rider.cot ?? "—"}</td>
+      <td className="px-4 text-right"><p className="text-sm tabular-nums text-slate-700">{formatRelativeTime(rider.updated_at)}</p><p className="text-xs tabular-nums text-slate-400">{formatShortDate(rider.updated_at)}</p></td>
+      {canManageRiders ? <td className="pr-3 text-right"><Button type="button" variant="ghost" aria-label={`Sửa ${rider.full_name ?? rider.rider_code}`} className="size-9 p-0" onClick={(event) => { event.stopPropagation(); onEdit(); }}><Pencil size={15} /></Button></td> : null}
+    </tr>
+  );
+}, areRiderListItemPropsEqual);
+
+const RiderMobileCard = memo(function RiderMobileCard({ rider, districts, checked, canManageRiders, onCheck, onOpen, onEdit }: RiderListItemProps) {
   return (
     <article className={cn("rider-mobile-card", checked && "is-checked")}>
       <div
@@ -729,7 +826,7 @@ function RiderMobileCard({ rider, districts, checked, canManageRiders, onCheck, 
       ) : null}
     </article>
   );
-}
+}, areRiderListItemPropsEqual);
 
 function EmptyRiders() {
   return (
@@ -804,6 +901,15 @@ function formatRate(value: number | null | undefined) {
 function riderPhone(rider: Rider) {
   const phone = rider.phone ?? rider.raw_data?.phone ?? rider.raw_data?.phone_number ?? rider.raw_data?.mobile;
   return typeof phone === "string" || typeof phone === "number" ? String(phone) : "";
+}
+
+function areRiderListItemPropsEqual(previous: RiderListItemProps, next: RiderListItemProps) {
+  return (
+    previous.rider === next.rider &&
+    previous.districts === next.districts &&
+    previous.checked === next.checked &&
+    previous.canManageRiders === next.canManageRiders
+  );
 }
 
 function RiderDetailModal({ selected, canManageRiders, deleting, onClose, onEdit, onDelete, onUpdated }: { selected: Rider; canManageRiders: boolean; deleting: boolean; onClose: () => void; onEdit: (rider: Rider) => void; onDelete: (rider: Rider) => void; onUpdated: (rider: Rider) => void }) {
@@ -1238,6 +1344,35 @@ function wardShortLabel(value: string) {
 
 function joinLocation(...parts: Array<string | null | undefined>) {
   return parts.filter(Boolean).join(" / ");
+}
+
+function useDebouncedValue<T>(value: T, delayMs: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [delayMs, value]);
+
+  return debouncedValue;
+}
+
+function useDesktopLayout() {
+  return useSyncExternalStore(subscribeDesktopLayout, getDesktopLayoutSnapshot, getDesktopLayoutServerSnapshot);
+}
+
+function subscribeDesktopLayout(onStoreChange: () => void) {
+  const mediaQuery = window.matchMedia("(min-width: 1024px)");
+  mediaQuery.addEventListener("change", onStoreChange);
+  return () => mediaQuery.removeEventListener("change", onStoreChange);
+}
+
+function getDesktopLayoutSnapshot() {
+  return window.matchMedia("(min-width: 1024px)").matches;
+}
+
+function getDesktopLayoutServerSnapshot() {
+  return true;
 }
 
 function buildRiderRegistryUrl({
