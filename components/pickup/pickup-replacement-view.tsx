@@ -150,6 +150,15 @@ export function PickupReplacementView() {
       ),
     [attendance],
   );
+  const replacementCandidatesByDate = useMemo(
+    () => new Map(days.map((day) => [
+      day,
+      activeRiders.filter((candidate) => !isPickupOff(
+        attendanceMap.get(`${normalize(candidate.rider_code)}:${day}`),
+      )),
+    ])),
+    [activeRiders, attendanceMap, days],
+  );
   const pickupRiders = useMemo(
     () => activeRiders.filter(hasPickupRoute),
     [activeRiders],
@@ -442,7 +451,7 @@ export function PickupReplacementView() {
                     const item = map.get(key);
                     const offLog = attendanceMap.get(`${normalize(rider.rider_code)}:${day}`);
                     const off = isPickupOff(offLog);
-                    const replacementCandidates = activeRiders.filter(
+                    const replacementCandidates = (replacementCandidatesByDate.get(day) ?? []).filter(
                       (candidate) => candidate.id !== rider.id,
                     );
                     return (

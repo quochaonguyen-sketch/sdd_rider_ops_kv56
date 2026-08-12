@@ -12,6 +12,7 @@ import {
 export const runtime = "nodejs";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const unavailablePickupStatuses = ["OFF_WEEKLY", "OFF_APPROVED", "OFF_UNEXPECTED", "NO_PICKUP"] as const;
 const updateSchema = z.object({
   rider_id: z.string().uuid(),
   rider_code: z.string().trim().min(1),
@@ -157,7 +158,8 @@ export async function PUT(request: Request) {
   const { data: riders, error: riderError } = await auth.admin
     .from("riders")
     .select("id,rider_code,full_name")
-    .in("id", riderIds);
+    .in("id", riderIds)
+    .eq("status", "active");
   if (riderError) return NextResponse.json({ success: false, error: riderError.message }, { status: 400 });
 
   const riderById = new Map(((riders ?? []) as RiderIdentity[]).map((rider) => [rider.id, rider]));
@@ -170,6 +172,25 @@ export async function PUT(request: Request) {
   }
   if (parsed.data.status === "ASSIGNED" && (!replacement || replacement.rider_code !== parsed.data.replacement_rider_code)) {
     return NextResponse.json({ success: false, error: "Rider pick thay không hợp lệ" }, { status: 400 });
+  }
+
+  if (replacement) {
+    const { data: unavailableLog, error: attendanceError } = await auth.admin
+      .from("attendance_logs")
+      .select("status")
+      .eq("rider_code", replacement.rider_code)
+      .eq("work_date", parsed.data.work_date)
+      .in("status", [...unavailablePickupStatuses])
+      .maybeSingle();
+    if (attendanceError) {
+      return NextResponse.json({ success: false, error: attendanceError.message }, { status: 400 });
+    }
+    if (unavailableLog) {
+      return NextResponse.json(
+        { success: false, error: `Rider ${replacement.rider_code} đang OFF hoặc không đi pick ngày ${parsed.data.work_date}.` },
+        { status: 409 },
+      );
+    }
   }
 
   const payload = {
