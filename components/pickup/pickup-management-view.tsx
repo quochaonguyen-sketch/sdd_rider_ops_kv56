@@ -1,14 +1,13 @@
 "use client";
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, Download, ListChecks, RefreshCcw, Search, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Database, Download, ListChecks, MapPinned, RefreshCcw, Search, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/utils/cn";
 import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
+import styles from "./pickup-management-view.module.css";
 
 type PickupAssignment = {
   id: string;
@@ -35,7 +34,6 @@ type RouteSummary = {
 
 const PAGE_SIZE = 1000;
 const ROW_PAGE_SIZE = 80;
-const ACCENT = "#f97316";
 
 export function PickupManagementView() {
   const [rows, setRows] = useState<PickupAssignment[]>([]);
@@ -97,7 +95,7 @@ export function PickupManagementView() {
   const routeOptions = useMemo(
     () =>
       routeSummaries
-        .filter((route) => route.route !== "Chua co tuyen")
+        .filter((route) => route.route !== "Chưa có tuyến")
         .map((route) => route.route)
         .sort((a, b) => a.localeCompare(b, "vi", { numeric: true })),
     [routeSummaries],
@@ -117,6 +115,12 @@ export function PickupManagementView() {
   }, [deferredQuery, rows, selectedRoute]);
 
   const activeRoute = routeSummaries.find((route) => route.route === selectedRoute);
+  const featuredRoutes = useMemo(() => {
+    const topRoutes = routeSummaries.slice(0, 9);
+    if (selectedRoute === "all" || topRoutes.some((route) => route.route === selectedRoute)) return topRoutes;
+    const selected = routeSummaries.find((route) => route.route === selectedRoute);
+    return selected ? [selected, ...topRoutes].slice(0, 9) : topRoutes;
+  }, [routeSummaries, selectedRoute]);
   const pageCount = Math.max(1, Math.ceil(selectedRows.length / ROW_PAGE_SIZE));
   const safePage = Math.min(currentPage, pageCount);
   const pageStart = (safePage - 1) * ROW_PAGE_SIZE;
@@ -146,7 +150,7 @@ export function PickupManagementView() {
     setRows((current) =>
       current.map((item) => (item.id === row.id ? { ...item, route_name: cleanedRoute } : item)),
     );
-    setSuccess(`Da chuyen ${pickupCode(row)} sang ${cleanedRoute}.`);
+    setSuccess(`Đã chuyển ${pickupCode(row)} sang ${cleanedRoute}.`);
   }
 
   function exportForPython() {
@@ -165,171 +169,84 @@ export function PickupManagementView() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: ACCENT }}>
-            Pickup operations
-          </p>
-          <h1 className="mt-1 text-4xl font-black text-slate-950 my-2">Pickup Management</h1>
-          <p className="mt-1 text-md text-slate-500 ">
-            Quan ly PUP/shop trong tung tuyen, dieu chinh tuyen roi xuat file cho Python gan.
-          </p>
+    <div className={styles.page}>
+      <header className={styles.commandHeader}>
+        <div className={styles.titleBlock}>
+          <span className={styles.titleIcon}><ListChecks size={20} /></span>
+          <div>
+            <p className={styles.contextLine}>Pickup operations · dữ liệu PUP theo tuyến</p>
+            <h1>Quản lý PUP</h1>
+            <p className={styles.lede}>Tìm shop, đổi tuyến và xuất dữ liệu gán từ cùng một màn hình.</p>
+          </div>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center bg-slate-50 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700">
-          <Button type="button" variant="secondary" onClick={exportForPython} disabled={loading || rows.length === 0}>
+        <div className={styles.commandActions}>
+          <Button type="button" variant="secondary" onClick={refresh} disabled={loading} className={styles.actionButton}>
+            <RefreshCcw size={16} className={loading ? styles.spinning : undefined} />
+            Làm mới
+          </Button>
+          <Button type="button" onClick={exportForPython} disabled={loading || rows.length === 0} className={styles.actionButton}>
             <Download size={16} />
-            Xuat file Excel
-          </Button>
-          <Button type="button" variant="secondary" onClick={refresh} disabled={loading}>
-            <RefreshCcw size={16} className={loading ? "animate-spin" : undefined} />
-            Lam moi
+            Xuất CSV
           </Button>
         </div>
-      </div>
+      </header>
 
-      {error ? (
-        <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
-          Khong tai/cap nhat duoc PUP: {error}
-        </p>
-      ) : null}
-      {success ? (
-        <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">
-          {success}
-        </p>
-      ) : null}
+      {error ? <p className={styles.errorBanner}><AlertTriangle size={17} />Không tải hoặc cập nhật được PUP: {error}</p> : null}
+      {success ? <p className={styles.successBanner}><CheckCircle2 size={17} />{success}</p> : null}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <MetricCard label="Tong PUP" value={rows.length} loading={loading} />
-        <MetricCard label="So tuyen" value={routeSummaries.length} loading={loading} />
-        <MetricCard label="Dang hien thi" value={selectedRows.length} loading={loading} />
-        <MetricCard label="Chua co tuyen" value={rows.filter((row) => routeName(row.route_name) === "Chua co tuyen").length} loading={loading} />
-      </div>
+      <section className={styles.signalStrip} aria-label="Tín hiệu vận hành PUP">
+        <MetricCard icon={<Database size={17} />} label="Tổng PUP" value={rows.length} loading={loading} />
+        <MetricCard icon={<MapPinned size={17} />} label="Số tuyến" value={routeSummaries.length} loading={loading} />
+        <MetricCard icon={<Search size={17} />} label="Đang hiển thị" value={selectedRows.length} loading={loading} />
+        <MetricCard icon={<AlertTriangle size={17} />} label="Chưa có tuyến" value={rows.filter((row) => routeName(row.route_name) === "Chưa có tuyến").length} loading={loading} tone="warning" />
+      </section>
 
-      <Card className="space-y-4">
-        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide" style={{ color: ACCENT }}>
-          <ListChecks size={16} />
-          Tabs tuyen
-        </div>
-
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          <RouteTab
-            active={selectedRoute === "all"}
-            label="Tat ca"
-            count={rows.length}
-            helper={`${routeSummaries.length} tuyen`}
-            onClick={() => {
-              setSelectedRoute("all");
-              setCurrentPage(1);
-            }}
-          />
-          {routeSummaries.map((route) => (
-            <RouteTab
-              key={route.route}
-              active={selectedRoute === route.route}
-              label={route.route}
-              count={route.count}
-              helper={route.helper}
-              onClick={() => {
-                setSelectedRoute(route.route);
-                setCurrentPage(1);
-              }}
-            />
-          ))}
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
-          <label className="relative block">
-            <Search
-              size={16}
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-            />
-            <Input
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setCurrentPage(1);
-              }}
-              placeholder="Tim PUP, shop, dia chi, ma tuyen..."
-              className="pl-9"
-            />
+      <section className={styles.routeIndex} aria-labelledby="route-index-title">
+        <div className={styles.sectionHeading}>
+          <div><h2 id="route-index-title">Chỉ mục tuyến</h2><p>Chọn nhanh tuyến nhiều PUP hoặc mở toàn bộ danh sách tuyến.</p></div>
+          <label className={styles.routeSelectLabel}>
+            <span>Tất cả tuyến</span>
+            <select value={selectedRoute} onChange={(event) => { setSelectedRoute(event.target.value); setCurrentPage(1); }}>
+              <option value="all">Tất cả · {formatNumber(rows.length)} PUP</option>
+              {routeSummaries.map((route) => <option key={route.route} value={route.route}>{route.route} · {formatNumber(route.count)}</option>)}
+            </select>
           </label>
-          <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
-            {formatNumber(selectedRows.length)} PUP {selectedRoute === "all" ? "dang loc" : `trong ${activeRoute?.route ?? selectedRoute}`}
+        </div>
+        <div className={styles.routeRail}>
+          <RouteTab active={selectedRoute === "all"} label="Tất cả" count={rows.length} helper={`${routeSummaries.length} tuyến`} onClick={() => { setSelectedRoute("all"); setCurrentPage(1); }} />
+          {featuredRoutes.map((route) => <RouteTab key={route.route} active={selectedRoute === route.route} label={route.route} count={route.count} helper={route.helper} onClick={() => { setSelectedRoute(route.route); setCurrentPage(1); }} />)}
+        </div>
+      </section>
+
+      <section className={styles.ledger} aria-labelledby="pup-ledger-title">
+        <div className={styles.ledgerToolbar}>
+          <div><h2 id="pup-ledger-title">Danh sách PUP</h2><p>{selectedRoute === "all" ? "Toàn bộ dữ liệu" : activeRoute?.route ?? selectedRoute} · {formatNumber(selectedRows.length)} kết quả</p></div>
+          <label className={styles.searchField}>
+            <span>Tìm trong danh sách</span>
+            <div className={styles.searchShell}><Search size={17} /><Input value={query} onChange={(event) => { setQuery(event.target.value); setCurrentPage(1); }} placeholder="Mã PUP, shop, địa chỉ, tuyến…" className={styles.searchInput} />{query ? <button type="button" aria-label="Xóa từ khóa tìm kiếm" onClick={() => setQuery("")}><X size={15} /></button> : null}</div>
+          </label>
+        </div>
+
+        <div className={styles.tableFrame}>
+          <div className={styles.tableHead}><span>PUP</span><span>Shop</span><span>Địa chỉ</span><span>Phường / Quận</span><span>Tuyến hiện tại</span></div>
+          <div className={styles.tableBody} aria-live="polite">
+            {loading ? Array.from({ length: 8 }, (_, index) => <div key={index} className={styles.skeletonRow}><i /><i /><i /><i /></div>) : null}
+            {!loading && selectedRows.length === 0 ? <div className={styles.emptyState}><Search size={21} /><strong>Không có PUP phù hợp.</strong><span>Đổi từ khóa hoặc chọn lại tuyến để mở rộng kết quả.</span><button type="button" onClick={() => { setQuery(""); setSelectedRoute("all"); }}>Xóa bộ lọc</button></div> : null}
+            {!loading ? pagedRows.map((row) => <div key={row.id} className={styles.tableRow}>
+              <div className={styles.identityCell} data-label="PUP"><strong>{pickupCode(row)}</strong><span>{formatAssignedAt(row.assigned_at)}</span></div>
+              <p className={styles.shopCell} data-label="Shop">{row.shop_name || "—"}</p>
+              <p className={styles.addressCell} data-label="Địa chỉ" title={row.shop_address || undefined}>{row.shop_address || "—"}</p>
+              <div className={styles.locationCell} data-label="Phường / Quận"><strong>{row.ward || "—"}</strong><span>{row.district || "—"}</span></div>
+              <div className={styles.routeCell} data-label="Tuyến hiện tại"><RoutePicker row={row} routes={routeOptions} disabled={updatingId === row.id} onChangeRoute={changeRoute} /></div>
+            </div>) : null}
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-slate-200">
-          <div className="hidden grid-cols-[120px_1.35fr_minmax(170px,1.25fr)_130px_250px] gap-3 bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-wide text-slate-500 xl:grid">
-            <span>PUP ID</span>
-            <span>Shop</span>
-            <span>Dia chi</span>
-            <span>Phuong</span>
-            <span>Chuyen tuyen</span>
-          </div>
-          <div className="max-h-[620px] divide-y divide-slate-100 overflow-y-auto">
-            {!loading && selectedRows.length === 0 ? (
-              <p className="p-6 text-center text-sm text-slate-500">Chua co PUP nao cho bo loc nay.</p>
-            ) : null}
-            {loading ? <p className="p-6 text-center text-sm text-slate-500">Dang tai PUP...</p> : null}
-            {!loading
-              ? pagedRows.map((row) => (
-                  <div
-                    key={row.id}
-                    className="grid gap-3 px-4 py-3 text-sm xl:grid-cols-[120px_1.35fr_minmax(170px,1.25fr)_130px_250px] xl:items-center"
-                  >
-                    <div>
-                      <p className="font-mono text-xs font-bold text-slate-950">{pickupCode(row)}</p>
-                      <p className="mt-0.5 text-[11px] font-semibold text-slate-400">{formatAssignedAt(row.assigned_at)}</p>
-                    </div>
-                    <p className="min-w-0 font-semibold text-slate-800 xl:truncate">{row.shop_name || "-"}</p>
-                    <p className="min-w-0 text-slate-600 xl:truncate" title={row.shop_address || undefined}>
-                      {row.shop_address || "-"}
-                    </p>
-                    <div className="text-slate-700">
-                      <p className="font-semibold">{row.ward || "-"}</p>
-                      <p className="text-xs text-slate-500">{row.district || "-"}</p>
-                    </div>
-                    <RoutePicker
-                      row={row}
-                      routes={routeOptions}
-                      disabled={updatingId === row.id}
-                      onChangeRoute={changeRoute}
-                    />
-                  </div>
-                ))
-              : null}
-          </div>
-        </div>
-        <div className="flex flex-col gap-2 border-t border-slate-100 pt-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
-          <span className="font-semibold">
-            Hien {selectedRows.length === 0 ? 0 : pageStart + 1}-{Math.min(pageStart + ROW_PAGE_SIZE, selectedRows.length)} / {formatNumber(selectedRows.length)} PUP
-          </span>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              className="h-9 min-h-9 px-3"
-              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-              disabled={safePage <= 1}
-            >
-              Truoc
-            </Button>
-            <span className="min-w-24 text-center text-xs font-bold uppercase tracking-wide text-slate-500">
-              Trang {safePage}/{pageCount}
-            </span>
-            <Button
-              type="button"
-              variant="secondary"
-              className="h-9 min-h-9 px-3"
-              onClick={() => setCurrentPage((page) => Math.min(pageCount, page + 1))}
-              disabled={safePage >= pageCount}
-            >
-              Sau
-            </Button>
-          </div>
-        </div>
-      </Card>
+        <footer className={styles.pagination}>
+          <span>Hiện {selectedRows.length === 0 ? 0 : pageStart + 1}–{Math.min(pageStart + ROW_PAGE_SIZE, selectedRows.length)} / {formatNumber(selectedRows.length)} PUP</span>
+          <div><button type="button" aria-label="Trang trước" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={safePage <= 1}><ChevronLeft size={16} /></button><strong>Trang {safePage}/{pageCount}</strong><button type="button" aria-label="Trang sau" onClick={() => setCurrentPage((page) => Math.min(pageCount, page + 1))} disabled={safePage >= pageCount}><ChevronRight size={16} /></button></div>
+        </footer>
+      </section>
     </div>
   );
 }
@@ -376,18 +293,19 @@ function RoutePicker({
         type="button"
         onClick={() => setOpen(true)}
         disabled={disabled}
-        className="flex h-10 w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 text-left text-sm font-semibold text-slate-800 transition hover:border-orange-200 hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-50"
-        aria-label={`Chuyen tuyen cho ${pickupCode(row)}`}
+        className={styles.routePickerButton}
+        aria-label={`Chuyển tuyến cho ${pickupCode(row)}`}
+        aria-expanded={false}
       >
-        <span className="min-w-0 truncate">{currentRoute}</span>
-        <ChevronDown size={15} className="shrink-0 text-slate-400" />
+        <span>{currentRoute}</span>
+        <ChevronDown size={15} />
       </button>
     );
   }
 
   return (
-    <div className="min-w-[240px] rounded-xl border border-orange-200 bg-white p-2 shadow-sm">
-      <div className="grid grid-cols-[minmax(0,1fr)_36px_36px] gap-1.5">
+    <div className={styles.routeEditor} data-state={disabled ? "loading" : "default"}>
+      <div className={styles.routeEditorControls}>
         <Input
           value={draftRoute}
           onChange={(event) => setDraftRoute(event.target.value)}
@@ -396,57 +314,67 @@ function RoutePicker({
             if (event.key === "Escape") cancelEdit();
           }}
           autoFocus
-          className="h-9"
-          aria-label={`Nhap ma tuyen cho ${pickupCode(row)}`}
+          className={styles.routeInput}
+          aria-label={`Nhập mã tuyến cho ${pickupCode(row)}`}
         />
         <button
           type="button"
           onClick={() => void saveRoute()}
           disabled={disabled || !draftRoute.trim()}
-          className="grid size-9 shrink-0 place-items-center rounded-md bg-slate-950 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-          aria-label="Luu tuyen"
+          className={styles.routeSaveButton}
+          aria-label="Lưu tuyến"
         >
           <Check size={15} />
         </button>
         <button
           type="button"
           onClick={cancelEdit}
-          className="grid size-9 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
-          aria-label="Huy doi tuyen"
+          className={styles.routeCancelButton}
+          aria-label="Hủy đổi tuyến"
         >
           <X size={15} />
         </button>
       </div>
       {filteredRoutes.length > 0 ? (
-        <div className="mt-2 grid gap-1">
+        <div className={styles.routeOptions}>
           {filteredRoutes.map((route) => (
             <button
               key={route}
               type="button"
               onClick={() => void saveRoute(route)}
-              className="truncate rounded-md bg-slate-50 px-2 py-1.5 text-left text-xs font-semibold text-slate-700 transition hover:bg-orange-50 hover:text-orange-700"
+              className={styles.routeOption}
             >
               {route}
             </button>
           ))}
         </div>
       ) : (
-        <p className="mt-2 rounded-md bg-slate-50 px-2 py-1.5 text-xs font-semibold text-slate-500">
-          Enter de luu ma tuyen moi.
+        <p className={styles.routeHint}>
+          Nhấn Enter để lưu mã tuyến mới.
         </p>
       )}
     </div>
   );
 }
 
-function MetricCard({ label, value, loading }: { label: string; value: number; loading: boolean }) {
+function MetricCard({
+  icon,
+  label,
+  value,
+  loading,
+  tone = "default",
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  loading: boolean;
+  tone?: "default" | "warning";
+}) {
   return (
-    <Card>
-      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-3 text-2xl font-black text-slate-950 sm:text-3xl">
-        {loading ? "-" : formatNumber(value)}
-      </p>
-    </Card>
+    <div className={styles.metric} data-tone={tone}>
+      <span className={styles.metricIcon}>{icon}</span>
+      <div><p>{label}</p><strong>{loading ? "—" : formatNumber(value)}</strong></div>
+    </div>
   );
 }
 
@@ -467,17 +395,13 @@ function RouteTab({
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        "min-w-[150px] rounded-xl border px-3 py-2 text-left transition",
-        active ? "border-slate-300 bg-white shadow-sm" : "border-slate-200 bg-slate-50 hover:bg-white",
-      )}
+      className={`${styles.routeTab} ${active ? styles.routeTabActive : ""}`}
+      aria-pressed={active}
     >
-      <span className="block truncate text-sm font-black text-slate-950">{label}</span>
-      <span className="mt-1 flex items-center justify-between gap-2">
-        <span className="truncate text-[11px] font-semibold text-slate-500">{helper || "Chua co COT"}</span>
-        <strong className="rounded-full px-2 py-0.5 text-xs text-white" style={{ backgroundColor: ACCENT }}>
-          {formatNumber(count)}
-        </strong>
+      <span className={styles.routeTabLabel}>{label}</span>
+      <span className={styles.routeTabMeta}>
+        <span>{helper || "Chưa có COT"}</span>
+        <strong>{formatNumber(count)}</strong>
       </span>
     </button>
   );
@@ -506,7 +430,7 @@ function summarizeRoutes(rows: PickupAssignment[]): RouteSummary[] {
 }
 
 function routeName(value: string | null | undefined) {
-  return value?.trim() || "Chua co tuyen";
+  return value?.trim() || "Chưa có tuyến";
 }
 
 function pickupCode(row: PickupAssignment) {
