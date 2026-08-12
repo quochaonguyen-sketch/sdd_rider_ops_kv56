@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { canManageRiders } from "@/lib/auth/permissions";
 import { getCachedRiders, invalidateRidersCache } from "@/lib/cache/operations-cache";
+import { getRiderRegistryData, riderRegistryQueryFromUrl } from "@/lib/riders/rider-registry";
 
 const createRiderSchema = z.object({
   kv: z.string().trim().optional().nullable(),
@@ -50,13 +51,19 @@ async function getRiderManager() {
   return { user, allowed: canManageRiders(profile?.role) };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const user = await getSignedInUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
   try {
+    const url = new URL(request.url);
+    if (url.searchParams.get("view") === "registry") {
+      const registry = await getRiderRegistryData(riderRegistryQueryFromUrl(url));
+      return NextResponse.json({ success: true, ...registry });
+    }
+
     const { data, cache } = await getCachedRiders();
     return NextResponse.json({ success: true, riders: data, cache });
   } catch (error) {

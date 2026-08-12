@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowDown,
@@ -28,7 +28,7 @@ import {
   ZoomIn,
 } from "lucide-react";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
-import type { DriverPerformanceDaily, Rider } from "@/types";
+import type { DriverPerformanceDaily, Rider, RiderRegistryData } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -41,10 +41,7 @@ import {
   canonicalDistrictName,
   canonicalWardNames,
   districtDefinitionFor,
-  districtMatches,
   hcmDistricts,
-  normalizeLocation,
-  wardMatches,
   wardNamesForDistrict,
   type DistrictDefinition,
 } from "@/lib/locations/hcm";
@@ -82,10 +79,8 @@ type RiderPerformanceResponse = {
 
 type RidersResponse = {
   success: boolean;
-  riders?: Rider[];
-  cache?: { hit: boolean; expires_at: string | null };
   error?: string;
-};
+} & Partial<RiderRegistryData>;
 
 type ThiCongPlanSyncResponse = {
   success: boolean;
@@ -98,8 +93,6 @@ type ThiCongPlanSyncResponse = {
 
 type RiderSortKey = "name" | "status" | "zone" | "cot" | "updated";
 const RIDERS_PER_PAGE = 20;
-const RIDERS_BROWSER_CACHE_KEY = "rider-ops:riders:v1";
-const RIDERS_BROWSER_CACHE_TTL_MS = 60_000;
 
 const emptyRiderForm: RiderFormState = {
   kv: "KV5",
@@ -115,10 +108,20 @@ const emptyRiderForm: RiderFormState = {
   status: "active",
 };
 
-export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
+export function RidersView({
+  canManageRiders,
+  initialData,
+  initialError,
+}: {
+  canManageRiders: boolean;
+  initialData: RiderRegistryData;
+  initialError: string | null;
+}) {
   const [districts, setDistricts] = useState<DistrictDefinition[]>(hcmDistricts);
-  const [riders, setRiders] = useState<Rider[]>([]);
+  const [registry, setRegistry] = useState<RiderRegistryData>(initialData);
+  const [riders, setRiders] = useState<Rider[]>(initialData.riders);
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [kv, setKv] = useState("all");
   const [cot, setCot] = useState("all");
   const [pickupDistrict, setPickupDistrict] = useState("all");
@@ -141,38 +144,78 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
   const [planSyncing, setPlanSyncing] = useState(false);
   const [importIssues, setImportIssues] = useState<ImportIssue[]>([]);
   const [success, setSuccess] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  useReportInitialDataLoading("riders", loading);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  useReportInitialDataLoading("riders", false);
+  const [error, setError] = useState<string | null>(initialError);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const skipInitialRequestRef = useRef(true);
+  const requestSequenceRef = useRef(0);
 
-  const load = useCallback(async () => {
+  const registryUrl = useMemo(
+    () =>
+      buildRiderRegistryUrl({
+        query: deferredQuery,
+        kv,
+        cot,
+        pickupDistrict,
+        pickupWard,
+        deliveryDistrict,
+        deliveryWard,
+        status,
+        shift,
+        sort,
+        page,
+      }),
+    [
+      cot,
+      deferredQuery,
+      deliveryDistrict,
+      deliveryWard,
+      kv,
+      page,
+      pickupDistrict,
+      pickupWard,
+      shift,
+      sort,
+      status,
+    ],
+  );
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const requestSequence = ++requestSequenceRef.current;
+    setLoading(true);
     setError(null);
 
-    const cached = readRidersBrowserCache();
-    if (cached) {
-      setRiders(cached);
-      setSelected((current) => cached.find((rider) => rider.id === current?.id) ?? cached[0] ?? null);
-      setLoading(false);
-    }
+    try {
+      const response = await fetch(registryUrl, { cache: "no-store", signal });
+      const result = (await response.json().catch(() => null)) as RidersResponse | null;
+      if (signal?.aborted || requestSequence !== requestSequenceRef.current) return;
 
-    const response = await fetch("/api/riders", { cache: "no-store" });
-    const result = (await response.json().catch(() => null)) as RidersResponse | null;
+      if (!response.ok || !result?.success || !isRiderRegistryData(result)) {
+        setError(result?.error ?? "Không thể tải danh sách rider");
+        return;
+      }
 
-    if (!response.ok || !result?.success) {
-      setError(result?.error ?? "Không thể tải danh sách rider");
-    } else {
-      const nextRiders = result.riders ?? [];
-      setRiders(nextRiders);
-      setSelected((current) => nextRiders.find((rider) => rider.id === current?.id) ?? nextRiders[0] ?? null);
-      writeRidersBrowserCache(nextRiders);
+      setRegistry(result);
+      setRiders(result.riders);
+      setSelected((current) => result.riders.find((rider) => rider.id === current?.id) ?? current);
+      if (result.page !== page) setPage(result.page);
+    } catch (caught) {
+      if (signal?.aborted || requestSequence !== requestSequenceRef.current) return;
+      setError(caught instanceof Error ? caught.message : "Không thể tải danh sách rider");
+    } finally {
+      if (!signal?.aborted && requestSequence === requestSequenceRef.current) setLoading(false);
     }
-    setLoading(false);
-  }, []);
+  }, [page, registryUrl]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
+    if (skipInitialRequestRef.current) {
+      skipInitialRequestRef.current = false;
+      return;
+    }
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
   }, [load]);
 
   useEffect(() => {
@@ -227,66 +270,18 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
   useSupabaseRealtime({ table: "riders", onChange: refresh });
 
   const districtOptions = useMemo(() => districts.map((district) => district.name), [districts]);
-  const cotOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.cot)), [riders]);
-  const shiftOptions = useMemo(() => uniqueOptions(riders.map((rider) => rider.current_shift)), [riders]);
-  const zoneOptions = useMemo(
-    () => uniqueOptions(riders.map((rider) => districtDisplayName(rider.delivery_district, districts))),
-    [districts, riders],
-  );
+  const cotOptions = registry.options.cots;
+  const shiftOptions = registry.options.shifts;
+  const zoneOptions = registry.options.delivery_districts;
   const pickupWardOptions = useMemo(
     () => (pickupDistrict === "all" ? [] : wardNamesForDistrict(pickupDistrict, districts)),
     [districts, pickupDistrict],
   );
 
-  const filtered = useMemo(() => {
-    const normalized = normalizeLocation(query);
-    return riders.filter((rider) => {
-      const matchesQuery =
-        !normalized ||
-        [
-          rider.rider_code,
-          rider.full_name,
-          rider.home_district,
-          rider.pickup_district,
-          rider.pickup_ward,
-          rider.point_name,
-          rider.delivery_district,
-          rider.delivery_ward,
-          rider.cot,
-          rider.kv,
-          riderPhone(rider),
-        ].some((value) => normalizeLocation(value).includes(normalized));
-      const matchesKv = kv === "all" || canonicalKv(rider.kv) === kv;
-      const matchesCot = cot === "all" || rider.cot === cot;
-      const matchesPickupDistrict = pickupDistrict === "all" || districtMatches(rider.pickup_district, pickupDistrict, districts);
-      const matchesPickupWard =
-        pickupWard === "all" || wardMatches(rider.pickup_district, rider.pickup_ward, pickupWard, districts);
-      const matchesDeliveryDistrict = deliveryDistrict === "all" ||
-        (deliveryDistrict === "__unassigned__" ? !rider.zone_id && !rider.delivery_district : districtMatches(rider.delivery_district, deliveryDistrict, districts));
-      const matchesDeliveryWard =
-        deliveryWard === "all" || wardMatches(rider.delivery_district, rider.delivery_ward, deliveryWard, districts);
-      const matchesStatus = status === "all" || rider.status === status;
-      const matchesShift = shift === "all" || (shift === "__has__" ? Boolean(rider.current_shift) : shift === "__none__" ? !rider.current_shift : rider.current_shift === shift);
-      return matchesQuery && matchesKv && matchesCot && matchesPickupDistrict && matchesPickupWard && matchesDeliveryDistrict && matchesDeliveryWard && matchesStatus && matchesShift;
-    }).sort((a, b) => compareRiders(a, b, sort.key) * (sort.direction === "asc" ? 1 : -1));
-  }, [cot, deliveryDistrict, deliveryWard, districts, kv, pickupDistrict, pickupWard, query, riders, shift, sort, status]);
-
-  const stats = useMemo(() => {
-    const active = riders.filter((rider) => rider.status !== "inactive").length;
-    const onShift = riders.filter((rider) => Boolean(rider.current_shift)).length;
-    const unassigned = riders.filter((rider) => !rider.zone_id && !rider.delivery_district).length;
-    return {
-      total: riders.length,
-      active,
-      inactive: riders.length - active,
-      onShift,
-      unassigned,
-    };
-  }, [riders]);
-
-  const pageCount = Math.max(1, Math.ceil(filtered.length / RIDERS_PER_PAGE));
-  const safePage = Math.min(page, pageCount);
-  const paginated = filtered.slice((safePage - 1) * RIDERS_PER_PAGE, safePage * RIDERS_PER_PAGE);
+  const stats = registry.stats;
+  const pageCount = registry.page_count;
+  const safePage = registry.page;
+  const paginated = riders;
   const visibleChecked = paginated.filter((rider) => checkedIds.has(rider.id)).length;
   const activeFilterCount = [query, status !== "all", deliveryDistrict !== "all", shift !== "all", kv !== "all", cot !== "all", pickupDistrict !== "all", pickupWard !== "all", deliveryWard !== "all"].filter(Boolean).length;
 
@@ -440,11 +435,9 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
 
   function updateRiderInView(updated: Rider) {
     setRiders((current) => {
-      const next = current.map((rider) => (rider.id === updated.id ? updated : rider));
-      writeRidersBrowserCache(next);
-      return next;
+      return current.map((rider) => (rider.id === updated.id ? mergeRiderUpdate(rider, updated) : rider));
     });
-    setSelected(updated);
+    setSelected((current) => (current?.id === updated.id ? mergeRiderUpdate(current, updated) : current));
     setSuccess("Đã cập nhật avatar rider.");
   }
 
@@ -457,15 +450,11 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
     const result = await response.json().catch(() => null) as { success?: boolean; error?: string } | null;
     setDeletingId(null);
     if (!response.ok || !result?.success) { setError(result?.error ?? "Không thể xóa rider"); return; }
-    setRiders((current) => {
-      const next = current.filter((item) => item.id !== rider.id);
-      writeRidersBrowserCache(next);
-      return next;
-    });
     setSelected((current) => current?.id === rider.id ? null : current);
     setCheckedIds((current) => { const next = new Set(current); next.delete(rider.id); return next; });
     setShowDetail(false);
     setSuccess(`Đã xóa rider ${name}.`);
+    await load();
   }
 
   return (
@@ -483,7 +472,7 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
           </div>
           <div className="riders-live-readout" aria-live="polite">
             <span className="riders-live-dot" />
-            {loading ? "Đang nạp dữ liệu" : `${formatNumber(filtered.length)} / ${formatNumber(riders.length)} rider`}
+            {loading ? "Đang nạp dữ liệu" : `${formatNumber(registry.total)} / ${formatNumber(stats.total)} rider`}
           </div>
         </div>
         <div className="riders-command-actions">
@@ -522,9 +511,9 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
       </header>
 
       <div className="riders-readouts" aria-label="Tín hiệu vận hành">
-        <StatCard icon={<UserRound size={17} />} label="Tổng rider" value={stats.total} helper={`${filtered.length} đang hiển thị`} tone="slate" active={activeFilterCount === 0} onClick={resetFilters} />
+        <StatCard icon={<UserRound size={17} />} label="Tổng rider" value={stats.total} helper={`${registry.total} đang hiển thị`} tone="slate" active={activeFilterCount === 0} onClick={resetFilters} />
         <StatCard icon={<CheckCircle2 size={17} />} label="Đang hoạt động" value={stats.active} helper={`${stats.inactive} ngừng hoạt động`} tone="emerald" active={status === "active"} onClick={() => { setStatus("active"); setPage(1); }} />
-        <StatCard icon={<Clock3 size={17} />} label="Có ca hiện tại" value={stats.onShift} helper={`${stats.total - stats.onShift} chưa có ca`} tone="blue" active={shift === "__has__"} onClick={() => { setShift("__has__"); setPage(1); }} />
+        <StatCard icon={<Clock3 size={17} />} label="Có ca hiện tại" value={stats.on_shift} helper={`${stats.total - stats.on_shift} chưa có ca`} tone="blue" active={shift === "__has__"} onClick={() => { setShift("__has__"); setPage(1); }} />
         <StatCard icon={<MapPin size={17} />} label="Chưa gán khu vực" value={stats.unassigned} helper="Không có zone hoặc quận giao" tone="amber" active={deliveryDistrict === "__unassigned__"} onClick={() => { setDeliveryDistrict("__unassigned__"); setDeliveryWard("all"); setPage(1); }} />
       </div>
 
@@ -662,7 +651,7 @@ export function RidersView({ canManageRiders }: { canManageRiders: boolean }) {
       <div>
         <section className="riders-registry">
           <div className="riders-registry-header">
-            <div><h2>Rider registry</h2><p aria-live="polite">{filtered.length} kết quả · Chọn rider để mở hồ sơ</p></div>
+            <div><h2>Rider registry</h2><p aria-live="polite">{registry.total} kết quả · Chọn rider để mở hồ sơ</p></div>
             {canManageRiders && checkedIds.size > 0 ? <div className="flex items-center gap-2"><span className="text-sm font-semibold text-blue-700">Đã chọn {checkedIds.size}</span>{checkedIds.size === 1 ? <Button type="button" variant="secondary" className="h-9" onClick={() => { const rider = riders.find((item) => checkedIds.has(item.id)); if (rider) beginEdit(rider); }}><Pencil size={15} />Sửa</Button> : null}<Button type="button" variant="ghost" className="h-9" onClick={() => setCheckedIds(new Set())}>Bỏ chọn</Button></div> : null}
           </div>
           <div className="riders-mobile-list lg:hidden">
@@ -779,14 +768,6 @@ function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }
   return <span className="rider-filter-chip">{label}<button type="button" aria-label={`Xóa bộ lọc ${label}`} onClick={onRemove}><X size={12} /></button></span>;
 }
 
-function compareRiders(a: Rider, b: Rider, key: RiderSortKey) {
-  if (key === "name") return (a.full_name ?? a.rider_code).localeCompare(b.full_name ?? b.rider_code, "vi", { numeric: true });
-  if (key === "status") return (a.status ?? "active").localeCompare(b.status ?? "active");
-  if (key === "zone") return (a.delivery_district ?? "").localeCompare(b.delivery_district ?? "", "vi", { numeric: true });
-  if (key === "cot") return (a.cot ?? "").localeCompare(b.cot ?? "", "vi", { numeric: true });
-  return new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
-}
-
 function formatRelativeTime(value: string) {
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return "—";
@@ -821,7 +802,7 @@ function formatRate(value: number | null | undefined) {
 }
 
 function riderPhone(rider: Rider) {
-  const phone = rider.raw_data?.phone ?? rider.raw_data?.phone_number ?? rider.raw_data?.mobile;
+  const phone = rider.phone ?? rider.raw_data?.phone ?? rider.raw_data?.phone_number ?? rider.raw_data?.mobile;
   return typeof phone === "string" || typeof phone === "number" ? String(phone) : "";
 }
 
@@ -1243,25 +1224,6 @@ function RouteStep({ icon, label, title, subtitle, tone }: { icon: React.ReactNo
   );
 }
 
-function uniqueOptions(values: Array<string | null>) {
-  return mergeOptions([], values);
-}
-
-function canonicalKv(value: string | null) {
-  const match = normalizeLocation(value).match(/^(?:kv|khu vuc)?\s*([56])$/);
-  return match ? `KV${match[1]}` : value?.trim().toUpperCase() ?? "";
-}
-
-function mergeOptions(primary: Array<string | null | undefined>, extra: Array<string | null | undefined>) {
-  const options = new Map<string, string>();
-  for (const value of [...primary, ...extra]) {
-    const clean = value?.trim();
-    if (!clean) continue;
-    options.set(normalizeLocation(clean), clean);
-  }
-  return Array.from(options.values()).sort((a, b) => a.localeCompare(b, "vi"));
-}
-
 function districtShortLabel(value: string, districts: DistrictDefinition[]) {
   return districts.find((district) => district.name === value)?.shortName ?? value;
 }
@@ -1278,22 +1240,68 @@ function joinLocation(...parts: Array<string | null | undefined>) {
   return parts.filter(Boolean).join(" / ");
 }
 
-function readRidersBrowserCache() {
-  try {
-    const raw = window.sessionStorage.getItem(RIDERS_BROWSER_CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { saved_at?: number; riders?: Rider[] };
-    if (!parsed.saved_at || Date.now() - parsed.saved_at > RIDERS_BROWSER_CACHE_TTL_MS) return null;
-    return Array.isArray(parsed.riders) ? parsed.riders : null;
-  } catch {
-    return null;
-  }
+function buildRiderRegistryUrl({
+  query,
+  kv,
+  cot,
+  pickupDistrict,
+  pickupWard,
+  deliveryDistrict,
+  deliveryWard,
+  status,
+  shift,
+  sort,
+  page,
+}: {
+  query: string;
+  kv: string;
+  cot: string;
+  pickupDistrict: string;
+  pickupWard: string;
+  deliveryDistrict: string;
+  deliveryWard: string;
+  status: string;
+  shift: string;
+  sort: { key: RiderSortKey; direction: "asc" | "desc" };
+  page: number;
+}) {
+  const params = new URLSearchParams({
+    view: "registry",
+    q: query,
+    kv,
+    cot,
+    pickup_district: pickupDistrict,
+    pickup_ward: pickupWard,
+    delivery_district: deliveryDistrict,
+    delivery_ward: deliveryWard,
+    status,
+    shift,
+    sort: sort.key,
+    direction: sort.direction,
+    page: String(page),
+    page_size: String(RIDERS_PER_PAGE),
+  });
+  return `/api/riders?${params.toString()}`;
 }
 
-function writeRidersBrowserCache(riders: Rider[]) {
-  try {
-    window.sessionStorage.setItem(RIDERS_BROWSER_CACHE_KEY, JSON.stringify({ saved_at: Date.now(), riders }));
-  } catch {
-    // Cache chỉ là tối ưu tốc độ; quota/private mode không được làm hỏng trang.
-  }
+function isRiderRegistryData(value: RidersResponse): value is RidersResponse & RiderRegistryData {
+  return (
+    Array.isArray(value.riders) &&
+    typeof value.total === "number" &&
+    typeof value.page === "number" &&
+    typeof value.page_size === "number" &&
+    typeof value.page_count === "number" &&
+    Boolean(value.stats) &&
+    Boolean(value.options) &&
+    Boolean(value.cache)
+  );
+}
+
+function mergeRiderUpdate(current: Rider, updated: Rider): Rider {
+  return {
+    ...current,
+    ...updated,
+    phone: updated.phone ?? current.phone ?? (riderPhone(updated) || null),
+    raw_data: updated.raw_data ?? current.raw_data,
+  };
 }

@@ -26,10 +26,40 @@ export type Rider = {
   zone_id: string | null;
   status: string | null;
   current_shift: string | null;
+  phone?: string | null;
   raw_data: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
   zones?: Pick<Zone, "id" | "name" | "area" | "hub"> | null;
+};
+
+export type RiderRegistryItem = Omit<Rider, "raw_data"> & {
+  phone: string | null;
+  raw_data: null;
+};
+
+export type RiderRegistryData = {
+  riders: RiderRegistryItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  page_count: number;
+  stats: {
+    total: number;
+    active: number;
+    inactive: number;
+    on_shift: number;
+    unassigned: number;
+  };
+  options: {
+    cots: string[];
+    shifts: string[];
+    delivery_districts: string[];
+  };
+  cache: {
+    hit: boolean;
+    expires_at: string | null;
+  };
 };
 
 export type DriverPerformanceDaily = {

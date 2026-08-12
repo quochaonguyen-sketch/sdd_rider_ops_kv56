@@ -1,4 +1,4 @@
-import type { AttendanceLog, Rider } from "@/types";
+import type { AttendanceLog, Rider, RiderRegistryItem } from "@/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type NoteStatus = "ACTIVE" | "ARCHIVED";
@@ -24,6 +24,7 @@ type CacheEntry<T> = {
 };
 
 const ridersCache = new Map<string, CacheEntry<Rider[]>>();
+const riderRegistryCache = new Map<string, CacheEntry<RiderRegistryItem[]>>();
 const notesCache = new Map<string, CacheEntry<CachedPersonalNote[]>>();
 const attendanceCache = new Map<string, CacheEntry<AttendanceSchedulePayload>>();
 
@@ -34,6 +35,7 @@ const ATTENDANCE_TTL_MS = 30_000;
 
 export function invalidateRidersCache() {
   ridersCache.clear();
+  riderRegistryCache.clear();
   attendanceCache.clear();
 }
 
@@ -63,6 +65,27 @@ export async function getCachedRiders() {
 
   ridersCache.set(RIDERS_CACHE_KEY, { value: riders, expiresAt: now + RIDERS_TTL_MS });
   return { data: riders, cache: cacheState<Rider[]>(undefined) };
+}
+
+export async function getCachedRiderRegistry() {
+  const now = Date.now();
+  const cached = riderRegistryCache.get(RIDERS_CACHE_KEY);
+  if (cached && cached.expiresAt > now) {
+    return { data: cached.value, cache: cacheState(cached) };
+  }
+
+  const rows = await fetchAll<RiderRegistryRow>((from, to) =>
+    createAdminClient()
+      .from("riders")
+      .select(RIDER_REGISTRY_SELECT)
+      .order("updated_at", { ascending: false })
+      .range(from, to)
+      .overrideTypes<RiderRegistryRow[], { merge: false }>(),
+  );
+  const riders = rows.map(toRiderRegistryItem);
+
+  riderRegistryCache.set(RIDERS_CACHE_KEY, { value: riders, expiresAt: now + RIDERS_TTL_MS });
+  return { data: riders, cache: cacheState<RiderRegistryItem[]>(undefined) };
 }
 
 export async function getCachedPersonalNotes(
@@ -120,4 +143,65 @@ async function fetchAll<T>(
   }
 
   return rows;
+}
+
+const RIDER_REGISTRY_SELECT = [
+  "id",
+  "rider_code",
+  "kv",
+  "home_district",
+  "cot",
+  "full_name",
+  "pickup_district",
+  "pickup_ward",
+  "point_name",
+  "delivery_district",
+  "delivery_ward",
+  "avatar_url",
+  "zone_id",
+  "status",
+  "current_shift",
+  "created_at",
+  "updated_at",
+  "phone:raw_data->>phone",
+  "phone_number:raw_data->>phone_number",
+  "mobile:raw_data->>mobile",
+].join(",");
+
+type RiderRegistryRow = Omit<RiderRegistryItem, "phone" | "raw_data"> & {
+  phone: unknown;
+  phone_number: unknown;
+  mobile: unknown;
+};
+
+function toRiderRegistryItem(row: RiderRegistryRow): RiderRegistryItem {
+  return {
+    id: row.id,
+    rider_code: row.rider_code,
+    kv: row.kv,
+    home_district: row.home_district,
+    cot: row.cot,
+    full_name: row.full_name,
+    pickup_district: row.pickup_district,
+    pickup_ward: row.pickup_ward,
+    point_name: row.point_name,
+    delivery_district: row.delivery_district,
+    delivery_ward: row.delivery_ward,
+    avatar_url: row.avatar_url,
+    zone_id: row.zone_id,
+    status: row.status,
+    current_shift: row.current_shift,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    phone: firstText(row.phone, row.phone_number, row.mobile),
+    raw_data: null,
+  };
+}
+
+function firstText(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number") return String(value);
+  }
+  return null;
 }
