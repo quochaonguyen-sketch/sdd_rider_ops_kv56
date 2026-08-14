@@ -10,6 +10,7 @@ type FormState = {
   rider_code: string;
   rider_name: string;
   requester_email: string;
+  request_type: "WEEKLY" | "PLANNED" | "EMERGENCY";
   shift: "FULL_DAY" | "MORNING" | "AFTERNOON";
   reason: string;
 };
@@ -20,10 +21,13 @@ function localDate(offsetDays = 0) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+const typeLabel = { WEEKLY: "OFF tuần", PLANNED: "OFF phép", EMERGENCY: "OFF đột xuất" };
+
 const initialForm: FormState = {
   rider_code: "",
   rider_name: "",
   requester_email: "",
+  request_type: "PLANNED",
   shift: "FULL_DAY",
   reason: "",
 };
@@ -83,6 +87,7 @@ export function PublicOffRegistration() {
     body.set("rider_name", form.rider_name);
     body.set("requester_email", form.requester_email);
     body.set("off_dates", JSON.stringify(selectedDates));
+    body.set("request_type", form.request_type);
     body.set("shift", form.shift);
     body.set("reason", form.reason);
     if (evidence) body.set("evidence", evidence);
@@ -161,7 +166,7 @@ export function PublicOffRegistration() {
                 </div>
               </section>
               <div className="off-public-leave-line">
-                <div><span>Loại OFF</span><strong>OFF phép</strong><small>Áp dụng cho toàn bộ ngày đã chọn</small></div>
+                <label><span>Loại OFF</span><select value={form.request_type} onChange={(e) => update("request_type", e.target.value as FormState["request_type"])}><option value="PLANNED">OFF phép</option><option value="WEEKLY">OFF tuần</option><option value="EMERGENCY">OFF đột xuất</option></select><small>Áp dụng cho toàn bộ ngày đã chọn</small></label>
                 <label><span>Khung thời gian</span><select value={form.shift} onChange={(e) => update("shift", e.target.value as FormState["shift"])}><option value="FULL_DAY">Cả ngày</option><option value="MORNING">Buổi sáng</option><option value="AFTERNOON">Buổi chiều</option></select></label>
               </div>
               <label className="off-public-reason"><span>Lý do / ghi chú <small>không bắt buộc</small></span><textarea rows={4} maxLength={500} value={form.reason} onChange={(e) => update("reason", e.target.value)} placeholder="Thông tin giúp điều phối viên xét duyệt..." /></label>
