@@ -1981,7 +1981,7 @@ select {
 .off-public-calendar-grid > button:focus-visible, .off-public-calendar > header button:focus-visible { outline-color: var(--color-focus); }
 .off-public-calendar-grid > button:active:not(:disabled), .off-public-calendar > header button:active { transform: translateY(1px); }
 .off-public-calendar-grid > button:disabled, .off-public-calendar > header button:disabled { cursor: not-allowed; opacity: 0.35; }
-.off-public-leave-line { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md); margin-block-start: var(--space-md); padding: var(--space-md); border: 1px solid rgba(0,0,0,0.08); background: linear-gradient(135deg, rgba(var(--color-accent-rgb), 0.03) 0%, rgba(var(--color-accent-rgb), 0.01) 100%); border-radius: 10px; }
+.off-public-leave-line { display: grid; grid-template-columns: 1fr; gap: var(--space-md); margin-block-start: var(--space-md); padding: var(--space-md); border: 1px solid rgba(0,0,0,0.08); background: linear-gradient(135deg, rgba(var(--color-accent-rgb), 0.03) 0%, rgba(var(--color-accent-rgb), 0.01) 100%); border-radius: 10px; }
 .off-public-leave-line label { display: grid; gap: var(--space-xs); }
 .off-public-leave-line label span { color: var(--color-ink-2); font-size: var(--text-xs); font-weight: 700; }
 .off-public-leave-line label small { color: var(--color-muted); font-size: 0.6875rem; line-height: 1.4; }

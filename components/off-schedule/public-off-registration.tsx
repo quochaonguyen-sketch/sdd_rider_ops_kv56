@@ -11,7 +11,6 @@ type FormState = {
   rider_name: string;
   requester_email: string;
   request_type: "WEEKLY" | "PLANNED" | "EMERGENCY";
-  shift: "FULL_DAY" | "MORNING" | "AFTERNOON";
   reason: string;
 };
 
@@ -28,7 +27,6 @@ const initialForm: FormState = {
   rider_name: "",
   requester_email: "",
   request_type: "PLANNED",
-  shift: "FULL_DAY",
   reason: "",
 };
 
@@ -39,6 +37,7 @@ export function PublicOffRegistration() {
   const [evidence, setEvidence] = useState<File | null>(null);
   const [evidencePreview, setEvidencePreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [honeypot, setHoneypot] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{ batchId: string; name: string | null; dates: string[]; email: string } | null>(null);
   const evidenceInputRef = useRef<HTMLInputElement>(null);
@@ -77,18 +76,32 @@ export function PublicOffRegistration() {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
+    if (honeypot.trim()) {
+      setError("Yêu cầu không hợp lệ.");
+      setSubmitting(false);
+      return;
+    }
     if (selectedDates.length === 0) {
       setError("Vui lòng chọn ít nhất một ngày OFF.");
       setSubmitting(false);
       return;
     }
+
+    const spamKey = `off-public:${form.rider_code.trim().toUpperCase()}:${selectedDates.join(",")}`;
+    const lastSubmittedAt = Number(sessionStorage.getItem(spamKey) ?? "0");
+    if (Date.now() - lastSubmittedAt < 30_000) {
+      setError("Bạn vừa gửi yêu cầu này gần đây. Vui lòng chờ 30 giây trước khi gửi lại.");
+      setSubmitting(false);
+      return;
+    }
+
     const body = new FormData();
     body.set("rider_code", form.rider_code);
     body.set("rider_name", form.rider_name);
     body.set("requester_email", form.requester_email);
     body.set("off_dates", JSON.stringify(selectedDates));
     body.set("request_type", form.request_type);
-    body.set("shift", form.shift);
+    body.set("shift", "FULL_DAY");
     body.set("reason", form.reason);
     if (evidence) body.set("evidence", evidence);
     const response = await fetch("/api/public/off-requests", { method: "POST", body });
@@ -98,6 +111,7 @@ export function PublicOffRegistration() {
       setSubmitting(false);
       return;
     }
+    sessionStorage.setItem(spamKey, String(Date.now()));
     setReceipt({ batchId: result.batch_id, name: result.rider_name, dates: result.off_dates, email: form.requester_email });
     setSubmitting(false);
   }
@@ -167,8 +181,8 @@ export function PublicOffRegistration() {
               </section>
               <div className="off-public-leave-line">
                 <label><span>Loại OFF</span><select value={form.request_type} onChange={(e) => update("request_type", e.target.value as FormState["request_type"])}><option value="PLANNED">OFF phép</option><option value="WEEKLY">OFF tuần</option><option value="EMERGENCY">OFF đột xuất</option></select><small>Áp dụng cho toàn bộ ngày đã chọn</small></label>
-                <label><span>Khung thời gian</span><select value={form.shift} onChange={(e) => update("shift", e.target.value as FormState["shift"])}><option value="FULL_DAY">Cả ngày</option><option value="MORNING">Buổi sáng</option><option value="AFTERNOON">Buổi chiều</option></select></label>
               </div>
+              <input aria-hidden="true" tabIndex={-1} autoComplete="off" className="sr-only" style={{ position: "absolute", left: "-9999px", opacity: 0, pointerEvents: "none" }} value={honeypot} onChange={(e) => setHoneypot(e.target.value)} />
               <label className="off-public-reason"><span>Lý do / ghi chú <small>không bắt buộc</small></span><textarea rows={4} maxLength={500} value={form.reason} onChange={(e) => update("reason", e.target.value)} placeholder="Thông tin giúp điều phối viên xét duyệt..." /></label>
               <section className="off-public-evidence">
                 <input ref={evidenceInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => selectEvidence(event.target.files?.[0] ?? null)} />

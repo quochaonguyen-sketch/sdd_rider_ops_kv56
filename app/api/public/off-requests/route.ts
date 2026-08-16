@@ -8,8 +8,9 @@ const requestSchema = z.object({
   rider_code: z.string().trim().min(2).max(30),
   rider_name: z.string().trim().min(2).max(120),
   requester_email: z.email().trim().max(254),
+  request_type: z.enum(["WEEKLY", "PLANNED", "EMERGENCY"]),
   off_dates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).min(1).max(31),
-  shift: z.enum(["FULL_DAY", "MORNING", "AFTERNOON"]),
+  shift: z.enum(["FULL_DAY", "MORNING", "AFTERNOON"]).optional().default("FULL_DAY"),
   reason: z.string().trim().max(500).optional(),
 });
 
@@ -43,8 +44,9 @@ export async function POST(request: Request) {
     rider_code: formData?.get("rider_code"),
     rider_name: formData?.get("rider_name"),
     requester_email: formData?.get("requester_email"),
+    request_type: formData?.get("request_type"),
     off_dates: parsedDates?.success ? parsedDates.data : null,
-    shift: formData?.get("shift"),
+    shift: formData?.get("shift") ?? "FULL_DAY",
     reason: formData?.get("reason") || undefined,
   });
   if (!parsed.success) {
@@ -117,7 +119,7 @@ export async function POST(request: Request) {
     rider_id: rider.id,
     rider_code: rider.rider_code,
     off_date: offDate,
-    request_type: "PLANNED",
+    request_type: payload.request_type,
     shift: payload.shift,
     reason: payload.reason || null,
     evidence_path: evidencePath,
@@ -149,7 +151,7 @@ export async function POST(request: Request) {
     entity_id: saved?.[0]?.id ?? null,
     action: "submitted",
     message: `${offDates.length} OFF requests submitted for ${rider.rider_code}`,
-    raw_data: { source: "public_off_registration", batch_id: batchId, request_type: "PLANNED", shift: payload.shift, off_dates: offDates, has_evidence: Boolean(evidencePath) },
+    raw_data: { source: "public_off_registration", batch_id: batchId, request_type: payload.request_type, shift: payload.shift, off_dates: offDates, has_evidence: Boolean(evidencePath) },
   });
 
   return NextResponse.json({ success: true, batch_id: batchId, request_ids: (saved ?? []).map((item) => item.id), rider_name: rider.full_name, off_dates: offDates }, { status: 201 });
