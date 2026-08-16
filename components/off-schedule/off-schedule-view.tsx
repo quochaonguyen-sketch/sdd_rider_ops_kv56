@@ -49,8 +49,31 @@ export function OffScheduleView() {
       body: JSON.stringify({ action }),
     });
     const result = await response.json().catch(() => null);
-    if (!response.ok || !result?.success) setError(result?.error ?? "Không thể cập nhật lịch OFF.");
-    else await load();
+    if (!response.ok || !result?.success) {
+      setError(result?.error ?? "Không thể cập nhật lịch OFF.");
+      setBusyId(null);
+      return;
+    }
+
+    if (action === "APPROVE" || action === "REJECT") {
+      const nextStatus = action === "APPROVE" ? "APPROVED" : "REJECTED";
+      setRequests((current) => current.map((request) => request.id === item.id ? {
+        ...request,
+        status: nextStatus,
+        reviewed_at: new Date().toISOString(),
+        email_notification_status: result?.request?.email_notification_status ?? request.email_notification_status,
+      } : request));
+    }
+
+    if (action === "RESEND_EMAIL" && result?.request) {
+      setRequests((current) => current.map((request) => request.id === item.id ? {
+        ...request,
+        email_notification_status: result.request.email_notification_status,
+        email_notification_error: result.request.email_notification_error,
+        email_notified_at: result.request.email_notified_at,
+      } : request));
+    }
+
     setBusyId(null);
   }
 
