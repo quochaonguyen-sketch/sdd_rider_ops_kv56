@@ -80,9 +80,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "Không thể kiểm tra thông tin rider." }, { status: 500 });
   }
 
-  const verified = rider && normalizeIdentity(rider.full_name ?? "") === normalizeIdentity(payload.rider_name);
-  if (!verified || String(rider.status ?? "active").toLowerCase() === "inactive") {
-    return NextResponse.json({ success: false, error: "Mã rider hoặc họ tên không khớp dữ liệu." }, { status: 400 });
+  if (!rider || String(rider.status ?? "active").toLowerCase() === "inactive") {
+    return NextResponse.json({ success: false, error: "Mã rider không tồn tại hoặc đã ngừng hoạt động." }, { status: 400 });
   }
 
   const { data: existing, error: existingError } = await admin
