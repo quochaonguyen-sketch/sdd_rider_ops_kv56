@@ -1,0 +1,47 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - link "Rider Operations" [ref=e4] [cursor=pointer]:
+        - /url: /off-lookup
+        - generic [ref=e8]:
+          - strong [ref=e9]: Rider Operations
+          - generic [ref=e10]: KV5 + KV6 · SDD
+      - link "Đăng ký lịch OFF" [ref=e11] [cursor=pointer]:
+        - /url: /off-registration
+    - generic [ref=e12]:
+      - complementary [ref=e13]:
+        - paragraph [ref=e14]: OFF LOOKUP / 02
+        - heading "Tra cứu lịch OFF" [level=1] [ref=e15]
+        - paragraph [ref=e16]: Nhập mã rider để xem các yêu cầu OFF đã ghi nhận và trạng thái xét duyệt hiện tại.
+        - generic [ref=e17]:
+          - generic [ref=e18]:
+            - term [ref=e19]: "01"
+            - definition [ref=e20]:
+              - strong [ref=e21]: Chỉ cần mã rider
+              - generic [ref=e22]: Không cần đăng nhập hoặc nhập email.
+          - generic [ref=e23]:
+            - term [ref=e24]: "02"
+            - definition [ref=e25]:
+              - strong [ref=e26]: Xem trạng thái
+              - generic [ref=e27]: Phân biệt rõ Chờ duyệt, Đã duyệt và Từ chối.
+          - generic [ref=e28]:
+            - term [ref=e29]: "03"
+            - definition [ref=e30]:
+              - strong [ref=e31]: Đăng ký bổ sung
+              - generic [ref=e32]: Nếu chưa có lịch, bạn có thể gửi yêu cầu OFF mới.
+        - generic [ref=e33]: Kết quả chỉ hiển thị lịch OFF, không bao gồm thông tin cá nhân.
+      - generic [ref=e41]:
+        - generic [ref=e43]:
+          - text: Tra cứu công khai
+          - heading "Lịch OFF của rider" [level=2] [ref=e44]
+        - generic [ref=e48]:
+          - text: Mã rider
+          - generic [ref=e49]:
+            - textbox "Mã rider Tra cứu Nhập đúng mã rider đã dùng khi đăng ký lịch OFF." [ref=e50]:
+              - /placeholder: "VD: 196"
+            - button "Tra cứu" [ref=e51]
+          - text: Nhập đúng mã rider đã dùng khi đăng ký lịch OFF.
+    - generic [ref=e52]:
+      - generic [ref=e53]: SDD Rider Operations
+      - generic [ref=e54]: Lịch OFF được cập nhật sau khi điều phối viên xử lý yêu cầu.
+  - alert [ref=e55]

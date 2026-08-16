@@ -1,5 +1,12 @@
 [
   {
+    "date": "2026-08-16",
+    "macrostructure": "Calendar Pocket",
+    "theme": "Cobalt adapted",
+    "enrichment": "read-only monthly OFF calendar",
+    "brief": "Public no-login rider OFF schedule calendar lookup by rider ID"
+  },
+  {
     "date": "2026-08-12",
     "macrostructure": "Ecosystem Index",
     "theme": "Cobalt adapted",

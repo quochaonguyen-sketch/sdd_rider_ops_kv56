@@ -192,6 +192,7 @@ export function PublicOffRegistration() {
           <LockKeyhole size={14} aria-hidden="true" />
           Không cần đăng nhập
         </div>
+        <a className="off-lookup-register-link" href="/off-lookup">Tra cứu lịch OFF</a>
       </header>
 
       <section className="off-public-layout">

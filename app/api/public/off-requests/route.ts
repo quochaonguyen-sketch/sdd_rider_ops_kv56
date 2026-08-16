@@ -4,6 +4,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
+const lookupSchema = z.string().trim().min(2).max(30);
+const lookupMonthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+
 const requestSchema = z.object({
   rider_code: z.string().trim().min(2).max(30),
   rider_name: z.string().trim().min(2).max(120),
@@ -29,6 +32,49 @@ function saigonDate(date = new Date()) {
 
 function normalizeIdentity(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+export async function GET(request: Request) {
+  const params = new URL(request.url).searchParams;
+  const rawCode = params.get("rider_code") ?? "";
+  const parsedCode = lookupSchema.safeParse(rawCode);
+  if (!parsedCode.success) {
+    return NextResponse.json({ success: false, error: "Vui lòng nhập mã rider hợp lệ." }, { status: 400 });
+  }
+  const parsedMonth = lookupMonthSchema.safeParse(params.get("month") ?? saigonDate().slice(0, 7));
+  if (!parsedMonth.success) {
+    return NextResponse.json({ success: false, error: "Tháng tra cứu không hợp lệ." }, { status: 400 });
+  }
+
+  const admin = createAdminClient();
+  const { data: rider, error: riderError } = await admin
+    .from("riders")
+    .select("id,rider_code,status")
+    .ilike("rider_code", parsedCode.data)
+    .maybeSingle();
+  if (riderError) {
+    return NextResponse.json({ success: false, error: "Không thể kiểm tra mã rider." }, { status: 500 });
+  }
+  if (!rider || String(rider.status ?? "active").toLowerCase() === "inactive") {
+    return NextResponse.json({ success: false, error: "Mã rider không tồn tại hoặc đã ngừng hoạt động." }, { status: 404 });
+  }
+
+  const startDate = `${parsedMonth.data}-01`;
+  const [year, month] = parsedMonth.data.split("-").map(Number);
+  const endDate = `${parsedMonth.data}-${String(new Date(year, month, 0).getDate()).padStart(2, "0")}`;
+  const { data: logs, error: logsError } = await admin
+    .from("attendance_logs")
+    .select("id,work_date,status")
+    .eq("rider_code", rider.rider_code)
+    .gte("work_date", startDate)
+    .lte("work_date", endDate)
+    .neq("status", "ON")
+    .order("work_date", { ascending: true });
+  if (logsError) {
+    return NextResponse.json({ success: false, error: "Không thể tải lịch OFF." }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true, rider_code: rider.rider_code, logs: logs ?? [] });
 }
 
 export async function POST(request: Request) {
