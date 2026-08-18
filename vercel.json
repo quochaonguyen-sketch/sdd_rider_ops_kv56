@@ -3,6 +3,10 @@
     {
       "path": "/api/violations/reconcile",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/attendance/schedule/sync",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

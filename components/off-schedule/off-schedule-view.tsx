@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { addDays, format, startOfWeek, subDays } from "date-fns";
 import { vi } from "date-fns/locale";
 import { Archive, CalendarClock, Check, ChevronLeft, ChevronRight, ExternalLink, Image as ImageIcon, MailCheck, MailWarning, RefreshCcw, Send, ShieldAlert, Undo2, X } from "lucide-react";
@@ -40,7 +40,7 @@ export function OffScheduleView() {
     void load();
   }, [load]);
 
-  async function review(item: RiderOffRequest, action: "APPROVE" | "REJECT" | "RESEND_EMAIL") {
+  const review = useCallback(async (item: RiderOffRequest, action: "APPROVE" | "REJECT" | "RESEND_EMAIL") => {
     setBusyId(item.id);
     setError(null);
     const response = await fetch(`/api/off-requests/${item.id}`, {
@@ -78,23 +78,58 @@ export function OffScheduleView() {
     }
 
     setBusyId(null);
-  }
+  }, []);
 
-  const summary = useMemo(() => ({
-    total: requests.length,
-    pending: requests.filter((item) => item.status === "PENDING").length,
-    approved: requests.filter((item) => item.status === "APPROVED").length,
-    evidence: new Set(requests.map((item) => item.evidence_path).filter(Boolean)).size,
-  }), [requests]);
-  const pendingRequests = useMemo(() => requests.filter((item) => item.status === "PENDING"), [requests]);
-  const approvedRequests = useMemo(() => requests.filter((item) => item.status === "APPROVED"), [requests]);
-  const rejectedRequests = useMemo(() => requests.filter((item) => item.status === "REJECTED"), [requests]);
+  // Combine all filtering into single pass for better performance
+  const { summary, pendingRequests, approvedRequests, rejectedRequests } = useMemo(() => {
+    let pendingCount = 0, approvedCount = 0, rejectedCount = 0;
+    const pending: RiderOffRequest[] = [];
+    const approved: RiderOffRequest[] = [];
+    const rejected: RiderOffRequest[] = [];
+    let evidenceSet = new Set<string>();
+
+    for (const item of requests) {
+      if (item.status === "PENDING") {
+        pending.push(item);
+        pendingCount++;
+      } else if (item.status === "APPROVED") {
+        approved.push(item);
+        approvedCount++;
+      } else if (item.status === "REJECTED") {
+        rejected.push(item);
+        rejectedCount++;
+      }
+      if (item.evidence_path) evidenceSet.add(item.evidence_path);
+    }
+
+    return {
+      summary: {
+        total: requests.length,
+        pending: pendingCount,
+        approved: approvedCount,
+        evidence: evidenceSet.size,
+      },
+      pendingRequests: pending,
+      approvedRequests: approved,
+      rejectedRequests: rejected,
+    };
+  }, [requests]);
 
   const byDate = useMemo(() => {
-    const map = new Map<string, RiderOffRequest[]>();
-    for (let day = 0; day < 7; day += 1) map.set(format(addDays(weekStart, day), "yyyy-MM-dd"), []);
-    for (const item of requests) map.get(item.off_date)?.push(item);
-    return map;
+    const dateMap = new Map<string, RiderOffRequest[]>();
+    const baseDate = weekStart;
+    // Pre-allocate all dates
+    for (let day = 0; day < 7; day++) {
+      const date = addDays(baseDate, day);
+      const dateStr = format(date, "yyyy-MM-dd");
+      dateMap.set(dateStr, []);
+    }
+    // Single pass to populate
+    for (const item of requests) {
+      const arr = dateMap.get(item.off_date);
+      if (arr) arr.push(item);
+    }
+    return dateMap;
   }, [requests, weekStart]);
 
   return (
@@ -127,10 +162,9 @@ export function OffScheduleView() {
       <section className="off-schedule-board">
         <header><div><span>01 / DAILY LOAD</span><h2>Tải OFF theo ngày</h2><p>Không tự áp quota; số lượng là tín hiệu để điều phối viên cân đối.</p></div><CalendarClock size={22} aria-hidden="true" /></header>
         <div className="off-schedule-days">
-          {Array.from(byDate.entries()).map(([date, items]) => {
-            const approved = items.filter((item) => item.status === "APPROVED").length;
-            return <div key={date} className={date === format(new Date(), "yyyy-MM-dd") ? "is-today" : ""}><span>{format(new Date(`${date}T00:00:00`), "EEE", { locale: vi })}</span><strong>{format(new Date(`${date}T00:00:00`), "dd")}</strong><p>{items.length} yêu cầu</p><small>{approved} đã duyệt</small></div>;
-          })}
+          {Array.from(byDate.entries()).map(([date, items]) => (
+            <DayCard key={date} date={date} items={items} />
+          ))}
         </div>
       </section>
 
@@ -152,22 +186,54 @@ export function OffScheduleView() {
   );
 }
 
-function RequestRows({ items, canEdit, busyId, mode, onReview }: { items: RiderOffRequest[]; canEdit: boolean; busyId: string | null; mode: "pending" | "approved" | "rejected"; onReview: (item: RiderOffRequest, action: "APPROVE" | "REJECT" | "RESEND_EMAIL") => Promise<void> }) {
-  const batchCounts = new Map<string, number>();
-  for (const item of items) batchCounts.set(item.batch_id, (batchCounts.get(item.batch_id) ?? 0) + 1);
-  return <div className="off-schedule-list">{items.map((item) => <article key={item.id} className="off-schedule-request">
-    <div className="off-schedule-date"><strong>{format(new Date(`${item.off_date}T00:00:00`), "dd")}</strong><span>{format(new Date(`${item.off_date}T00:00:00`), "MMM", { locale: vi })}</span></div>
-    <div className="off-schedule-rider"><span>{item.rider_code}</span><h3>{item.rider?.full_name || "Chưa có tên rider"}</h3><p>{[item.rider?.kv, item.rider?.cot, item.rider?.delivery_district].filter(Boolean).join(" · ") || "Chưa có thông tin tuyến"}</p>{(batchCounts.get(item.batch_id) ?? 0) > 1 ? <small>Cùng đơn · {batchCounts.get(item.batch_id)} ngày trong tuần</small> : null}</div>
+const RequestRow = memo(({ item, canEdit, busyId, mode, onReview, batchCount }: { item: RiderOffRequest; canEdit: boolean; busyId: string | null; mode: "pending" | "approved" | "rejected"; onReview: (item: RiderOffRequest, action: "APPROVE" | "REJECT" | "RESEND_EMAIL") => Promise<void>; batchCount: number }) => {
+  const dateObj = useMemo(() => new Date(`${item.off_date}T00:00:00`), [item.off_date]);
+  const dayStr = useMemo(() => format(dateObj, "dd"), [dateObj]);
+  const monthStr = useMemo(() => format(dateObj, "MMM", { locale: vi }), [dateObj]);
+  
+  return <article className="off-schedule-request">
+    <div className="off-schedule-date"><strong>{dayStr}</strong><span>{monthStr}</span></div>
+    <div className="off-schedule-rider"><span>{item.rider_code}</span><h3>{item.rider?.full_name || "Chưa có tên rider"}</h3><p>{[item.rider?.kv, item.rider?.cot, item.rider?.delivery_district].filter(Boolean).join(" · ") || "Chưa có thông tin tuyến"}</p>{batchCount > 1 ? <small>Cùng đơn · {batchCount} ngày trong tuần</small> : null}</div>
     <div className="off-schedule-request-meta"><span className={`is-${item.request_type.toLowerCase()}`}>{typeLabel[item.request_type]}</span><strong>{shiftLabel[item.shift]}</strong><p>{item.reason || "Không có ghi chú"}</p>{item.evidence_url ? <a href={item.evidence_url} target="_blank" rel="noreferrer"><ImageIcon size={14} aria-hidden="true" />Xem bằng chứng</a> : <small>Không có ảnh bằng chứng</small>}{item.requester_email ? <small className="off-schedule-email-address">{item.requester_email}</small> : null}</div>
     <div className="off-schedule-decision"><span className={`is-${item.status.toLowerCase()}`}>{statusLabel[item.status]}</span>{mode !== "pending" ? <EmailState item={item} /> : null}{canEdit && mode === "pending" ? <div><button type="button" className="is-reject" disabled={busyId === item.id} onClick={() => void onReview(item, "REJECT")}><X size={15} aria-hidden="true" />Từ chối</button><button type="button" className="is-approve" disabled={busyId === item.id} onClick={() => void onReview(item, "APPROVE")}><Check size={15} aria-hidden="true" />Duyệt</button></div> : canEdit && mode === "approved" ? <div><button type="button" className="is-reject" disabled={busyId === item.id} onClick={() => void onReview(item, "REJECT")}><Undo2 size={15} aria-hidden="true" />Thu hồi lịch</button>{item.requester_email && item.email_notification_status !== "SENT" ? <button type="button" disabled={busyId === item.id} onClick={() => void onReview(item, "RESEND_EMAIL")}><Send size={15} aria-hidden="true" />Gửi lại email</button> : null}</div> : canEdit && mode === "rejected" && item.requester_email && item.email_notification_status !== "SENT" ? <div><button type="button" disabled={busyId === item.id} onClick={() => void onReview(item, "RESEND_EMAIL")}><Send size={15} aria-hidden="true" />Gửi lại email</button></div> : mode === "rejected" ? null : <small><ShieldAlert size={14} aria-hidden="true" />Chỉ xem</small>}</div>
-  </article>)}</div>;
+  </article>;
+});
+RequestRow.displayName = "RequestRow";
+
+const MemoRequestRow = memo(RequestRow);
+
+function RequestRows({ items, canEdit, busyId, mode, onReview }: { items: RiderOffRequest[]; canEdit: boolean; busyId: string | null; mode: "pending" | "approved" | "rejected"; onReview: (item: RiderOffRequest, action: "APPROVE" | "REJECT" | "RESEND_EMAIL") => Promise<void> }) {
+  const batchCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of items) counts.set(item.batch_id, (counts.get(item.batch_id) ?? 0) + 1);
+    return counts;
+  }, [items]);
+
+  return <div className="off-schedule-list">{items.map((item) => <MemoRequestRow key={item.id} item={item} canEdit={canEdit} busyId={busyId} mode={mode} onReview={onReview} batchCount={batchCounts.get(item.batch_id) ?? 0} />)}</div>;
 }
 
-function EmailState({ item }: { item: RiderOffRequest }) {
+const EmailState = memo(({ item }: { item: RiderOffRequest }) => {
   if (!item.requester_email) return <small className="off-schedule-email-state is-unsent"><MailWarning size={14} aria-hidden="true" />Không có email</small>;
   const sent = item.email_notification_status === "SENT";
   return <small className={`off-schedule-email-state ${sent ? "is-sent" : "is-unsent"}`} title={item.email_notification_error || undefined}>{sent ? <MailCheck size={14} aria-hidden="true" /> : <MailWarning size={14} aria-hidden="true" />}{sent ? "Email đã gửi" : item.email_notification_status === "NOT_CONFIGURED" ? "Email chưa cấu hình" : "Email chưa gửi"}</small>;
-}
+});
+EmailState.displayName = "EmailState";
+
+const DayCard = memo(({ date, items }: { date: string; items: RiderOffRequest[] }) => {
+  const dateObj = useMemo(() => new Date(`${date}T00:00:00`), [date]);
+  const dayName = useMemo(() => format(dateObj, "EEE", { locale: vi }), [dateObj]);
+  const dayNum = useMemo(() => format(dateObj, "dd"), [dateObj]);
+  const isToday = useMemo(() => date === format(new Date(), "yyyy-MM-dd"), [date]);
+  const approved = useMemo(() => items.filter((item) => item.status === "APPROVED").length, [items]);
+  
+  return <div className={isToday ? "is-today" : ""}>
+    <span>{dayName}</span>
+    <strong>{dayNum}</strong>
+    <p>{items.length} yêu cầu</p>
+    <small>{approved} đã duyệt</small>
+  </div>;
+});
+DayCard.displayName = "DayCard";
 
 function LoadingRows() {
   return <div className="off-schedule-loading" aria-label="Đang tải"><span /><span /><span /></div>;

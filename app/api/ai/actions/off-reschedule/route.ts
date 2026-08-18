@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { canManageOperations } from "@/lib/auth/permissions";
 import { invalidateAttendanceCache } from "@/lib/cache/operations-cache";
-import { resolveOffScheduleSpreadsheetId, syncScheduleUpdatesToGoogleSheet, type GoogleScheduleStatus } from "@/lib/google/off-schedule";
+import { processAttendanceSheetSync } from "@/lib/google/attendance-sheet-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -44,20 +44,9 @@ export async function POST(request: Request) {
     rider_name: string | null;
     from_date: string;
     to_date: string;
-    off_status: GoogleScheduleStatus;
+    off_status: string;
   };
-  let sheetSync: { success: true } | { success: false; error: string };
-  try {
-    const spreadsheetId = resolveOffScheduleSpreadsheetId();
-    if (!spreadsheetId) throw new Error("Chưa cấu hình Google Sheet lịch OFF");
-    await syncScheduleUpdatesToGoogleSheet(spreadsheetId, [
-      { rider_code: payload.rider_code, rider_name: payload.rider_name ?? "", work_date: payload.from_date, status: "ON" },
-      { rider_code: payload.rider_code, rider_name: payload.rider_name ?? "", work_date: payload.to_date, status: payload.off_status },
-    ]);
-    sheetSync = { success: true };
-  } catch (caught) {
-    sheetSync = { success: false, error: caught instanceof Error ? caught.message : "Không thể đồng bộ Google Sheet" };
-  }
+  const sheetSync = await processAttendanceSheetSync();
   invalidateAttendanceCache(payload.from_date.slice(0, 7));
   invalidateAttendanceCache(payload.to_date.slice(0, 7));
   await auth.admin.from("activity_logs").insert({

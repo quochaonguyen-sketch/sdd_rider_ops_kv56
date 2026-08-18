@@ -114,6 +114,25 @@ model AttendanceLog {
   @@map("attendance_logs")
 }
 
+model AttendanceSheetSyncOutbox {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  riderCode       String    @map("rider_code")
+  workDate        DateTime  @map("work_date") @db.Date
+  attendanceStatus String   @map("attendance_status")
+  operation       String
+  state           String    @default("PENDING")
+  attempts        Int       @default(0)
+  nextAttemptAt   DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  lastError       String?   @map("last_error")
+  syncedAt        DateTime? @map("synced_at") @db.Timestamptz(6)
+  sourceUpdatedAt DateTime  @default(now()) @map("source_updated_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([riderCode, workDate, createdAt(sort: Desc)])
+  @@map("attendance_sheet_sync_outbox")
+}
+
 model ImportBatch {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   source       String?

@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { canManageOperations } from "@/lib/auth/permissions";
 import { sendOffRequestDecisionEmail, type OffRequestEmailResult } from "@/lib/email/off-request-notification";
-import { buildOffRequestGoogleSheetSync, resolveOffScheduleSpreadsheetId, syncScheduleUpdatesToGoogleSheet } from "@/lib/google/off-schedule";
+import { processAttendanceSheetSync } from "@/lib/google/attendance-sheet-sync";
 
 const updateSchema = z.object({
   action: z.enum(["APPROVE", "REJECT", "RESEND_EMAIL"]),
@@ -56,20 +56,7 @@ export async function PATCH(request: Request, context: RouteContext<"/api/off-re
     }, { onConflict: "rider_code,work_date" });
     if (attendanceError) return NextResponse.json({ success: false, error: attendanceError.message }, { status: 500 });
 
-    try {
-      const spreadsheetId = resolveOffScheduleSpreadsheetId(parsed.data.sheet_url ?? null);
-      if (!spreadsheetId) throw new Error("Chưa cấu hình Google Sheet lịch OFF");
-      const result = await syncScheduleUpdatesToGoogleSheet(spreadsheetId, buildOffRequestGoogleSheetSync({
-        rider_code: offRequest.rider_code,
-        rider_name: offRequest.rider?.full_name ?? null,
-        off_date: offRequest.off_date,
-        request_type: offRequest.request_type as "WEEKLY" | "PLANNED" | "EMERGENCY",
-        action: "APPROVE",
-      }));
-      sheetSync = { success: true, ...result };
-    } catch (error) {
-      sheetSync = { success: false, error: error instanceof Error ? error.message : "Không thể đồng bộ Google Sheet" };
-    }
+    sheetSync = await processAttendanceSheetSync(300, parsed.data.sheet_url ?? null);
   } else if (parsed.data.action === "REJECT" && offRequest.status === "APPROVED") {
     const { data: attendance } = await admin
       .from("attendance_logs")
@@ -82,20 +69,7 @@ export async function PATCH(request: Request, context: RouteContext<"/api/off-re
       if (removeError) return NextResponse.json({ success: false, error: removeError.message }, { status: 500 });
     }
 
-    try {
-      const spreadsheetId = resolveOffScheduleSpreadsheetId(parsed.data.sheet_url ?? null);
-      if (!spreadsheetId) throw new Error("Chưa cấu hình Google Sheet lịch OFF");
-      const result = await syncScheduleUpdatesToGoogleSheet(spreadsheetId, buildOffRequestGoogleSheetSync({
-        rider_code: offRequest.rider_code,
-        rider_name: offRequest.rider?.full_name ?? null,
-        off_date: offRequest.off_date,
-        request_type: offRequest.request_type as "WEEKLY" | "PLANNED" | "EMERGENCY",
-        action: "REJECT",
-      }));
-      sheetSync = { success: true, ...result };
-    } catch (error) {
-      sheetSync = { success: false, error: error instanceof Error ? error.message : "Không thể đồng bộ Google Sheet" };
-    }
+    sheetSync = await processAttendanceSheetSync(300, parsed.data.sheet_url ?? null);
   }
 
   const nextStatus = parsed.data.action === "RESEND_EMAIL"

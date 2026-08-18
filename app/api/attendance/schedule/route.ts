@@ -5,9 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { canManageOperations } from "@/lib/auth/permissions";
 import { getCachedAttendanceSchedule, getCachedRiders, invalidateAttendanceCache } from "@/lib/cache/operations-cache";
 import {
-  resolveOffScheduleSpreadsheetId,
-  syncScheduleUpdatesToGoogleSheet,
-} from "@/lib/google/off-schedule";
+  processAttendanceSheetSync,
+} from "@/lib/google/attendance-sheet-sync";
 import type { Rider } from "@/types";
 
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -158,7 +157,6 @@ export async function PUT(request: Request) {
   }
 
   const riderCodes = new Map((riders ?? []).map((rider) => [rider.id, rider.rider_code]));
-  const riderNames = new Map((riders ?? []).map((rider) => [rider.id, rider.full_name ?? ""]));
   if (riderCodes.size !== riderIds.length) {
     return NextResponse.json({ success: false, error: "Có rider không tồn tại" }, { status: 400 });
   }
@@ -203,33 +201,7 @@ export async function PUT(request: Request) {
     updatedLogs = data ?? [];
   }
 
-  let sheetSync:
-    | { success: true; spreadsheet_id: string; updated: number; appended: number; cleared: number }
-    | { success: false; error: string };
-  try {
-    const spreadsheetId = resolveOffScheduleSpreadsheetId(parsed.data.sheet_url);
-    if (!spreadsheetId) {
-      throw new Error(
-        "Chưa chọn Google Sheet khu 5,6. Hãy mở Đồng bộ Google Sheet và lưu link một lần.",
-      );
-    }
-    const result = await syncScheduleUpdatesToGoogleSheet(
-      spreadsheetId,
-      parsed.data.updates.map((item) => ({
-        rider_code: riderCodes.get(item.rider_id) ?? "",
-        rider_name: riderNames.get(item.rider_id) ?? "",
-        work_date: item.work_date,
-        status: item.status,
-      })),
-      request.signal,
-    );
-    sheetSync = { success: true, ...result };
-  } catch (error) {
-    sheetSync = {
-      success: false,
-      error: error instanceof Error ? error.message : "Không thể đồng bộ Google Sheet",
-    };
-  }
+  const sheetSync = await processAttendanceSheetSync(300, parsed.data.sheet_url);
 
   await session.admin.from("activity_logs").insert({
     entity_type: "attendance_schedule",
