@@ -46,7 +46,10 @@ export function OffScheduleView() {
     const response = await fetch(`/api/off-requests/${item.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({
+        action,
+        sheet_url: window.localStorage.getItem("rider-ops-off-sheet-url") || null,
+      }),
     });
     const result = await response.json().catch(() => null);
     if (!response.ok || !result?.success) {

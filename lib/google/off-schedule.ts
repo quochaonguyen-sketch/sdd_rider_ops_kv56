@@ -18,6 +18,32 @@ export type GoogleScheduleUpdate = {
   status: GoogleScheduleStatus;
 };
 
+export function buildOffRequestGoogleSheetSync({
+  rider_code,
+  rider_name,
+  off_date,
+  request_type,
+  action,
+}: {
+  rider_code: string;
+  rider_name: string | null;
+  off_date: string;
+  request_type: "WEEKLY" | "PLANNED" | "EMERGENCY";
+  action: "APPROVE" | "REJECT";
+}): GoogleScheduleUpdate[] {
+  if (action === "REJECT") {
+    return [{ rider_code, rider_name: rider_name ?? "", work_date: off_date, status: "ON" }];
+  }
+
+  const statusByType: Record<typeof request_type, Exclude<GoogleScheduleStatus, "" | "ON">> = {
+    WEEKLY: "OFF_WEEKLY",
+    PLANNED: "OFF_APPROVED",
+    EMERGENCY: "OFF_UNEXPECTED",
+  };
+
+  return [{ rider_code, rider_name: rider_name ?? "", work_date: off_date, status: statusByType[request_type] }];
+}
+
 const STATUS_LABELS: Record<Exclude<GoogleScheduleStatus, "" | "ON">, string> = {
   OFF_WEEKLY: "OFF tuần",
   OFF_APPROVED: "OFF có xin phép",
@@ -51,6 +77,12 @@ export function extractSpreadsheetId(value: string | null | undefined) {
 }
 
 export function resolveOffScheduleSpreadsheetId(sheetUrl?: string | null) {
+  if (sheetUrl?.trim()) {
+    const id = extractSpreadsheetId(sheetUrl);
+    if (!id) throw new Error("Link Google Sheet lịch OFF không hợp lệ");
+    return id;
+  }
+
   const configuredId = extractSpreadsheetId(
     process.env.OFF_SCHEDULE_SPREADSHEET_ID
       || process.env.THI_CONG_PLAN_SPREADSHEET_ID
@@ -58,11 +90,6 @@ export function resolveOffScheduleSpreadsheetId(sheetUrl?: string | null) {
   );
   if (configuredId) return configuredId;
 
-  if (sheetUrl?.trim()) {
-    const id = extractSpreadsheetId(sheetUrl);
-    if (!id) throw new Error("Link Google Sheet lịch OFF không hợp lệ");
-    return id;
-  }
   return null;
 }
 

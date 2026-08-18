@@ -119,6 +119,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   useReportInitialDataLoading("attendance", loading);
   const [importing, setImporting] = useState(false);
   const [syncingSheet, setSyncingSheet] = useState(false);
+  const [bulkSyncingSheet, setBulkSyncingSheet] = useState(false);
   const [showSheetSync, setShowSheetSync] = useState(false);
   const [sheetUrl, setSheetUrl] = useState("");
   const [serviceAccountEmail, setServiceAccountEmail] = useState<string | null>(null);
@@ -523,6 +524,49 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
     await load();
   }
 
+  async function reconcileGoogleSheet() {
+    if (!canEdit) return;
+    const targetSheet = window.localStorage.getItem("rider-ops-off-sheet-url") || sheetUrl || "";
+    if (!targetSheet) {
+      setError("Bạn chưa lưu link Google Sheet OFF trong form Đồng bộ Sheet OFF.");
+      setShowSheetSync(true);
+      return;
+    }
+
+    setBulkSyncingSheet(true);
+    setError(null);
+    setSuccess(null);
+    setImportIssues([]);
+
+    try {
+      const response = await fetch("/api/attendance/schedule/reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month, sheet_url: targetSheet }),
+      });
+      const result = await response.json().catch(() => null) as {
+        success?: boolean;
+        error?: string;
+        updated?: number;
+        appended?: number;
+        cleared?: number;
+      } | null;
+
+      if (!response.ok || !result?.success) {
+        setError(result?.error ?? "Không thể đồng bộ toàn bộ lịch lên Google Sheet");
+        return;
+      }
+
+      window.localStorage.setItem("rider-ops-off-sheet-url", targetSheet);
+      setSuccess(`Đã đồng bộ lại toàn bộ lịch tháng ${month}: cập nhật ${result.updated ?? 0}, thêm ${result.appended ?? 0}, xóa ${result.cleared ?? 0}.`);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Không thể đồng bộ toàn bộ lịch lên Google Sheet");
+    } finally {
+      setBulkSyncingSheet(false);
+    }
+  }
+
   async function openSheetSync() {
     setError(null);
     const response = await fetch("/api/attendance/schedule/google-sheet", { cache: "no-store" });
@@ -584,6 +628,10 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
                 <FileSpreadsheet size={16} />
                 <span className="hidden sm:inline">Đồng bộ Sheet OFF</span>
               </Button>
+              <Button type="button" variant="secondary" disabled={!canEdit || bulkSyncingSheet} onClick={() => void reconcileGoogleSheet()}>
+                <RefreshCcw className={bulkSyncingSheet ? "animate-spin" : ""} size={16} />
+                <span className="hidden sm:inline">{bulkSyncingSheet ? "Đang đồng bộ..." : "Đồng bộ lại tháng"}</span>
+              </Button>
               <Button type="button" variant="secondary" disabled={!canEdit || downloadingTemplate} onClick={() => void downloadTemplate()}>
                 <Download size={16} />
                 <span className="hidden sm:inline">File mẫu</span>
@@ -633,6 +681,15 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
           >
             <FileSpreadsheet size={16} />
             {syncingSheet ? "Đang đồng bộ..." : "Đồng bộ Sheet OFF"}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!canEdit || bulkSyncingSheet}
+            onClick={() => void reconcileGoogleSheet()}
+          >
+            <RefreshCcw className={bulkSyncingSheet ? "animate-spin" : ""} size={16} />
+            {bulkSyncingSheet ? "Đang đồng bộ..." : "Đồng bộ lại tháng"}
           </Button>
           <Button
             type="button"

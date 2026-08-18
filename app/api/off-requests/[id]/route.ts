@@ -4,10 +4,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { canManageOperations } from "@/lib/auth/permissions";
 import { sendOffRequestDecisionEmail, type OffRequestEmailResult } from "@/lib/email/off-request-notification";
+import { buildOffRequestGoogleSheetSync, resolveOffScheduleSpreadsheetId, syncScheduleUpdatesToGoogleSheet } from "@/lib/google/off-schedule";
 
 const updateSchema = z.object({
   action: z.enum(["APPROVE", "REJECT", "RESEND_EMAIL"]),
   review_note: z.string().trim().max(500).optional(),
+  sheet_url: z.string().trim().max(1000).optional().nullable(),
 });
 
 const attendanceStatus = {
@@ -38,6 +40,8 @@ export async function PATCH(request: Request, context: RouteContext<"/api/off-re
     return NextResponse.json({ success: false, error: "Chỉ gửi email sau khi yêu cầu đã được xử lý." }, { status: 400 });
   }
 
+  let sheetSync: { success: true; updated?: number; appended?: number; cleared?: number; spreadsheet_id?: string } | { success: false; error: string } | null = null;
+
   if (parsed.data.action === "APPROVE") {
     const status = attendanceStatus[offRequest.request_type as keyof typeof attendanceStatus];
     if (!status) return NextResponse.json({ success: false, error: "Loại OFF không được hỗ trợ." }, { status: 400 });
@@ -51,6 +55,21 @@ export async function PATCH(request: Request, context: RouteContext<"/api/off-re
       raw_data: { source: "rider_off_request", request_id: offRequest.id, request_type: offRequest.request_type },
     }, { onConflict: "rider_code,work_date" });
     if (attendanceError) return NextResponse.json({ success: false, error: attendanceError.message }, { status: 500 });
+
+    try {
+      const spreadsheetId = resolveOffScheduleSpreadsheetId(parsed.data.sheet_url ?? null);
+      if (!spreadsheetId) throw new Error("Chưa cấu hình Google Sheet lịch OFF");
+      const result = await syncScheduleUpdatesToGoogleSheet(spreadsheetId, buildOffRequestGoogleSheetSync({
+        rider_code: offRequest.rider_code,
+        rider_name: offRequest.rider?.full_name ?? null,
+        off_date: offRequest.off_date,
+        request_type: offRequest.request_type as "WEEKLY" | "PLANNED" | "EMERGENCY",
+        action: "APPROVE",
+      }));
+      sheetSync = { success: true, ...result };
+    } catch (error) {
+      sheetSync = { success: false, error: error instanceof Error ? error.message : "Không thể đồng bộ Google Sheet" };
+    }
   } else if (parsed.data.action === "REJECT" && offRequest.status === "APPROVED") {
     const { data: attendance } = await admin
       .from("attendance_logs")
@@ -61,6 +80,21 @@ export async function PATCH(request: Request, context: RouteContext<"/api/off-re
     if (attendance?.raw_data && (attendance.raw_data as Record<string, unknown>).request_id === offRequest.id) {
       const { error: removeError } = await admin.from("attendance_logs").delete().eq("id", attendance.id);
       if (removeError) return NextResponse.json({ success: false, error: removeError.message }, { status: 500 });
+    }
+
+    try {
+      const spreadsheetId = resolveOffScheduleSpreadsheetId(parsed.data.sheet_url ?? null);
+      if (!spreadsheetId) throw new Error("Chưa cấu hình Google Sheet lịch OFF");
+      const result = await syncScheduleUpdatesToGoogleSheet(spreadsheetId, buildOffRequestGoogleSheetSync({
+        rider_code: offRequest.rider_code,
+        rider_name: offRequest.rider?.full_name ?? null,
+        off_date: offRequest.off_date,
+        request_type: offRequest.request_type as "WEEKLY" | "PLANNED" | "EMERGENCY",
+        action: "REJECT",
+      }));
+      sheetSync = { success: true, ...result };
+    } catch (error) {
+      sheetSync = { success: false, error: error instanceof Error ? error.message : "Không thể đồng bộ Google Sheet" };
     }
   }
 
@@ -109,5 +143,5 @@ export async function PATCH(request: Request, context: RouteContext<"/api/off-re
     message: `${offRequest.rider_code} OFF request ${nextStatus.toLowerCase()} for ${offRequest.off_date}`,
     raw_data: { reviewer_id: user.id, attendance_synced: parsed.data.action !== "RESEND_EMAIL", email_status: emailResult.status, email_provider_id: emailResult.providerId ?? null },
   });
-  return NextResponse.json({ success: true, request: updated, email_notification: emailResult });
+  return NextResponse.json({ success: true, request: updated, email_notification: emailResult, sheet_sync: sheetSync ?? undefined });
 }
