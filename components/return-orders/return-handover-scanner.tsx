@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, MouseEvent, useEffect, useRef, useState } from "react";
-import { Camera, Check, LoaderCircle, ScanLine, X } from "lucide-react";
+import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, useState } from "react";
+import { Camera, Check, ChevronDown, ClipboardCheck, LoaderCircle, ScanLine, Search, X } from "lucide-react";
 
 type ScannerRider = { id: string; name: string; kv: string };
 type ScanResult = { shipment_id: string; rider_code: string; rider_name: string; handed_over_at: string; source: string };
@@ -14,7 +14,10 @@ export function ReturnHandoverScanner({ riders }: { riders: ScannerRider[] }) {
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
   const scanningRef = useRef(false);
+  const boxRef = useRef<HTMLDivElement>(null);
   const [riderCode, setRiderCode] = useState(riders[0]?.id ?? "");
+  const [riderQuery, setRiderQuery] = useState("");
+  const [riderListOpen, setRiderListOpen] = useState(false);
   const [manualCode, setManualCode] = useState("");
   const [cameraOn, setCameraOn] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -33,6 +36,14 @@ export function ReturnHandoverScanner({ riders }: { riders: ScannerRider[] }) {
 
   useEffect(() => stopCamera, []);
 
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (boxRef.current && !boxRef.current.contains(event.target as Node)) setRiderListOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
+
   const close = () => {
     stopCamera();
     dialogRef.current?.close();
@@ -42,6 +53,31 @@ export function ReturnHandoverScanner({ riders }: { riders: ScannerRider[] }) {
     setMessage("");
     setManualCode("");
     dialogRef.current?.showModal();
+  };
+
+  const normalizeRiderText = (value: string) =>
+    value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("vi");
+
+  const selectedRider = riders.find((rider) => rider.id === riderCode);
+  const filteredRiders = riderQuery.trim()
+    ? riders.filter((rider) => normalizeRiderText(`${rider.name} ${rider.id} ${rider.kv}`).includes(normalizeRiderText(riderQuery)))
+    : riders;
+  const riderInputValue =
+    riderListOpen || riderQuery ? riderQuery : selectedRider ? `${selectedRider.name || selectedRider.id} · ${selectedRider.id}` : "";
+
+  const selectRider = (id: string) => {
+    setRiderCode(id);
+    setRiderQuery("");
+    setRiderListOpen(false);
+  };
+
+  const onRiderInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      setRiderListOpen(false);
+    } else if (event.key === "Enter" && filteredRiders.length) {
+      event.preventDefault();
+      selectRider(filteredRiders[0].id);
+    }
   };
 
   const submitCode = async (rawCode: string, source: "camera" | "manual") => {
@@ -124,8 +160,12 @@ export function ReturnHandoverScanner({ riders }: { riders: ScannerRider[] }) {
   return (
     <>
       <button type="button" className="return-handover-trigger" onClick={open} disabled={!riders.length}>
-        <ScanLine aria-hidden="true" />
-        <span>Quét camera bàn giao</span>
+        <span className="return-handover-trigger-icon"><ClipboardCheck aria-hidden="true" /></span>
+        <span className="return-handover-trigger-copy">
+          <strong>Bàn giao cho rider</strong>
+          <small>{riders.length ? `${riders.length} rider đang chờ nhận hàng` : "Chưa có rider đang trả hàng"}</small>
+        </span>
+        <ScanLine aria-hidden="true" className="return-handover-trigger-arrow" />
       </button>
       <dialog ref={dialogRef} className="return-handover-dialog" onClick={closeFromBackdrop} onClose={stopCamera}>
         <article className="return-handover-panel">
@@ -140,9 +180,57 @@ export function ReturnHandoverScanner({ riders }: { riders: ScannerRider[] }) {
 
           <div className="return-handover-form">
             <label htmlFor="return-handover-rider">Rider bàn giao</label>
-            <select id="return-handover-rider" value={riderCode} onChange={(event) => setRiderCode(event.target.value)} disabled={busy}>
-              {riders.map((rider) => <option key={rider.id} value={rider.id}>{rider.name || rider.id} · {rider.id}</option>)}
-            </select>
+            <div className="return-rider-combobox" ref={boxRef}>
+              <div className="return-rider-combobox-input">
+                <Search aria-hidden="true" />
+                <input
+                  id="return-handover-rider"
+                  value={riderInputValue}
+                  placeholder="Tìm rider theo tên, mã hoặc KV..."
+                  autoComplete="off"
+                  disabled={busy}
+                  onChange={(event) => {
+                    setRiderQuery(event.target.value);
+                    setRiderListOpen(true);
+                  }}
+                  onFocus={() => setRiderListOpen(true)}
+                  onKeyDown={onRiderInputKeyDown}
+                />
+                <button
+                  type="button"
+                  onClick={() => setRiderListOpen((open) => !open)}
+                  disabled={busy}
+                  aria-label={riderListOpen ? "Thu danh sách rider" : "Mở danh sách rider"}
+                >
+                  <ChevronDown aria-hidden="true" />
+                </button>
+              </div>
+              {riderListOpen ? (
+                <ul className="return-rider-combobox-list" role="listbox" aria-label="Danh sách rider bàn giao">
+                  {filteredRiders.length ? (
+                    filteredRiders.map((rider) => (
+                      <li key={rider.id}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={rider.id === riderCode}
+                          className={rider.id === riderCode ? "is-selected" : undefined}
+                          onClick={() => selectRider(rider.id)}
+                        >
+                          <span className="return-rider-option-name">{rider.name || rider.id}</span>
+                          <small className="return-rider-option-code">
+                            {rider.kv ? `${rider.kv} · ` : ""}{rider.id}
+                          </small>
+                          <span className="return-rider-option-check">{rider.id === riderCode ? <Check aria-hidden="true" /> : null}</span>
+                        </button>
+                      </li>
+                    ))
+                  ) : (
+                    <li className="return-rider-combobox-empty">{riders.length ? "Không tìm thấy rider phù hợp" : "Chưa có rider đang trả hàng"}</li>
+                  )}
+                </ul>
+              ) : null}
+            </div>
           </div>
 
           {cameraOn ? (

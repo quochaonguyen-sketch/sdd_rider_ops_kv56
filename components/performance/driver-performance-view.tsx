@@ -11,6 +11,7 @@ import { cn } from "@/utils/cn";
 import {
   type PerformanceDirection,
   type PerformanceFilters,
+  type PerformancePeriod,
   type PerformanceResult,
   type PerformanceRow,
   type PerformanceSortKey,
@@ -98,7 +99,7 @@ export function DriverPerformanceView({ result, filters, error, loadedKey }: Pro
   }
 
   return (
-    <div className="mx-auto max-w-[1600px] space-y-5">
+    <div className="perf-page mx-auto max-w-[1600px]">
       <PageHeader />
 
       <PerformanceFilters
@@ -110,9 +111,9 @@ export function DriverPerformanceView({ result, filters, error, loadedKey }: Pro
       />
 
       {error ? (
-        <Card className="border-red-200 bg-red-50 text-sm font-medium text-red-700">
+        <div className="perf-error" role="alert">
           Không thể tải dữ liệu performance. Chi tiết: {error}
-        </Card>
+        </div>
       ) : null}
 
       <PerformanceKpiCards summary={summary} page={filters.page} pageCount={pageCount} pageSize={filters.pageSize} isLoading={isLoading} />
@@ -133,23 +134,22 @@ export function DriverPerformanceView({ result, filters, error, loadedKey }: Pro
 
 function PageHeader() {
   return (
-    <header className="rounded-2xl border border-slate-200/80 bg-white/85 p-5 shadow-sm backdrop-blur">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-start gap-3">
-          <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-slate-950 text-white shadow-sm">
-            <BarChart3 size={22} />
-          </span>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-600">Rider Operations · KV5/KV6</p>
-            <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950">Performance Deli / Pick KV5/KV6</h1>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
-              Xem sản lượng rider khu 5 và 6 theo một ngày, có phân trang server-side.
-            </p>
-          </div>
+    <header className="perf-header">
+      <div className="perf-header-top">
+        <span className="perf-mark">
+          <BarChart3 size={22} />
+        </span>
+        <div className="perf-header-copy">
+          <p className="perf-kicker">Rider Operations · KV5/KV6</p>
+          <h1 className="perf-title">Performance Deli / Pick KV5/KV6</h1>
+          <p className="perf-desc">
+            Xem sản lượng rider khu 5 và 6 theo ngày, tuần hoặc tháng — có phân trang server-side.
+          </p>
         </div>
-        <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200">
-          <span className="font-bold text-slate-950">Ngữ cảnh:</span> chỉ tính rider KV5/KV6
-        </div>
+      </div>
+      <div className="perf-scope">
+        <span>Ngữ cảnh</span>
+        <strong>Chỉ tính rider KV5/KV6 · Tổng hợp theo chu kỳ đã chọn</strong>
       </div>
     </header>
   );
@@ -212,18 +212,43 @@ function PerformanceFilters({
   }
 
   return (
-    <section className="sticky top-16 z-20 rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-sm backdrop-blur-xl" aria-label="Bộ lọc performance">
-      <div className="grid gap-3 xl:grid-cols-[180px_150px_220px_160px_minmax(260px,1fr)_auto] xl:items-end">
+    <section className="perf-filters" aria-label="Bộ lọc performance">
+      <div className="perf-filters-period">
+        <div className="perf-filters-label">
+          <span>Chu kỳ thống kê</span>
+          <small>Ngày, tuần gần nhất hoặc tháng hiện tại</small>
+        </div>
+        <div className="perf-period-toggle" role="group" aria-label="Chọn chu kỳ thống kê">
+          {(["day", "week", "month"] as const).map((period) => (
+            <button
+              key={period}
+              type="button"
+              aria-pressed={filters.period === period}
+              className={cn("perf-period-option", filters.period === period && "is-active")}
+              onClick={() =>
+                updateParams((params) => {
+                  params.set("period", period);
+                  params.set("page", "1");
+                })
+              }
+            >
+              {periodLabel(period)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="perf-filters-grid">
         <label className="block" htmlFor="performance-date">
-          <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Chọn ngày</span>
+          <span className="perf-field-label">Chọn ngày</span>
           <div className="relative">
-            <CalendarDays className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <CalendarDays className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" size={16} />
             <Input id="performance-date" type="date" className="pl-9" value={filters.date} onChange={(event) => changeDate(event.target.value)} aria-label="Chọn ngày xem performance" />
           </div>
         </label>
 
         <label className="block" htmlFor="performance-kv">
-          <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Khu</span>
+          <span className="perf-field-label">Khu</span>
           <Select id="performance-kv" value={filters.kv} onChange={(event) => changeFilter("kv", event.target.value)} aria-label="Lọc theo khu">
             <option value="all">KV5 + KV6</option>
             <option value="KV5">KV5</option>
@@ -232,7 +257,7 @@ function PerformanceFilters({
         </label>
 
         <label className="block" htmlFor="performance-district">
-          <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Quận giao</span>
+          <span className="perf-field-label">Quận giao</span>
           <Select id="performance-district" value={filters.district} onChange={(event) => changeFilter("district", event.target.value)} aria-label="Lọc theo quận giao">
             <option value="all">Tất cả quận</option>
             {options.districts.map((district) => (
@@ -242,7 +267,7 @@ function PerformanceFilters({
         </label>
 
         <label className="block" htmlFor="performance-cot">
-          <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">COT</span>
+          <span className="perf-field-label">COT</span>
           <Select id="performance-cot" value={filters.cot} onChange={(event) => changeFilter("cot", event.target.value)} aria-label="Lọc theo COT">
             <option value="all">Tất cả COT</option>
             {options.cots.map((cot) => (
@@ -252,9 +277,9 @@ function PerformanceFilters({
         </label>
 
         <label className="block" htmlFor="performance-search">
-          <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Tìm rider / quận / COT</span>
+          <span className="perf-field-label">Tìm rider / quận / COT</span>
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" size={16} />
             <Input
               id="performance-search"
               className="pl-9"
@@ -267,7 +292,7 @@ function PerformanceFilters({
           <span id="performance-search-help" className="sr-only">Tìm kiếm tự động sau khi ngừng gõ.</span>
         </label>
 
-        <Button type="button" className="h-10 min-w-32" variant="secondary" disabled={isLoading} onClick={onRefresh}>
+        <Button type="button" className="perf-refresh" variant="secondary" disabled={isLoading} onClick={onRefresh}>
           <RefreshCcw size={16} className={isLoading ? "animate-spin" : undefined} />
           Tải lại
         </Button>
@@ -349,7 +374,7 @@ function RiderPerformanceTable({
 }) {
   const filterText = useMemo(() => {
     const parts = [
-      `Ngày ${formatDate(filters.date)}`,
+      periodScopeLabel(filters),
       filters.kv === "all" ? "KV5/KV6" : filters.kv,
       filters.district === "all" ? "Tất cả quận giao" : filters.district,
       filters.cot === "all" ? "Tất cả COT" : filters.cot,
@@ -357,18 +382,18 @@ function RiderPerformanceTable({
     ];
     if (filters.q) parts.push(`Tìm "${filters.q}"`);
     return parts.join(" · ");
-  }, [filters.cot, filters.date, filters.district, filters.kv, filters.q, rows.length, summary.groups]);
+  }, [filters, rows.length, summary.groups]);
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-busy={isLoading}>
-      <div className="flex flex-col gap-3 border-b border-slate-100 p-4 lg:flex-row lg:items-center lg:justify-between">
+    <section className="perf-table" aria-busy={isLoading}>
+      <div className="perf-table-head">
         <div>
-          <h2 className="text-base font-black text-slate-950">Danh sách rider theo ngày</h2>
-          <p className="mt-1 text-sm text-slate-500">{filterText}</p>
+          <h2 className="perf-table-title">Danh sách rider</h2>
+          <p className="perf-table-sub">{filterText}</p>
         </div>
         <div className="flex items-center gap-2">
-          {isLoading ? <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">Đang tải dữ liệu...</span> : null}
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
+          {isLoading ? <span className="perf-badge is-loading">Đang tải dữ liệu...</span> : null}
+          <span className="perf-badge">
             {formatNumber(rows.length)} / {formatNumber(summary.groups)} dòng
           </span>
         </div>
@@ -376,15 +401,15 @@ function RiderPerformanceTable({
 
       <div className="relative max-h-[68vh] overflow-auto [scrollbar-gutter:stable]">
         {isLoading ? (
-          <div className="sticky top-0 z-20 flex items-center gap-2 border-b border-blue-100 bg-blue-50/95 px-4 py-2 text-sm font-semibold text-blue-700 backdrop-blur">
-            <span className="size-3 animate-spin rounded-full border-2 border-blue-300 border-t-blue-700" />
-            Đang tải dữ liệu ngày {formatDate(filters.date)}...
+          <div className="perf-loading-bar">
+            <span className="size-3 animate-spin rounded-full border-2 border-[var(--color-accent-soft)] border-t-[var(--color-accent)]" />
+            Đang tải dữ liệu {filters.period === "day" ? `ngày ${formatDate(filters.date)}` : periodScopeLabel(filters)}...
           </div>
         ) : null}
 
         <table className="w-full min-w-[1120px] border-separate border-spacing-0 text-left text-sm">
-          <caption className="sr-only">Bảng performance Deli Pick rider KV5 KV6 theo một ngày</caption>
-          <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 shadow-[0_1px_0_#e2e8f0]">
+          <caption className="sr-only">Bảng performance Deli Pick rider KV5 KV6</caption>
+          <thead className="perf-table-thead">
             <tr>
               <SortHeader label="Rider" sortKey="rider" current={filters} onSort={onSort} className="w-[24%]" />
               <th scope="col" className="px-4 py-3 font-semibold">KV / COT</th>
@@ -400,7 +425,7 @@ function RiderPerformanceTable({
               Array.from({ length: 8 }, (_, index) => (
                 <tr key={index} className="h-16 animate-pulse">
                   <td colSpan={7} className="px-4">
-                    <div className="h-4 rounded bg-slate-100" />
+                    <div className="h-4 rounded bg-[var(--color-paper-2)]" />
                   </td>
                 </tr>
               ))
@@ -434,33 +459,33 @@ function PerformanceTableRow({ row, index }: { row: PerformanceRow; index: numbe
   const pickRate = row.pickup_rate;
 
   return (
-    <tr className={cn("transition hover:bg-blue-50/60", index % 2 === 1 ? "bg-slate-50/45" : "bg-white")}>
+    <tr className={cn("transition hover:bg-[var(--color-accent-soft)]", index % 2 === 1 ? "bg-[var(--color-paper-2)]" : "bg-[var(--color-paper)]")}>
       <th scope="row" className="px-4 py-3 text-left">
-        <p className="max-w-72 truncate font-bold text-slate-950" title={row.rider_name ?? row.driver_name ?? row.driver_id}>
+        <p className="max-w-72 truncate font-bold text-[var(--color-ink)]" title={row.rider_name ?? row.driver_name ?? row.driver_id}>
           {row.rider_name ?? row.driver_name ?? "Chưa map rider"}
         </p>
-        <p className="font-mono text-xs font-normal text-slate-500">{row.driver_id}</p>
+        <p className="font-mono text-xs font-normal text-[var(--color-muted)]">{row.driver_id}</p>
       </th>
       <td className="px-4 py-3">
-        <p className="font-bold text-slate-800">{row.kv ?? "—"}</p>
-        <p className="text-xs text-slate-500">{row.cot ?? "—"}</p>
+        <p className="font-bold text-[var(--color-ink-2)]">{row.kv ?? "—"}</p>
+        <p className="text-xs text-[var(--color-muted)]">{row.cot ?? "—"}</p>
       </td>
       <td className="px-4 py-3">
-        <p className="max-w-56 truncate font-semibold text-slate-800" title={row.delivery_district ?? undefined}>{row.delivery_district ?? "Chưa có quận giao"}</p>
-        <span className="mt-1 inline-flex max-w-56 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+        <p className="max-w-56 truncate font-semibold text-[var(--color-ink-2)]" title={row.delivery_district ?? undefined}>{row.delivery_district ?? "Chưa có quận giao"}</p>
+        <span className="mt-1 inline-flex max-w-56 rounded-full bg-[var(--color-paper-2)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-muted)]">
           Pick: {row.pickup_district ?? "—"}
         </span>
       </td>
       <td className="px-4 py-3 text-right">
-        <p className="font-black tabular-nums text-slate-950">{formatNumber(row.delivery_delivered)}</p>
-        <p className="text-xs text-slate-400">/ {formatNumber(row.delivery_assigned)} phân</p>
+        <p className="font-black tabular-nums text-[var(--color-ink)]">{formatNumber(row.delivery_delivered)}</p>
+        <p className="text-xs text-[var(--color-muted)]">/ {formatNumber(row.delivery_assigned)} phân</p>
       </td>
       <td className="px-4 py-3 text-right">
         <ProgressMetric value={deliRate} />
       </td>
       <td className="px-4 py-3 text-right">
-        <p className="font-black tabular-nums text-slate-950">{formatNumber(row.pickup_picked)}</p>
-        <p className="text-xs text-slate-400">/ {formatNumber(row.pickup_assigned)} phân</p>
+        <p className="font-black tabular-nums text-[var(--color-ink)]">{formatNumber(row.pickup_picked)}</p>
+        <p className="text-xs text-[var(--color-muted)]">/ {formatNumber(row.pickup_assigned)} phân</p>
       </td>
       <td className="px-4 py-3 text-right">
         <ProgressMetric value={pickRate} />
@@ -487,15 +512,15 @@ function PaginationControls({
   const pages = pageWindow(page, pageCount);
 
   return (
-    <div className="flex flex-col gap-3 border-t border-slate-100 bg-white p-4 lg:flex-row lg:items-center lg:justify-between">
-      <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
-        <span>Trang <strong className="text-slate-800">{page}</strong> / {pageCount}</span>
+    <div className="flex flex-col gap-3 border-t border-[var(--color-rule)] bg-[var(--color-paper)] p-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--color-muted)]">
+        <span>Trang <strong className="text-[var(--color-ink)]">{page}</strong> / {pageCount}</span>
         <label className="flex items-center gap-2">
           <span>Dòng/trang</span>
           <select
             value={pageSize}
             disabled={disabled}
-            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm font-semibold text-slate-700 disabled:opacity-60"
+            className="rounded-lg border border-[var(--color-rule-strong)] bg-[var(--color-paper)] px-2 py-1 text-sm font-semibold text-[var(--color-ink)] disabled:opacity-60"
             onChange={(event) => onPageSizeChange(Number(event.target.value))}
             aria-label="Chọn số dòng mỗi trang"
           >
@@ -519,7 +544,7 @@ function PaginationControls({
             onClick={() => onPageChange(item)}
             className={cn(
               "grid size-9 place-items-center rounded-lg border text-sm font-bold transition disabled:opacity-60",
-              item === page ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700",
+              item === page ? "border-[var(--color-graphite)] bg-[var(--color-graphite)] text-[var(--color-graphite-ink)]" : "border-[var(--color-rule-strong)] bg-[var(--color-paper)] text-[var(--color-ink-2)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]",
             )}
           >
             {item}
@@ -549,23 +574,23 @@ function KpiCard({
   tone: "blue" | "emerald" | "slate" | "amber" | "red";
 }) {
   const classes = {
-    blue: "bg-blue-50 text-blue-700 ring-blue-100",
-    emerald: "bg-emerald-50 text-emerald-700 ring-emerald-100",
-    slate: "bg-slate-100 text-slate-700 ring-slate-200",
-    amber: "bg-amber-50 text-amber-700 ring-amber-100",
-    red: "bg-red-50 text-red-700 ring-red-100",
+    blue: "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-[var(--color-accent-soft)]",
+    emerald: "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-[var(--color-success-soft)]",
+    slate: "bg-[var(--color-paper-2)] text-[var(--color-muted)] ring-[var(--color-paper-2)]",
+    amber: "bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-[var(--color-warning-soft)]",
+    red: "bg-[var(--color-error-soft)] text-[var(--color-error)] ring-[var(--color-error-soft)]",
   };
 
   return (
-    <Card className="min-h-36 border-slate-200/80 bg-white/90 shadow-sm">
+    <Card className="perf-kpi border-[var(--color-rule)] bg-[var(--color-paper)] shadow-[var(--shadow-panel)]">
       <div className="flex items-start justify-between gap-3">
         <span className={cn("grid size-11 place-items-center rounded-xl ring-1", classes[tone])}>{icon}</span>
         {rate !== undefined ? <span className={cn("rounded-full px-2.5 py-1 text-xs font-black", scoreBadgeClass(rate))}>{formatRate(rate)}</span> : null}
       </div>
-      <p className="mt-4 text-xs font-bold uppercase tracking-wide text-slate-400">{title}</p>
+      <p className="perf-kpi-title">{title}</p>
       <div className="mt-1 flex flex-wrap items-end gap-x-2 gap-y-1">
-        <p className="text-2xl font-black tabular-nums tracking-tight text-slate-950">{primary}</p>
-        <p className="pb-1 text-sm font-semibold text-slate-500">{secondary}</p>
+        <p className="perf-kpi-value">{primary}</p>
+        <p className="perf-kpi-secondary">{secondary}</p>
       </div>
       {rate !== undefined ? (
         <div className="mt-4">
@@ -588,7 +613,7 @@ function ProgressMetric({ value }: { value: number | null }) {
 function ProgressBar({ value }: { value: number | null }) {
   const safeValue = Math.max(0, Math.min(100, value ?? 0));
   return (
-    <div className="h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+    <div className="h-2 overflow-hidden rounded-full bg-[var(--color-paper-2)]" aria-hidden="true">
       <div className={cn("h-full rounded-full transition-all", scoreBarClass(value))} style={{ width: `${safeValue}%` }} />
     </div>
   );
@@ -603,13 +628,13 @@ function EmptyState({ filters }: { filters: PerformanceFilters }) {
 
   return (
     <div className="mx-auto flex min-h-80 max-w-xl flex-col items-center justify-center px-6 text-center">
-      <div className="grid size-12 place-items-center rounded-full bg-slate-100 text-slate-500">
+      <div className="grid size-12 place-items-center rounded-full bg-[var(--color-paper-2)] text-[var(--color-muted)]">
         <Search size={20} />
       </div>
-      <h3 className="mt-3 font-bold text-slate-950">Không có dữ liệu performance phù hợp</h3>
-      <p className="mt-2 text-sm text-slate-500">
-        Đang xem ngày {formatDate(filters.date)}, bộ lọc {scope}
-        {filters.q ? ` và từ khóa "${filters.q}"` : ""}. Hãy chọn ngày khác, đổi quận/COT hoặc xóa bớt từ khóa tìm kiếm.
+      <h3 className="mt-3 font-bold text-[var(--color-ink)]">Không có dữ liệu performance phù hợp</h3>
+      <p className="mt-2 text-sm text-[var(--color-muted)]">
+        Đang xem {periodScopeLabel(filters)}, bộ lọc {scope}
+        {filters.q ? ` và từ khóa "${filters.q}"` : ""}. Hãy đổi chu kỳ, chọn ngày khác, đổi quận/COT hoặc xóa bớt từ khóa tìm kiếm.
       </p>
     </div>
   );
@@ -620,7 +645,7 @@ function SortHeader({ label, sortKey, current, onSort, align, className }: { lab
   const directionLabel = current.sort === sortKey ? (current.dir === "asc" ? "tăng dần" : "giảm dần") : "chưa sắp xếp";
   return (
     <th scope="col" className={cn("px-4 py-3 font-semibold", className)} aria-sort={current.sort === sortKey ? (current.dir === "asc" ? "ascending" : "descending") : "none"}>
-      <button type="button" className={cn("flex items-center gap-1 hover:text-slate-950", align === "right" && "ml-auto")} onClick={() => onSort(sortKey)} aria-label={`Sắp xếp ${label}, hiện ${directionLabel}`}>
+      <button type="button" className={cn("flex items-center gap-1 hover:text-[var(--color-ink)]", align === "right" && "ml-auto")} onClick={() => onSort(sortKey)} aria-label={`Sắp xếp ${label}, hiện ${directionLabel}`}>
         {label}
         <Icon size={13} />
       </button>
@@ -632,6 +657,16 @@ function pageWindow(page: number, pageCount: number) {
   const start = Math.max(1, Math.min(page - 2, pageCount - 4));
   const end = Math.min(pageCount, start + 4);
   return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+}
+
+function periodLabel(period: PerformancePeriod) {
+  return period === "day" ? "Ngày" : period === "week" ? "Tuần" : "Tháng";
+}
+
+function periodScopeLabel(filters: PerformanceFilters) {
+  if (filters.period === "week") return `Tuần đến ${formatDate(filters.date)}`;
+  if (filters.period === "month") return `Tháng ${filters.date.slice(0, 7)}`;
+  return `Ngày ${formatDate(filters.date)}`;
 }
 
 function formatDate(value: string) {
@@ -658,26 +693,26 @@ function scoreTone(value: number | null | undefined): "blue" | "emerald" | "slat
 
 function scoreBadgeClass(value: number | null | undefined) {
   const tone = scoreTone(value);
-  if (tone === "emerald") return "bg-emerald-50 text-emerald-700";
-  if (tone === "amber") return "bg-amber-50 text-amber-700";
-  if (tone === "red") return "bg-red-50 text-red-700";
-  return "bg-slate-100 text-slate-500";
+  if (tone === "emerald") return "bg-[var(--color-success-soft)] text-[var(--color-success)]";
+  if (tone === "amber") return "bg-[var(--color-warning-soft)] text-[var(--color-warning)]";
+  if (tone === "red") return "bg-[var(--color-error-soft)] text-[var(--color-error)]";
+  return "bg-[var(--color-paper-2)] text-[var(--color-muted)]";
 }
 
 function scoreTextClass(value: number | null | undefined) {
   const tone = scoreTone(value);
-  if (tone === "emerald") return "text-emerald-700";
-  if (tone === "amber") return "text-amber-700";
-  if (tone === "red") return "text-red-700";
-  return "text-slate-500";
+  if (tone === "emerald") return "text-[var(--color-success)]";
+  if (tone === "amber") return "text-[var(--color-warning)]";
+  if (tone === "red") return "text-[var(--color-error)]";
+  return "text-[var(--color-muted)]";
 }
 
 function scoreBarClass(value: number | null | undefined) {
   const tone = scoreTone(value);
-  if (tone === "emerald") return "bg-emerald-500";
-  if (tone === "amber") return "bg-amber-500";
-  if (tone === "red") return "bg-red-500";
-  return "bg-slate-300";
+  if (tone === "emerald") return "bg-[var(--color-success)]";
+  if (tone === "amber") return "bg-[var(--color-warning)]";
+  if (tone === "red") return "bg-[var(--color-error)]";
+  return "bg-[var(--color-rule-strong)]";
 }
 
 function rate(numerator: number, denominator: number) {

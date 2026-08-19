@@ -6,13 +6,16 @@ import { prisma } from "@/lib/prisma/client";
 export const performanceSortSchema = z.enum(["area", "rider", "delivery", "pickup", "deliveryRate", "pickupRate"]);
 export const performanceDirectionSchema = z.enum(["asc", "desc"]);
 export const performanceKvSchema = z.enum(["all", "KV5", "KV6"]);
+export const performancePeriodSchema = z.enum(["day", "week", "month"]);
 
 export type PerformanceSortKey = z.infer<typeof performanceSortSchema>;
 export type PerformanceDirection = z.infer<typeof performanceDirectionSchema>;
 export type PerformanceKvFilter = z.infer<typeof performanceKvSchema>;
+export type PerformancePeriod = z.infer<typeof performancePeriodSchema>;
 
 export type PerformanceFilters = {
   date: string;
+  period: PerformancePeriod;
   q: string;
   kv: PerformanceKvFilter;
   district: string;
@@ -82,6 +85,18 @@ export function todayString() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function shiftDate(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function periodRange(date: string, period: PerformancePeriod) {
+  if (period === "week") return { start: shiftDate(date, -6), end: date };
+  if (period === "month") return { start: `${date.slice(0, 7)}-01`, end: date };
+  return { start: date, end: date };
+}
+
 export function parsePerformanceFilters(params: SearchParamsLike): PerformanceFilters {
   const parsedDate = dateSchema.safeParse(getParam(params, "date"));
   const rawPage = Number(getParam(params, "page") ?? 1);
@@ -89,6 +104,7 @@ export function parsePerformanceFilters(params: SearchParamsLike): PerformanceFi
 
   return {
     date: parsedDate.success ? parsedDate.data : todayString(),
+    period: performancePeriodSchema.catch("day").parse(getParam(params, "period")),
     q: (getParam(params, "q") ?? "").trim().slice(0, 80),
     kv: performanceKvSchema.catch("all").parse(getParam(params, "kv")),
     district: (getParam(params, "district") ?? "all").trim().slice(0, 80) || "all",
@@ -126,6 +142,13 @@ function orderClause(sort: PerformanceSortKey, direction: PerformanceDirection) 
 export const getDriverPerformance = cache(async (filters: PerformanceFilters): Promise<PerformanceResult> => {
   const orderBy = orderClause(filters.sort, filters.dir);
   const offset = (filters.page - 1) * filters.pageSize;
+  const { start, end } = periodRange(filters.date, filters.period);
+  const reportDateSelect = filters.period === "day"
+    ? Prisma.sql`p.report_date::date`
+    : Prisma.sql`${end}::date`;
+  const groupBy = filters.period === "day"
+    ? Prisma.sql`p.report_date, p.driver_id`
+    : Prisma.sql`p.driver_id`;
   const likeQuery = `%${filters.q}%`;
   const kvClause = filters.kv === "all" ? Prisma.empty : Prisma.sql`and upper(coalesce(kv, '')) = ${filters.kv}`;
   const districtClause = filters.district === "all" ? Prisma.empty : Prisma.sql`and delivery_district = ${filters.district}`;
@@ -183,7 +206,7 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
     ),
     grouped as (
       select
-        p.report_date::date as report_date,
+        ${reportDateSelect} as report_date,
         p.driver_id,
         max(p.driver_name) as driver_name,
         max(r.full_name) as rider_name,
@@ -197,9 +220,9 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
         sum(coalesce(p.pickup_picked, 0))::bigint as pickup_picked
       from public.driver_performance_daily p
       join rider_scope r on r.rider_code = p.driver_id
-      where p.report_date = ${filters.date}::date
+      where p.report_date between ${start}::date and ${end}::date
         ${searchClause}
-      group by p.report_date, p.driver_id
+      group by ${groupBy}
     ),
     final as (
       select
@@ -248,7 +271,7 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
       nullif(trim(r.cot), '') as cot
     from public.driver_performance_daily p
     join rider_scope r on r.rider_code = p.driver_id
-    where p.report_date = ${filters.date}::date
+    where p.report_date between ${start}::date and ${end}::date
     order by delivery_district asc nulls last, cot asc nulls last
   `;
 

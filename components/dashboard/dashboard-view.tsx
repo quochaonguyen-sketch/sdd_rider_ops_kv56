@@ -22,10 +22,13 @@ type RealtimeRow = { work_date: string; driver_id: string; total_assigned: numbe
 type ReturnOverdueOrder = { shipmentId: string; startedAt: string; ageHours: number; zone: string; district: string; ward: string };
 type ReturnOverdueRider = { riderCode: string; riderName: string; kv: string; cot: string; totalOrders: number; oldestHours: number; oldestAt: string; orders: ReturnOverdueOrder[] };
 type ReturnOverdueState = { thresholdHours: number; totalOrders: number; missingStartedAt: number; snapshotAt: string | null; riders: ReturnOverdueRider[] };
-type DashboardState = { riders: Rider[]; activity: ActivityLog[]; delivery: VolumeRow[]; pickup: VolumeRow[]; realtime: RealtimeRow[]; returnOverdue: ReturnOverdueState };
+type DashboardState = { riders: Rider[]; activity: ActivityLog[]; delivery: VolumeRow[]; pickup: VolumeRow[]; realtime: RealtimeRow[]; returnOverdue: ReturnOverdueState; failedLeaders: FailedLeaders };
 type FailedLeader = { riderCode: string; riderName: string; district: string; failed: number; assigned: number };
+type FailedLeaders = { day: FailedLeader[]; week: FailedLeader[] };
+type AreaTotals = { deliveryVolume: number; pickupVolume: number; assigned: number; delivered: number; delivering: number; failed: number };
+type AreaBreakdown = { kv5: AreaTotals; kv6: AreaTotals };
 const emptyReturnOverdue: ReturnOverdueState = { thresholdHours: 48, totalOrders: 0, missingStartedAt: 0, snapshotAt: null, riders: [] };
-const emptyState: DashboardState = { riders: [], activity: [], delivery: [], pickup: [], realtime: [], returnOverdue: emptyReturnOverdue };
+const emptyState: DashboardState = { riders: [], activity: [], delivery: [], pickup: [], realtime: [], returnOverdue: emptyReturnOverdue, failedLeaders: { day: [], week: [] } };
 
 export function DashboardView() {
   const [state, setState] = useState<DashboardState>(emptyState);
@@ -43,20 +46,22 @@ export function DashboardView() {
     setLoading(true);
     setError(null);
     const historyStart = monthStartOffset(dateRange.end, -11);
-    const [riders, activity, delivery, pickup, realtime, returnOverdue] = await Promise.all([
+    const [riders, activity, delivery, pickup, realtime, returnOverdue, failedLeaders] = await Promise.all([
       supabase.from("riders").select("*, zones(id,name,area,hub)").order("updated_at", { ascending: false }),
       supabase.from("activity_logs").select("*").order("created_at", { ascending: false }).limit(10),
       fetchVolumeRows(supabase, "delivery_order", historyStart, dateRange.end),
       fetchVolumeRows(supabase, "pickup_volume", historyStart, dateRange.end),
       fetchRealtimeHistory(supabase, dateRange.end),
       fetchReturnOverdue(),
+      fetchFailedLeaders(dateRange.end),
     ]);
     const results = [riders, activity, delivery, pickup, realtime];
     const firstError = results.find((result) => result.error)?.error;
     if (firstError) setError(firstError.message ?? "Không thể tải dữ liệu dashboard");
     else {
-      setState({ riders: (riders.data ?? []) as Rider[], activity: (activity.data ?? []) as ActivityLog[], delivery: (delivery.data ?? []) as VolumeRow[], pickup: (pickup.data ?? []) as VolumeRow[], realtime: (realtime.data ?? []) as RealtimeRow[], returnOverdue: returnOverdue.data ?? emptyReturnOverdue });
+      setState({ riders: (riders.data ?? []) as Rider[], activity: (activity.data ?? []) as ActivityLog[], delivery: (delivery.data ?? []) as VolumeRow[], pickup: (pickup.data ?? []) as VolumeRow[], realtime: (realtime.data ?? []) as RealtimeRow[], returnOverdue: returnOverdue.data ?? emptyReturnOverdue, failedLeaders: failedLeaders.data ?? { day: [], week: [] } });
       if (returnOverdue.error) setError(`Không thể tải cảnh báo đơn trả quá hạn: ${returnOverdue.error.message}`);
+      if (failedLeaders.error) setError(`Không thể tải bảng xếp hạng Failed: ${failedLeaders.error.message}`);
       setLastUpdated(new Date());
     }
     setLoading(false);
@@ -79,7 +84,7 @@ export function DashboardView() {
   const volumeAnalytics = useMemo(() => buildVolumeAnalytics(kv56Delivery, kv56Pickup, volumeMode, volumeGrouping), [kv56Delivery, kv56Pickup, volumeGrouping, volumeMode]);
   const volumeDailyData = useMemo(() => buildDailyVolumeRecords(kv56Delivery, kv56Pickup, volumeMode), [kv56Delivery, kv56Pickup, volumeMode]);
   const districtAverages = useMemo(() => ({ delivery: buildDistrictAverages(kv56Delivery, dateRange.end), pickup: buildDistrictAverages(kv56Pickup, dateRange.end) }), [dateRange.end, kv56Delivery, kv56Pickup]);
-  const failedLeaders = useMemo(() => buildFailedLeaders(state, dateRange.end), [dateRange.end, state]);
+  const areaBreakdown = useMemo(() => buildAreaBreakdown(state, dateRange), [dateRange, state]);
   const alerts = useMemo(() => buildAlerts(state, summary), [state, summary]);
 
   return <div className="dashboard-control mx-auto max-w-[1600px] space-y-6">
@@ -108,6 +113,7 @@ export function DashboardView() {
         <KpiCard className="col-span-6 lg:col-span-4 xl:col-span-2" href="/realtime-dashboard" icon={PackageCheck} label="Delivered" value={summary.delivered} context={`${summary.deliveryRate}% completion`} tone="green" loading={loading} />
         <KpiCard className="col-span-6 lg:col-span-4 xl:col-span-2" href="/realtime-dashboard" icon={PackageX} label="Failed" value={summary.failed} context="Latest daily snapshot" tone={summary.failed ? "red" : "green"} loading={loading} />
       </div>
+      <AreaBreakdown breakdown={areaBreakdown} loading={loading} />
     </section>
 
     <section aria-labelledby="return-overdue" className="space-y-3">
@@ -132,8 +138,8 @@ export function DashboardView() {
     </section>
 
     <section aria-labelledby="failed-ranking" className="space-y-3">
-      <DashboardSectionHeading id="failed-ranking" index="05" title="Top rider Failed (On Hold)" description="Xếp hạng rider KV5/KV6 theo số đơn Failed; mỗi ngày chỉ lấy snapshot cuối ngày để không đếm trùng." />
-      <div className="grid gap-3 lg:grid-cols-2"><FailedLeaderboard title="Selected day" subtitle={formatDate(dateRange.end)} rows={failedLeaders.day} loading={loading} /><FailedLeaderboard title="Last 7 days" subtitle={`${formatDate(shiftDate(dateRange.end, -6))}–${formatDate(dateRange.end)}`} rows={failedLeaders.week} loading={loading} /></div>
+      <DashboardSectionHeading id="failed-ranking" index="05" title="Top rider Failed (On Hold)" description="Xếp hạng rider KV5/KV6 theo đơn chưa giao (assigned − delivered) từ dữ liệu Performance." />
+      <div className="grid gap-3 lg:grid-cols-2"><FailedLeaderboard title="Selected day" subtitle={formatDate(dateRange.end)} rows={state.failedLeaders.day} loading={loading} /><FailedLeaderboard title="Last 7 days" subtitle={`${formatDate(shiftDate(dateRange.end, -6))}–${formatDate(dateRange.end)}`} rows={state.failedLeaders.week} loading={loading} /></div>
     </section>
 
     <section id="alerts" className="grid grid-cols-12 gap-3"><AlertsList className="col-span-12 xl:col-span-7" alerts={alerts} /><SectionCard className="col-span-12 xl:col-span-5" title="Lối tắt vận hành" description="Đi nhanh đến màn hình chuyên sâu" href="/realtime-dashboard" linkLabel="Mở realtime"><div className="grid grid-cols-2 gap-2">{[["Morning Dispatch", "/morning-delivery"], ["Delivery Volume", "/volume/delivery"], ["Pickup Volume", "/volume/pickup"], ["Riders", "/riders"]].map(([label, href]) => <Link key={href} href={href} className="dashboard-shortcut">{label}</Link>)}</div><div className="mt-4 border-t border-slate-100 pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Cập nhật gần đây</p>{state.activity.slice(0, 3).map((item) => <p key={item.id} className="mt-2 line-clamp-1 text-sm text-slate-600">{item.message}</p>)}</div></SectionCard></section>
@@ -208,7 +214,57 @@ async function fetchReturnOverdue(): Promise<{ data: ReturnOverdueState | null; 
   }
 }
 
+async function fetchFailedLeaders(endDate: string): Promise<{ data: FailedLeaders | null; error: { message: string } | null }> {
+  try {
+    const response = await fetch(`/api/dashboard/failed-leaders?end=${encodeURIComponent(endDate)}`, { cache: "no-store" });
+    const result = (await response.json().catch(() => null)) as { success?: boolean; error?: string; leaders?: FailedLeaders } | null;
+    if (!response.ok || !result?.success || !result.leaders) {
+      return { data: null, error: { message: result?.error ?? "Không thể tải bảng xếp hạng Failed" } };
+    }
+    return { data: result.leaders, error: null };
+  } catch (error) {
+    return { data: null, error: { message: error instanceof Error ? error.message : "Không thể tải bảng xếp hạng Failed" } };
+  }
+}
+
 export const KpiCard = memo(function KpiCard({ href, icon: Icon, label, value, context, tone, loading, className }: { href: string; icon: typeof Activity; label: string; value: number | string; context: string; tone: "blue" | "green" | "red" | "slate"; loading: boolean; className?: string }) { return <Link href={href} className={cn("dashboard-kpi-card", `is-${tone}`, className)}><div className="dashboard-kpi-heading"><p>{label}</p><Icon size={17} /></div><p className="dashboard-kpi-value">{loading ? "—" : typeof value === "number" ? value.toLocaleString("vi-VN") : value}</p><p className="dashboard-kpi-context">{context}</p></Link>; });
+
+function AreaBreakdown({ breakdown, loading }: { breakdown: AreaBreakdown; loading: boolean }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <AreaBreakdownColumn label="KV5" data={breakdown.kv5} loading={loading} />
+      <AreaBreakdownColumn label="KV6" data={breakdown.kv6} loading={loading} />
+    </div>
+  );
+}
+
+function AreaBreakdownColumn({ label, data, loading }: { label: string; data: AreaTotals; loading: boolean }) {
+  const rows = [
+    { label: "Delivery volume", value: data.deliveryVolume },
+    { label: "Pickup volume", value: data.pickupVolume },
+    { label: "Assigned", value: data.assigned },
+    { label: "Delivered", value: data.delivered },
+    { label: "Delivering", value: data.delivering },
+    { label: "Failed", value: data.failed },
+  ];
+  const totalVolume = data.deliveryVolume + data.pickupVolume;
+  return (
+    <article className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-black text-slate-950">{label}</h3>
+        <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">{loading ? "—" : `${totalVolume.toLocaleString("vi-VN")} volume`}</span>
+      </div>
+      <dl className="mt-4 grid grid-cols-3 gap-3">
+        {rows.map((row) => (
+          <div key={row.label}>
+            <dt className="text-xs text-slate-500">{row.label}</dt>
+            <dd className="mt-0.5 font-black tabular-nums text-slate-950">{loading ? "—" : row.value.toLocaleString("vi-VN")}</dd>
+          </div>
+        ))}
+      </dl>
+    </article>
+  );
+}
 
 function DashboardSectionHeading({ id, index, title, description }: { id: string; index: string; title: string; description: string }) {
   return <div className="dashboard-section-heading"><span>{index}</span><div><h2 id={id}>{title}</h2><p>{description}</p></div></div>;
@@ -243,8 +299,8 @@ function FailedLeaderboard({ title, subtitle, rows, loading }: { title: string; 
   return <article className="dashboard-hold-card">
     <div className="dashboard-card-title"><span><PackageX size={17} /></span><div><h3>{title}</h3><p>{subtitle}</p></div></div>
     <div className="dashboard-hold-list">
-      {loading ? Array.from({ length: 5 }, (_, index) => <div key={index} className="dashboard-hold-row is-loading" />) : rows.map((row, index) => <Link href="/realtime-dashboard" key={row.riderCode} className="dashboard-hold-row"><span className="dashboard-hold-rank">{String(index + 1).padStart(2, "0")}</span><div className="min-w-0"><strong>{row.riderName}</strong><p><MapPin size={11} />{row.riderCode} · {row.district}</p></div><div className="dashboard-hold-value"><strong>{row.failed.toLocaleString("vi-VN")} Failed</strong><span>{row.assigned.toLocaleString("vi-VN")} assigned</span></div></Link>)}
-      {!loading && rows.length === 0 ? <Empty text="Không có đơn Failed trong snapshot." /> : null}
+      {loading ? Array.from({ length: 5 }, (_, index) => <div key={index} className="dashboard-hold-row is-loading" />) : rows.map((row, index) => <Link href="/performance" key={row.riderCode} className="dashboard-hold-row"><span className="dashboard-hold-rank">{String(index + 1).padStart(2, "0")}</span><div className="min-w-0"><strong>{row.riderName}</strong><p><MapPin size={11} />{row.riderCode} · {row.district}</p></div><div className="dashboard-hold-value"><strong>{row.failed.toLocaleString("vi-VN")} Failed</strong><span>{row.assigned.toLocaleString("vi-VN")} assigned</span></div></Link>)}
+      {!loading && rows.length === 0 ? <Empty text="Không có đơn chưa giao trong dữ liệu performance." /> : null}
     </div>
   </article>;
 }
@@ -328,6 +384,41 @@ function buildSummary(state: DashboardState, range: { start: string; end: string
   const pickupVolume = volumeTotal(state.pickup);
   return { ...realtime, deliveryRate: realtime.assigned ? Math.round(realtime.delivered / realtime.assigned * 100) : 0, idleRiders: kv56Realtime.filter((row) => row.delivering > 0 && row.idle_delivery_seconds > 3600).length, deliveryVolume, pickupVolume, totalVolume: deliveryVolume + pickupVolume };
 }
+
+function buildAreaBreakdown(state: DashboardState, range: { start: string; end: string }) {
+  const riderByCode = new Map(state.riders.map((rider) => [normalizeRiderCode(rider.rider_code), rider]));
+  const zero = (): AreaTotals => ({ deliveryVolume: 0, pickupVolume: 0, assigned: 0, delivered: 0, delivering: 0, failed: 0 });
+  const totals: AreaBreakdown = { kv5: zero(), kv6: zero() };
+
+  const inRange = (row: VolumeRow) => {
+    const date = row.report_date?.slice(0, 10);
+    return Boolean(date && date >= range.start && date <= range.end);
+  };
+
+  for (const row of state.delivery.filter(inRange)) {
+    const area = kvAreaOf(row);
+    if (!area) continue;
+    (area === 5 ? totals.kv5 : totals.kv6).deliveryVolume += row.total_orders ?? 1;
+  }
+  for (const row of state.pickup.filter(inRange)) {
+    const area = kvAreaOf(row);
+    if (!area) continue;
+    (area === 5 ? totals.kv5 : totals.kv6).pickupVolume += row.total_orders ?? 1;
+  }
+  for (const row of state.realtime) {
+    if (row.work_date.slice(0, 10) !== range.end) continue;
+    const rider = riderByCode.get(normalizeRiderCode(row.driver_id));
+    const area = kvNumber(rider?.kv);
+    if (!area) continue;
+    const target = area === 5 ? totals.kv5 : totals.kv6;
+    target.assigned += row.total_assigned;
+    target.delivered += row.delivered;
+    target.delivering += row.delivering;
+    target.failed += row.failed;
+  }
+
+  return totals;
+}
 // Retained as the daily trend shape consumed by the exported compact chart component.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function buildVolumeTrend(delivery: VolumeRow[], pickup: VolumeRow[], range: { start: string; end: string }) { const dates = dateSequence(range.start, range.end); const sumByDate = (rows: VolumeRow[]) => { const map = new Map<string, number>(); for (const row of rows) { const date = row.report_date?.slice(0, 10); if (date) map.set(date, (map.get(date) ?? 0) + (row.total_orders ?? 1)); } return map; }; const deliveryMap = sumByDate(delivery); const pickupMap = sumByDate(pickup); return dates.map((date) => ({ date, delivery: deliveryMap.get(date) ?? 0, pickup: pickupMap.get(date) ?? 0 })); }
@@ -352,38 +443,25 @@ function buildDistrictAverages(rows: VolumeRow[], endDate: string) {
   return { rows: rowsByDistrict, dayCount, monthLabel: `Tháng ${endDate.slice(5, 7)}/${endDate.slice(0, 4)}` };
 }
 
-function buildFailedLeaders(state: DashboardState, endDate: string) {
-  const riderByCode = new Map(state.riders.map((rider) => [normalizeRiderCode(rider.rider_code), rider]));
-  const startDate = shiftDate(endDate, -6);
-  const eligible = state.realtime.filter((row) => {
-    const rider = riderByCode.get(normalizeRiderCode(row.driver_id));
-    const date = row.work_date.slice(0, 10);
-    return isKv56(rider?.kv) && date >= startDate && date <= endDate && row.failed > 0;
-  });
-  const rank = (rows: RealtimeRow[]) => {
-    const totals = new Map<string, { failed: number; assigned: number }>();
-    for (const row of rows) {
-      const key = normalizeRiderCode(row.driver_id);
-      const current = totals.get(key) ?? { failed: 0, assigned: 0 };
-      current.failed += row.failed;
-      current.assigned += row.total_assigned;
-      totals.set(key, current);
-    }
-    return Array.from(totals, ([riderCode, value]) => {
-      const rider = riderByCode.get(riderCode);
-      return { riderCode, riderName: rider?.full_name ?? riderCode, district: rider?.delivery_district ?? "Chưa xác định", ...value };
-    }).sort((a, b) => b.failed - a.failed || b.assigned - a.assigned).slice(0, 5);
-  };
-  return { day: rank(eligible.filter((row) => row.work_date.slice(0, 10) === endDate)), week: rank(eligible) };
-}
-
 function buildAlerts(state: DashboardState, summary: ReturnType<typeof buildSummary>) { const alerts: Array<{ title: string; description: string; severity: "critical" | "warning"; href: string }> = []; if (state.returnOverdue.totalOrders > 0) alerts.push({ title: `${state.returnOverdue.totalOrders} đơn trả quá 48 giờ`, description: `${state.returnOverdue.riders.length} rider đang giữ đơn nhưng chưa quét bàn giao trả.`, severity: "critical", href: "/return-orders?status=returning&sort=aging_desc&page=1&pageSize=50" }); if (state.returnOverdue.missingStartedAt > 0) alerts.push({ title: `${state.returnOverdue.missingStartedAt} đơn trả thiếu mốc thời gian`, description: "Chưa thể xác định các đơn này có vượt 48 giờ hay không.", severity: "warning", href: "/return-orders?status=returning&page=1&pageSize=50" }); if (summary.failed > 0) alerts.push({ title: `${summary.failed} Failed deliveries`, description: "Kiểm tra rider và quận trong snapshot KV5/KV6 mới nhất.", severity: "critical", href: "/realtime-dashboard" }); if (summary.idleRiders > 0) alerts.push({ title: `${summary.idleRiders} riders idle trên 1 giờ`, description: "Rider vẫn còn đơn Delivering nhưng không có tiến triển.", severity: "critical", href: "/realtime-dashboard" }); return alerts; }
 function normalizeRiderCode(value: string) { return value.trim().toUpperCase(); }
 function isKv56(value: string | null | undefined) { return /^(?:(?:kv|khu).*?)?[56]$/i.test(normalizeText(value ?? "").replace(/\s+/g, " ")); }
+function kvNumber(value: string | null | undefined): 5 | 6 | null {
+  const match = normalizeText(value ?? "").match(/([56])\s*$/);
+  if (!match) return null;
+  return match[1] === "6" ? 6 : 5;
+}
 function normalizeText(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim(); }
 function resolveKvDistrict(value: string | null | undefined) { const key = compactZoneName(value ?? ""); if (!key) return null; return MAP_DISTRICTS.find((district) => [district.name, district.shortName, district.code, ...district.aliases].some((candidate) => compactZoneName(candidate) === key)) ?? null; }
 function volumeDistrictInfo(row: VolumeRow) { const mapped = resolveKvDistrict(row.district); if (mapped) return { name: mapped.name, shortName: mapped.shortName, area: mapped.area }; const key = compactZoneName(row.district ?? ""); if (["thanhphothuduc", "thuduc", "tpthuduc"].includes(key)) return { name: "Thành phố Thủ Đức", shortName: "TP Thủ Đức", area: "KV5" }; const name = row.district?.trim(); return name && isKv56(row.area) ? { name, shortName: name.replace(/^Thành phố\s+/i, "TP ").replace(/^Quận\s+/i, "Q. ").replace(/^Huyện\s+/i, "H. "), area: normalizeText(row.area ?? "").endsWith("6") ? "KV6" : "KV5" } : null; }
 function isKv56VolumeRow(row: VolumeRow) { return isKv56(row.area) || Boolean(resolveKvDistrict(row.district)); }
+function kvAreaOf(row: VolumeRow): 5 | 6 | null {
+  const fromArea = kvNumber(row.area);
+  if (fromArea) return fromArea;
+  const mapped = resolveKvDistrict(row.district);
+  if (mapped) return mapped.area === "KV6" ? 6 : 5;
+  return null;
+}
 function volumeShare(value: number, total: number) { return total ? `${Math.round(value / total * 100)}%` : "0%"; }
 function getDateRange(range: RangeKey) { const today = new Date(); if (range === "yesterday") { const date = format(subDays(today, 1), "yyyy-MM-dd"); return { start: date, end: date }; } if (range === "7d") return { start: format(subDays(today, 6), "yyyy-MM-dd"), end: format(today, "yyyy-MM-dd") }; const date = format(today, "yyyy-MM-dd"); return { start: date, end: date }; }
 function dateSequence(start: string, end: string) { const dates: string[] = []; const current = new Date(`${start}T00:00:00Z`); const last = new Date(`${end}T00:00:00Z`); while (current <= last) { dates.push(current.toISOString().slice(0, 10)); current.setUTCDate(current.getUTCDate() + 1); } return dates; }

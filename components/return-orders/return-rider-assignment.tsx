@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { AlertCircle, Check, LoaderCircle, UserRoundPlus, X } from "lucide-react";
+import { KeyboardEvent, useEffect, useRef, useState } from "react";
+import { AlertCircle, Check, ChevronDown, LoaderCircle, Search, UserRoundPlus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 type RiderOption = {
@@ -53,11 +53,22 @@ export function ReturnRiderAssignment({
 }) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const [riders, setRiders] = useState<RiderOption[]>([]);
   const [selectedCode, setSelectedCode] = useState(currentRiderCode);
+  const [riderQuery, setRiderQuery] = useState("");
+  const [riderListOpen, setRiderListOpen] = useState(false);
   const [state, setState] = useState<AssignmentState>("idle");
   const [message, setMessage] = useState("");
   const [canAssign, setCanAssign] = useState(true);
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (boxRef.current && !boxRef.current.contains(event.target as Node)) setRiderListOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
 
   const openDialog = async () => {
     const dialog = dialogRef.current;
@@ -82,6 +93,8 @@ export function ReturnRiderAssignment({
   const closeDialog = () => {
     dialogRef.current?.close();
     setSelectedCode(currentRiderCode);
+    setRiderQuery("");
+    setRiderListOpen(false);
     setState("idle");
     setMessage("");
   };
@@ -115,8 +128,47 @@ export function ReturnRiderAssignment({
     }
   };
 
+  const normalizeRiderText = (value: string) =>
+    value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("vi");
+
+  const riderLabel = (rider: RiderOption) =>
+    `${rider.rider_code} · ${rider.full_name || "Chưa có tên"} · ${rider.cot || "Chưa COT"} · ${rider.kv || "Chưa KV"}`;
+
+  const selectedRider = riders.find((rider) => rider.rider_code === selectedCode);
+  const filteredRiders = riderQuery.trim()
+    ? riders.filter((rider) => normalizeRiderText(riderLabel(rider)).includes(normalizeRiderText(riderQuery)))
+    : riders;
   const currentMissing =
     currentRiderCode && !riders.some((rider) => rider.rider_code === currentRiderCode);
+  const showUnassign = manualAssignment && !riderQuery.trim();
+  const showCurrentMissing = Boolean(currentMissing) && !riderQuery.trim();
+  const listEmpty = !filteredRiders.length && !showUnassign && !showCurrentMissing;
+
+  const riderInputValue = (() => {
+    if (riderListOpen || riderQuery) return riderQuery;
+    if (!selectedCode) return "";
+    if (selectedRider) return riderLabel(selectedRider);
+    if (showCurrentMissing) return `${currentRiderCode} · ${currentRiderName || "Rider hiện tại"}`;
+    return selectedCode;
+  })();
+
+  const selectRider = (code: string) => {
+    setSelectedCode(code);
+    setRiderQuery("");
+    setRiderListOpen(false);
+    setState("idle");
+    setMessage("");
+  };
+
+  const onRiderInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      setRiderListOpen(false);
+    } else if (event.key === "Enter" && riderListOpen) {
+      event.preventDefault();
+      if (filteredRiders.length) selectRider(filteredRiders[0].rider_code);
+    }
+  };
+
   const triggerLabel = manualAssignment || currentRiderCode ? "Đổi rider" : "Gán rider";
 
   return (
@@ -187,38 +239,92 @@ export function ReturnRiderAssignment({
           ) : null}
 
           {state !== "loading" && canAssign ? (
-            <label className="return-assignment-field">
-              <span>Rider trả hàng</span>
-              <select
-                autoFocus
-                value={selectedCode}
-                onChange={(event) => {
-                  setSelectedCode(event.target.value);
-                  setState("idle");
-                  setMessage("");
-                }}
-                disabled={state === "saving"}
-                aria-invalid={state === "error"}
-                aria-describedby={`assign-message-${shipmentId}`}
-              >
-                <option
-                  value=""
-                  disabled={Boolean(currentRiderCode) && !manualAssignment}
-                >
-                  {manualAssignment ? "Bỏ gán thủ công" : "Chọn rider"}
-                </option>
-                {currentMissing ? (
-                  <option value={currentRiderCode}>
-                    {currentRiderCode} · {currentRiderName || "Rider hiện tại"}
-                  </option>
+            <div className="return-assignment-field">
+              <label htmlFor={`assign-rider-${shipmentId}`}>Rider trả hàng</label>
+              <div className="return-assignment-combobox" ref={boxRef}>
+                <div className="return-assignment-combobox-input">
+                  <Search aria-hidden="true" />
+                  <input
+                    id={`assign-rider-${shipmentId}`}
+                    autoFocus
+                    value={riderInputValue}
+                    placeholder="Tìm rider theo mã, tên, COT hoặc KV…"
+                    autoComplete="off"
+                    disabled={state === "saving"}
+                    aria-invalid={state === "error"}
+                    aria-describedby={`assign-message-${shipmentId}`}
+                    onChange={(event) => {
+                      setRiderQuery(event.target.value);
+                      setRiderListOpen(true);
+                      setState("idle");
+                      setMessage("");
+                    }}
+                    onFocus={() => setRiderListOpen(true)}
+                    onKeyDown={onRiderInputKeyDown}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setRiderListOpen((open) => !open)}
+                    disabled={state === "saving"}
+                    aria-label={riderListOpen ? "Thu danh sách rider" : "Mở danh sách rider"}
+                  >
+                    <ChevronDown aria-hidden="true" />
+                  </button>
+                </div>
+                {riderListOpen ? (
+                  <ul className="return-assignment-combobox-list" role="listbox" aria-label="Danh sách rider trả hàng">
+                    {showUnassign ? (
+                      <li>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={selectedCode === ""}
+                          className={selectedCode === "" ? "is-selected" : undefined}
+                          onClick={() => selectRider("")}
+                        >
+                          <span className="return-assignment-option-name">Bỏ gán thủ công</span>
+                          <small className="return-assignment-option-meta">Không gán rider cho đơn này</small>
+                          <span className="return-assignment-option-check">{selectedCode === "" ? <Check aria-hidden="true" /> : null}</span>
+                        </button>
+                      </li>
+                    ) : null}
+                    {showCurrentMissing ? (
+                      <li>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={selectedCode === currentRiderCode}
+                          className={selectedCode === currentRiderCode ? "is-selected" : undefined}
+                          onClick={() => selectRider(currentRiderCode)}
+                        >
+                          <span className="return-assignment-option-name">{currentRiderCode} · {currentRiderName || "Rider hiện tại"}</span>
+                          <small className="return-assignment-option-meta">Rider đang gán</small>
+                          <span className="return-assignment-option-check">{selectedCode === currentRiderCode ? <Check aria-hidden="true" /> : null}</span>
+                        </button>
+                      </li>
+                    ) : null}
+                    {filteredRiders.map((rider) => (
+                      <li key={rider.id}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={rider.rider_code === selectedCode}
+                          className={rider.rider_code === selectedCode ? "is-selected" : undefined}
+                          onClick={() => selectRider(rider.rider_code)}
+                        >
+                          <span className="return-assignment-option-name">{rider.full_name || "Chưa có tên"}</span>
+                          <small className="return-assignment-option-meta">{rider.rider_code} · {rider.cot || "Chưa COT"} · {rider.kv || "Chưa KV"}</small>
+                          <span className="return-assignment-option-check">{rider.rider_code === selectedCode ? <Check aria-hidden="true" /> : null}</span>
+                        </button>
+                      </li>
+                    ))}
+                    {listEmpty ? (
+                      <li className="return-assignment-combobox-empty">Không tìm thấy rider phù hợp</li>
+                    ) : null}
+                  </ul>
                 ) : null}
-                {riders.map((rider) => (
-                  <option key={rider.id} value={rider.rider_code}>
-                    {rider.rider_code} · {rider.full_name || "Chưa có tên"} · {rider.cot || "Chưa COT"} · {rider.kv || "Chưa KV"}
-                  </option>
-                ))}
-              </select>
-            </label>
+              </div>
+            </div>
           ) : null}
 
           <div
