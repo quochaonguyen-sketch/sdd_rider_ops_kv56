@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, PackageCheck, RefreshCcw, Search, Truck, UsersRound } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, PackageCheck, RefreshCcw, Search, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -318,37 +318,27 @@ function PerformanceKpiCards({
   const pickRate = rate(summary.pickup_picked, summary.pickup_assigned);
 
   return (
-    <section className={cn("grid gap-3 md:grid-cols-2 2xl:grid-cols-4", isLoading && "opacity-70")} aria-label="Chỉ số tổng quan">
-      <KpiCard
-        icon={<Truck size={19} />}
-        title="Deli đã giao / đã phân"
-        primary={formatNumber(summary.delivery_delivered)}
-        secondary={`/ ${formatNumber(summary.delivery_assigned)} đã phân`}
-        rate={deliRate}
-        tone={scoreTone(deliRate)}
-      />
-      <KpiCard
-        icon={<PackageCheck size={19} />}
-        title="Pick đã lấy / đã phân"
-        primary={formatNumber(summary.pickup_picked)}
-        secondary={`/ ${formatNumber(summary.pickup_assigned)} đã phân`}
-        rate={pickRate}
-        tone={scoreTone(pickRate)}
-      />
-      <KpiCard
-        icon={<CalendarDays size={19} />}
-        title="Dòng dữ liệu"
-        primary={formatNumber(summary.groups)}
-        secondary={`Trang ${page}/${pageCount} · ${formatNumber(pageSize)} dòng/trang`}
-        tone="slate"
-      />
-      <KpiCard
-        icon={<UsersRound size={19} />}
-        title="Rider có dữ liệu"
-        primary={formatNumber(summary.active_riders)}
-        secondary="Chỉ tính rider KV5/KV6"
-        tone="slate"
-      />
+    <section className={cn("perf-kpis", isLoading && "is-loading")} aria-label="Chỉ số tổng quan">
+      <div className="perf-kpi-grid">
+        <KpiCard
+          icon={<Truck size={18} />}
+          title="Deli đã giao / đã phân"
+          primary={formatNumber(summary.delivery_delivered)}
+          secondary={`/ ${formatNumber(summary.delivery_assigned)} đã phân`}
+          rate={deliRate}
+        />
+        <KpiCard
+          icon={<PackageCheck size={18} />}
+          title="Pick đã lấy / đã phân"
+          primary={formatNumber(summary.pickup_picked)}
+          secondary={`/ ${formatNumber(summary.pickup_assigned)} đã phân`}
+          rate={pickRate}
+        />
+      </div>
+      <div className="perf-kpi-context" aria-label="Thông tin dữ liệu đang xem">
+        <ContextStat label="Dòng dữ liệu" value={formatNumber(summary.groups)} sub={`Trang ${page}/${pageCount} · ${formatNumber(pageSize)} dòng/trang`} />
+        <ContextStat label="Rider có dữ liệu" value={formatNumber(summary.active_riders)} sub="Chỉ tính rider KV5/KV6" />
+      </div>
     </section>
   );
 }
@@ -564,40 +554,40 @@ function KpiCard({
   primary,
   secondary,
   rate,
-  tone,
 }: {
   icon: React.ReactNode;
   title: string;
   primary: string;
   secondary: string;
-  rate?: number | null;
-  tone: "blue" | "emerald" | "slate" | "amber" | "red";
+  rate: number | null;
 }) {
-  const classes = {
-    blue: "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-[var(--color-accent-soft)]",
-    emerald: "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-[var(--color-success-soft)]",
-    slate: "bg-[var(--color-paper-2)] text-[var(--color-muted)] ring-[var(--color-paper-2)]",
-    amber: "bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-[var(--color-warning-soft)]",
-    red: "bg-[var(--color-error-soft)] text-[var(--color-error)] ring-[var(--color-error-soft)]",
-  };
-
   return (
-    <Card className="perf-kpi border-[var(--color-rule)] bg-[var(--color-paper)] shadow-[var(--shadow-panel)]">
-      <div className="flex items-start justify-between gap-3">
-        <span className={cn("grid size-11 place-items-center rounded-xl ring-1", classes[tone])}>{icon}</span>
-        {rate !== undefined ? <span className={cn("rounded-full px-2.5 py-1 text-xs font-black", scoreBadgeClass(rate))}>{formatRate(rate)}</span> : null}
+    <Card className="perf-kpi">
+      <div className="perf-kpi-top">
+        <span className="perf-kpi-icon">{icon}</span>
+        <span className={cn("perf-kpi-badge", scoreBadgeClass(rate))}>{formatRate(rate)}</span>
       </div>
-      <p className="perf-kpi-title">{title}</p>
-      <div className="mt-1 flex flex-wrap items-end gap-x-2 gap-y-1">
-        <p className="perf-kpi-value">{primary}</p>
-        <p className="perf-kpi-secondary">{secondary}</p>
-      </div>
-      {rate !== undefined ? (
-        <div className="mt-4">
-          <ProgressBar value={rate} />
+      <div className="perf-kpi-body">
+        <p className="perf-kpi-title">{title}</p>
+        <div className="perf-kpi-numbers">
+          <p className="perf-kpi-value">{primary}</p>
+          <p className="perf-kpi-secondary">{secondary}</p>
         </div>
-      ) : null}
+      </div>
+      <div className="perf-kpi-foot">
+        <ProgressBar value={rate} />
+      </div>
     </Card>
+  );
+}
+
+function ContextStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="perf-context-stat">
+      <span className="perf-context-label">{label}</span>
+      <strong className="perf-context-value">{value}</strong>
+      {sub ? <span className="perf-context-sub">{sub}</span> : null}
+    </div>
   );
 }
 

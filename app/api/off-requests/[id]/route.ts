@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { canManageOperations } from "@/lib/auth/permissions";
 import { sendOffRequestDecisionEmail, type OffRequestEmailResult } from "@/lib/email/off-request-notification";
-import { processAttendanceSheetSync } from "@/lib/google/attendance-sheet-sync";
+import { processAttendanceSheetSync, type AttendanceSheetSyncResult } from "@/lib/google/attendance-sheet-sync";
 
 const updateSchema = z.object({
   action: z.enum(["APPROVE", "REJECT", "RESEND_EMAIL"]),
@@ -40,7 +40,7 @@ export async function PATCH(request: Request, context: RouteContext<"/api/off-re
     return NextResponse.json({ success: false, error: "Chỉ gửi email sau khi yêu cầu đã được xử lý." }, { status: 400 });
   }
 
-  let sheetSync: { success: true; updated?: number; appended?: number; cleared?: number; spreadsheet_id?: string } | { success: false; error: string } | null = null;
+  let sheetSync: AttendanceSheetSyncResult | null = null;
 
   if (parsed.data.action === "APPROVE") {
     const status = attendanceStatus[offRequest.request_type as keyof typeof attendanceStatus];
