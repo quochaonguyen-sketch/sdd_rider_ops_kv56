@@ -17,7 +17,7 @@ export function resolveWorkDateScope(question: string, now = new Date()): WorkDa
   if (weekMatch) {
     const today = todayInVietnam(now);
     const weekOffset = weekMatch[1] === "truoc" ? -1 : weekMatch[1] === "nay" ? 0 : 1;
-    const start = startOfWeek(today, weekOffset);
+    const start = startOfWeekUtc(today, weekOffset);
     const end = shiftDate(start, 6);
     return {
       mode: "week",
@@ -53,13 +53,13 @@ export function todayInVietnam(now = new Date()) {
   }).format(now);
 }
 
-function shiftDate(value: string, days: number) {
+export function shiftDate(value: string, days: number) {
   const date = new Date(`${value}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 }
 
-function startOfWeek(today: string, weekOffset: number) {
+export function startOfWeekUtc(today: string, weekOffset: number) {
   const date = new Date(`${today}T00:00:00Z`);
   const mondayOffset = (date.getUTCDay() + 6) % 7;
   date.setUTCDate(date.getUTCDate() - mondayOffset + weekOffset * 7);

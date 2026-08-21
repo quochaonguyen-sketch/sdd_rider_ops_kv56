@@ -1,5 +1,17 @@
 export type Role = "admin" | "leader" | "viewer" | "member";
 
+export type WardConflict = {
+  ward: string;
+  cot: string | null;
+  count: number;
+  has_approved: boolean;
+  riders: Array<{
+    rider_code: string;
+    full_name: string | null;
+    status: "PENDING" | "APPROVED";
+  }>;
+};
+
 export type Zone = {
   id: string;
   name: string;
@@ -116,7 +128,8 @@ export type RiderOffRequest = {
   review_note: string | null;
   created_at: string;
   updated_at: string;
-  rider?: Pick<Rider, "full_name" | "kv" | "cot" | "delivery_district" | "current_shift">;
+  ward_conflict?: WardConflict | null;
+  rider?: Pick<Rider, "full_name" | "kv" | "cot" | "delivery_district" | "delivery_ward" | "pickup_district" | "pickup_ward" | "current_shift">;
 };
 
 export type DeliveryVolume = {

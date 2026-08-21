@@ -4,10 +4,16 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { addDays, format, startOfWeek, subDays } from "date-fns";
 import { vi } from "date-fns/locale";
 import { Archive, CalendarClock, Check, ChevronLeft, ChevronRight, ExternalLink, Image as ImageIcon, MailCheck, MailWarning, RefreshCcw, Send, ShieldAlert, Undo2, X } from "lucide-react";
-import type { RiderOffRequest } from "@/types";
+import type { RiderOffRequest, WardConflict } from "@/types";
 import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
 type ApiResponse = { success: boolean; can_edit?: boolean; requests?: RiderOffRequest[]; error?: string };
+
+type ReviewResponse = {
+  success: boolean;
+  request?: RiderOffRequest;
+  ward_warning?: WardConflict | null;
+};
 
 const typeLabel = { WEEKLY: "OFF tuần", PLANNED: "OFF phép", EMERGENCY: "OFF đột xuất" };
 const shiftLabel = { FULL_DAY: "Cả ngày", MORNING: "Buổi sáng", AFTERNOON: "Buổi chiều" };
@@ -21,6 +27,7 @@ export function OffScheduleView() {
   useReportInitialDataLoading("off-schedule", loading);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
 
   const load = useCallback(async () => {
@@ -43,6 +50,20 @@ export function OffScheduleView() {
   const review = useCallback(async (item: RiderOffRequest, action: "APPROVE" | "REJECT" | "RESEND_EMAIL") => {
     setBusyId(item.id);
     setError(null);
+    setNotice(null);
+    if (action === "APPROVE" && item.ward_conflict && item.ward_conflict.count > 0) {
+      const conflict = item.ward_conflict;
+      const approvedNote = conflict.has_approved ? " (có người đã duyệt)" : "";
+      const names = conflict.riders.map((rider) => rider.full_name || rider.rider_code).join(", ");
+      const group = conflict.cot ? `phường ${conflict.ward} (${conflict.cot})` : `phường ${conflict.ward}`;
+      const confirmed = window.confirm(
+        `${group.charAt(0).toUpperCase() + group.slice(1)} ngày này đã có ${conflict.count} người OFF cùng COT${approvedNote}: ${names}. Vẫn duyệt yêu cầu này?`,
+      );
+      if (!confirmed) {
+        setBusyId(null);
+        return;
+      }
+    }
     const response = await fetch(`/api/off-requests/${item.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -51,9 +72,9 @@ export function OffScheduleView() {
         sheet_url: window.localStorage.getItem("rider-ops-off-sheet-url") || null,
       }),
     });
-    const result = await response.json().catch(() => null);
+    const result = await response.json().catch(() => null) as ReviewResponse | null;
     if (!response.ok || !result?.success) {
-      setError(result?.error ?? "Không thể cập nhật lịch OFF.");
+      setError((result as { error?: string } | null)?.error ?? "Không thể cập nhật lịch OFF.");
       setBusyId(null);
       return;
     }
@@ -65,15 +86,26 @@ export function OffScheduleView() {
         status: nextStatus,
         reviewed_at: new Date().toISOString(),
         email_notification_status: result?.request?.email_notification_status ?? request.email_notification_status,
+        ward_conflict: result?.ward_warning ?? request.ward_conflict,
       } : request));
     }
 
+    if (action === "APPROVE" && result?.ward_warning) {
+      const conflict = result.ward_warning;
+      const approvedNote = conflict.has_approved ? " (có người đã duyệt)" : "";
+      const group = conflict.cot ? `Phường ${conflict.ward} (${conflict.cot})` : `Phường ${conflict.ward}`;
+      setNotice(
+        `${group} ngày này đã có ${conflict.count} người OFF cùng COT${approvedNote}: ${conflict.riders.map((rider) => rider.full_name || rider.rider_code).join(", ")}.`,
+      );
+    }
+
     if (action === "RESEND_EMAIL" && result?.request) {
+      const updatedRequest = result.request;
       setRequests((current) => current.map((request) => request.id === item.id ? {
         ...request,
-        email_notification_status: result.request.email_notification_status,
-        email_notification_error: result.request.email_notification_error,
-        email_notified_at: result.request.email_notified_at,
+        email_notification_status: updatedRequest.email_notification_status,
+        email_notification_error: updatedRequest.email_notification_error,
+        email_notified_at: updatedRequest.email_notified_at,
       } : request));
     }
 
@@ -86,7 +118,7 @@ export function OffScheduleView() {
     const pending: RiderOffRequest[] = [];
     const approved: RiderOffRequest[] = [];
     const rejected: RiderOffRequest[] = [];
-    let evidenceSet = new Set<string>();
+    const evidenceSet = new Set<string>();
 
     for (const item of requests) {
       if (item.status === "PENDING") {
@@ -151,6 +183,7 @@ export function OffScheduleView() {
       </section>
 
       {error ? <p className="off-schedule-error" role="alert">{error}</p> : null}
+      {notice ? <p className="off-schedule-notice" role="status">{notice}</p> : null}
 
       <section className="off-schedule-metrics" aria-label="Tổng hợp tuần">
         <div><span>Tổng yêu cầu</span><strong>{summary.total}</strong><small>Trong tuần đang xem</small></div>
@@ -196,9 +229,21 @@ const RequestRow = memo(({ item, canEdit, busyId, mode, onReview, batchCount }: 
     <div className="off-schedule-rider"><span>{item.rider_code}</span><h3>{item.rider?.full_name || "Chưa có tên rider"}</h3><p>{[item.rider?.kv, item.rider?.cot, item.rider?.delivery_district].filter(Boolean).join(" · ") || "Chưa có thông tin tuyến"}</p>{batchCount > 1 ? <small>Cùng đơn · {batchCount} ngày trong tuần</small> : null}</div>
     <div className="off-schedule-request-meta"><span className={`is-${item.request_type.toLowerCase()}`}>{typeLabel[item.request_type]}</span><strong>{shiftLabel[item.shift]}</strong><p>{item.reason || "Không có ghi chú"}</p>{item.evidence_url ? <a href={item.evidence_url} target="_blank" rel="noreferrer"><ImageIcon size={14} aria-hidden="true" />Xem bằng chứng</a> : <small>Không có ảnh bằng chứng</small>}{item.requester_email ? <small className="off-schedule-email-address">{item.requester_email}</small> : null}</div>
     <div className="off-schedule-decision"><span className={`is-${item.status.toLowerCase()}`}>{statusLabel[item.status]}</span>{mode !== "pending" ? <EmailState item={item} /> : null}{canEdit && mode === "pending" ? <div><button type="button" className="is-reject" disabled={busyId === item.id} onClick={() => void onReview(item, "REJECT")}><X size={15} aria-hidden="true" />Từ chối</button><button type="button" className="is-approve" disabled={busyId === item.id} onClick={() => void onReview(item, "APPROVE")}><Check size={15} aria-hidden="true" />Duyệt</button></div> : canEdit && mode === "approved" ? <div><button type="button" className="is-reject" disabled={busyId === item.id} onClick={() => void onReview(item, "REJECT")}><Undo2 size={15} aria-hidden="true" />Thu hồi lịch</button>{item.requester_email && item.email_notification_status !== "SENT" ? <button type="button" disabled={busyId === item.id} onClick={() => void onReview(item, "RESEND_EMAIL")}><Send size={15} aria-hidden="true" />Gửi lại email</button> : null}</div> : canEdit && mode === "rejected" && item.requester_email && item.email_notification_status !== "SENT" ? <div><button type="button" disabled={busyId === item.id} onClick={() => void onReview(item, "RESEND_EMAIL")}><Send size={15} aria-hidden="true" />Gửi lại email</button></div> : mode === "rejected" ? null : <small><ShieldAlert size={14} aria-hidden="true" />Chỉ xem</small>}</div>
+    {item.ward_conflict && item.ward_conflict.count > 0 ? <WardConflictBadge conflict={item.ward_conflict} /> : null}
   </article>;
 });
 RequestRow.displayName = "RequestRow";
+
+const WardConflictBadge = memo(({ conflict }: { conflict: NonNullable<RiderOffRequest["ward_conflict"]> }) => {
+  const names = conflict.riders.map((rider) => rider.full_name || rider.rider_code).join(", ");
+  const group = conflict.cot ? `Phường ${conflict.ward} (${conflict.cot})` : `Phường ${conflict.ward}`;
+  return <p className={`off-schedule-conflict ${conflict.has_approved ? "is-approved" : ""}`} role="status" title={names}>
+    <span className="off-schedule-conflict-mark" aria-hidden="true"><ShieldAlert size={13} /></span>
+    <span className="off-schedule-conflict-label">{conflict.has_approved ? "Trùng OFF đã duyệt" : "Trùng OFF chờ duyệt"}</span>
+    <span className="off-schedule-conflict-text">{group}: {conflict.count} người OFF cùng ngày — {names}</span>
+  </p>;
+});
+WardConflictBadge.displayName = "WardConflictBadge";
 
 const MemoRequestRow = memo(RequestRow);
 
