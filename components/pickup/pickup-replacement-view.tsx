@@ -14,10 +14,12 @@ import {
   LoaderCircle,
   RefreshCcw,
   Search,
+  Sparkles,
   UserRoundX,
 } from "lucide-react";
 import type { AttendanceLog, Rider } from "@/types";
 import { createClient } from "@/lib/supabase/client";
+import { recommendReplacementRiders, type RecommendedRider } from "@/lib/pickup/recommendations";
 import { cn } from "@/utils/cn";
 import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 import styles from "./pickup-replacement-view.module.css";
@@ -43,6 +45,10 @@ type ApiResponse = {
     imported?: number;
     skipped?: number;
     verified?: boolean;
+  };
+  recommendation?: {
+    history?: Record<string, number>;
+    ward_volume?: Record<string, number>;
   };
   error?: string;
 };
@@ -70,6 +76,7 @@ export function PickupReplacementView() {
   const [syncingSheet, setSyncingSheet] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sheetStatus, setSheetStatus] = useState<{ success: boolean; message: string } | null>(null);
+  const [recommendation, setRecommendation] = useState<ApiResponse["recommendation"] | null>(null);
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, index) => shiftDate(rangeStart, index)),
     [rangeStart],
@@ -112,6 +119,7 @@ export function PickupReplacementView() {
     if (!response.ok || !result?.success)
       setError(result?.error ?? "Không thể tải lịch thế pick");
     else {
+      setRecommendation(result.recommendation ?? null);
       setReplacements(result.replacements ?? []);
       setCanEdit(Boolean(result.can_edit));
       setSheetStatus(result.sheet_sync?.success
@@ -159,6 +167,14 @@ export function PickupReplacementView() {
     ])),
     [activeRiders, attendanceMap, days],
   );
+  const historyMap = useMemo(
+    () => new Map(Object.entries(recommendation?.history ?? {})),
+    [recommendation],
+  );
+  const wardVolumeMap = useMemo(
+    () => new Map(Object.entries(recommendation?.ward_volume ?? {})),
+    [recommendation],
+  );
   const pickupRiders = useMemo(
     () => activeRiders.filter(hasPickupRoute),
     [activeRiders],
@@ -195,6 +211,29 @@ export function PickupReplacementView() {
   const pageCount = Math.max(1, Math.ceil(filtered.length / 30));
   const safePage = Math.min(page, pageCount);
   const visibleRiders = filtered.slice((safePage - 1) * 30, safePage * 30);
+  const recommendedByKey = useMemo(
+    () => {
+      const map = new Map<string, RecommendedRider[]>();
+      for (const rider of visibleRiders) {
+        for (const day of days) {
+          const candidates = (replacementCandidatesByDate.get(day) ?? []).filter(
+            (candidate) => candidate.id !== rider.id,
+          );
+          const recommended = recommendReplacementRiders({
+            rider,
+            candidates,
+            history: historyMap,
+            wardVolume: wardVolumeMap,
+          });
+          if (recommended.length > 0) {
+            map.set(`${rider.rider_code}:${day}`, recommended);
+          }
+        }
+      }
+      return map;
+    },
+    [days, historyMap, replacementCandidatesByDate, visibleRiders, wardVolumeMap],
+  );
   async function update(rider: Rider, date: string, value: string) {
     const replacement = activeRiders.find((item) => item.id === value);
     const missing = value === "__missing__";
@@ -473,6 +512,7 @@ export function PickupReplacementView() {
                               key={`${item?.status ?? "empty"}-${item?.replacement_rider_id ?? "none"}`}
                               id={`replacement-${rider.id}-${day}`}
                               candidates={replacementCandidates}
+                              recommended={recommendedByKey.get(key) ?? []}
                               disabled={!canEdit}
                               loading={savingKey === key}
                               status={item?.status}
@@ -553,6 +593,7 @@ function FilterSelect({
 function ReplacementRiderInput({
   id,
   candidates,
+  recommended,
   disabled,
   loading,
   status,
@@ -561,6 +602,7 @@ function ReplacementRiderInput({
 }: {
   id: string;
   candidates: Rider[];
+  recommended: RecommendedRider[];
   disabled: boolean;
   loading: boolean;
   status: Replacement["status"] | undefined;
@@ -578,10 +620,23 @@ function ReplacementRiderInput({
   const anchorRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const normalizedQuery = normalize(query === selectedLabel ? "" : query);
+  const recommendedIds = useMemo(
+    () => new Set(recommended.map((item) => item.rider.id)),
+    [recommended],
+  );
+  const showRecommend = recommended.length > 0 && !normalizedQuery;
   const filteredCandidates = useMemo(() => candidates
+    .filter((rider) => showRecommend ? !recommendedIds.has(rider.id) : true)
     .filter((rider) => !normalizedQuery || normalize(`${replacementRiderLabel(rider)} ${rider.pickup_district ?? ""} ${rider.pickup_ward ?? ""} ${rider.point_name ?? ""}`).includes(normalizedQuery))
-    .slice(0, 12), [candidates, normalizedQuery]);
-  const options = useMemo(() => ["__missing__", ...filteredCandidates.map((rider) => rider.id)], [filteredCandidates]);
+    .slice(0, 12), [candidates, normalizedQuery, recommendedIds, showRecommend]);
+  const options = useMemo(
+    () => [
+      ...(showRecommend ? recommended.map((item) => item.rider.id) : []),
+      "__missing__",
+      ...filteredCandidates.map((rider) => rider.id),
+    ],
+    [filteredCandidates, recommended, showRecommend],
+  );
 
   const updatePosition = useCallback(() => {
     const rect = anchorRef.current?.getBoundingClientRect();
@@ -678,16 +733,43 @@ function ReplacementRiderInput({
         >
           <div className={styles.dropdownHeader}>
             <span>Chọn rider thay</span>
-            <span>{filteredCandidates.length}/{candidates.length}</span>
+            <span>{showRecommend ? `${recommended.length} recommend · ` : ""}{filteredCandidates.length}/{candidates.length}</span>
           </div>
+          {showRecommend ? (
+            <div className={styles.recommendSection}>
+              <p className={styles.recommendTitle}>
+                <Sparkles size={14} aria-hidden="true" />
+                Recommend
+                <span>ưu tiên xếp trước</span>
+              </p>
+              {recommended.map((item, index) => (
+                <button
+                  id={`${id}-option-${index}`}
+                  key={item.rider.id}
+                  type="button"
+                  role="option"
+                  aria-selected={item.rider.id === selectedRiderId}
+                  className={cn(styles.option, styles.recommendOption, activeIndex === index && styles.activeOption)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  onClick={() => void choose(item.rider.id)}
+                >
+                  <span className={styles.priorityBadge}>{item.priority}</span>
+                  <span className={styles.riderCode}>{item.rider.rider_code}</span>
+                  <span className={styles.optionBody}><strong>{item.rider.full_name?.trim() || "Chưa có tên"}</strong><small>{recommendReasonLabel(item)}</small></span>
+                  {item.rider.id === selectedRiderId ? <Check size={16} /> : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <button
-            id={`${id}-option-0`}
+            id={`${id}-option-${showRecommend ? recommended.length : 0}`}
             type="button"
             role="option"
             aria-selected={status === "MISSING"}
-            className={cn(styles.option, styles.missingOption, activeIndex === 0 && styles.activeOption)}
+            className={cn(styles.option, styles.missingOption, activeIndex === (showRecommend ? recommended.length : 0) && styles.activeOption)}
             onMouseDown={(event) => event.preventDefault()}
-            onMouseEnter={() => setActiveIndex(0)}
+            onMouseEnter={() => setActiveIndex(showRecommend ? recommended.length : 0)}
             onClick={() => void choose("__missing__")}
           >
             <CircleAlert size={16} />
@@ -696,18 +778,18 @@ function ReplacementRiderInput({
           <div className={styles.optionList}>
             {filteredCandidates.map((rider, index) => (
               <button
-                id={`${id}-option-${index + 1}`}
+                id={`${id}-option-${(showRecommend ? recommended.length : 0) + index + 1}`}
                 key={rider.id}
                 type="button"
                 role="option"
                 aria-selected={rider.id === selectedRiderId}
-                className={cn(styles.option, activeIndex === index + 1 && styles.activeOption)}
+                className={cn(styles.option, activeIndex === (showRecommend ? recommended.length : 0) + index + 1 && styles.activeOption)}
                 onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => setActiveIndex(index + 1)}
+                onMouseEnter={() => setActiveIndex((showRecommend ? recommended.length : 0) + index + 1)}
                 onClick={() => void choose(rider.id)}
               >
                 <span className={styles.riderCode}>{rider.rider_code}</span>
-                <span><strong>{rider.full_name?.trim() || "Chưa có tên"}</strong><small>{[rider.pickup_district, rider.pickup_ward].filter(Boolean).join(" · ") || "Chưa có tuyến pick"}</small></span>
+                <span className={styles.optionBody}><strong>{rider.full_name?.trim() || "Chưa có tên"}</strong><small>{[rider.pickup_district, rider.pickup_ward].filter(Boolean).join(" · ") || "Chưa có tuyến pick"}</small></span>
                 {rider.id === selectedRiderId ? <Check size={16} /> : null}
               </button>
             ))}
@@ -722,6 +804,18 @@ function ReplacementRiderInput({
 
 function replacementRiderLabel(rider: Rider) {
   return `${rider.rider_code} · ${rider.full_name?.trim() || "Chưa có tên"}`;
+}
+
+function recommendReasonLabel(item: RecommendedRider) {
+  if (item.reason === "history") {
+    return item.historyCount > 1
+      ? `Đã từng thay ${item.historyCount} lần · ${[item.rider.pickup_district, item.rider.pickup_ward].filter(Boolean).join(" · ") || "Chưa có tuyến"}`
+      : `Đã từng thay · ${[item.rider.pickup_district, item.rider.pickup_ward].filter(Boolean).join(" · ") || "Chưa có tuyến"}`;
+  }
+  if (item.reason === "ward") {
+    return `Cùng phường ${item.rider.pickup_ward ?? ""}`;
+  }
+  return `Phường gần · ${item.rider.pickup_ward ?? ""}`;
 }
 
 function unique(values: Array<string | null>) {

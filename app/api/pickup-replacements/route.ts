@@ -8,8 +8,11 @@ import {
   readPickupReplacementsFromGoogleSheet,
   syncPickupReplacementToGoogleSheet,
 } from "@/lib/google/pickup-replacements";
+import { wardKey } from "@/lib/pickup/recommendations";
 
 export const runtime = "nodejs";
+
+const HISTORY_WEEKS = 8;
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const unavailablePickupStatuses = ["OFF_WEEKLY", "OFF_APPROVED", "OFF_UNEXPECTED", "NO_PICKUP"] as const;
@@ -40,6 +43,33 @@ type RiderIdentity = {
   full_name: string | null;
 };
 
+function shiftDate(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+async function loadLatestPickupWardVolume(
+  admin: ReturnType<typeof createAdminClient>,
+) {
+  try {
+    const { data: latest } = await admin
+      .from("pickup_volume")
+      .select("report_date")
+      .order("report_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!latest?.report_date) return { data: [], error: null };
+    return admin
+      .from("pickup_volume")
+      .select("district,new_ward,total_orders")
+      .eq("report_date", latest.report_date)
+      .limit(10_000);
+  } catch {
+    return { data: [], error: null };
+  }
+}
+
 async function session() {
   const client = await createClient();
   const { data: { user } } = await client.auth.getUser();
@@ -66,7 +96,8 @@ export async function GET(request: Request) {
   }
 
   const { start, end } = parsedRange.data;
-  const [{ data, error }, { data: riders, error: riderError }] = await Promise.all([
+  const historyStart = shiftDate(start, -7 * HISTORY_WEEKS);
+  const [{ data, error }, { data: riders, error: riderError }, historyQuery, volumeQuery] = await Promise.all([
     auth.admin
       .from("pickup_replacements")
       .select("*")
@@ -74,9 +105,37 @@ export async function GET(request: Request) {
       .lte("work_date", end)
       .order("work_date"),
     auth.admin.from("riders").select("id,rider_code,full_name").eq("status", "active"),
+    auth.admin
+      .from("pickup_replacements")
+      .select("rider_code,replacement_rider_code")
+      .gte("work_date", historyStart)
+      .lte("work_date", end)
+      .eq("status", "ASSIGNED"),
+    loadLatestPickupWardVolume(auth.admin),
   ]);
   if (error || riderError) {
     return NextResponse.json({ success: false, error: (error ?? riderError)?.message }, { status: 400 });
+  }
+
+  const historyCounts = new Map<string, number>();
+  for (const row of (historyQuery.data ?? []) as Array<{
+    rider_code: string;
+    replacement_rider_code: string | null;
+  }>) {
+    if (!row.replacement_rider_code) continue;
+    const key = `${row.rider_code}|${row.replacement_rider_code}`;
+    historyCounts.set(key, (historyCounts.get(key) ?? 0) + 1);
+  }
+
+  const wardVolume = new Map<string, number>();
+  for (const row of (volumeQuery.data ?? []) as Array<{
+    district: string | null;
+    new_ward: string | null;
+    total_orders: number | null;
+  }>) {
+    const key = wardKey(row.district, row.new_ward);
+    if (!key) continue;
+    wardVolume.set(key, (wardVolume.get(key) ?? 0) + Number(row.total_orders ?? 0));
   }
 
   const databaseRows = (data ?? []) as ReplacementRow[];
@@ -134,6 +193,10 @@ export async function GET(request: Request) {
     can_edit: auth.role === "admin" || auth.role === "leader",
     replacements: Array.from(merged.values()).sort((a, b) => a.work_date.localeCompare(b.work_date)),
     sheet_sync: sheetSync,
+    recommendation: {
+      history: Object.fromEntries(historyCounts),
+      ward_volume: Object.fromEntries(wardVolume),
+    },
   });
 }
 
