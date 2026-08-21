@@ -77,6 +77,22 @@ type AbsenceNoteRow = {
 
 type AbsenceNoteDraft = Pick<AbsenceNoteRow, "reason" | "is_excused">;
 
+type PickupReplacementRow = {
+  id?: string;
+  work_date: string;
+  rider_code: string;
+  rider_name?: string | null;
+  replacement_rider_id?: string | null;
+  replacement_rider_code: string | null;
+  replacement_rider_name?: string | null;
+  status: "ASSIGNED" | "MISSING" | string;
+};
+
+type PickReplacementInfo = {
+  offRiderCode: string;
+  offRiderName: string | null;
+};
+
 type RequiredAbsentRiderRowProps = {
   rider: MorningRider;
   attendance: AttendanceRow | null;
@@ -84,6 +100,7 @@ type RequiredAbsentRiderRowProps = {
   status: string;
   hasRealtimeOrders: boolean;
   realtimeOrderCount: number;
+  pickReplacement: PickReplacementInfo | null;
   canEdit: boolean;
   saving: boolean;
   onDraftChange: (riderId: string, patch: Partial<AbsenceNoteDraft>) => void;
@@ -100,6 +117,7 @@ type ApiResponse = {
   attendance?: AttendanceRow[];
   absence_notes?: AbsenceNoteRow[];
   absence_note?: AbsenceNoteRow | null;
+  pickup_replacements?: PickupReplacementRow[];
   active_delivery_rider_count?: number;
   realtime_delivery_riders?: RealtimeDeliveryRider[];
   realtime_delivery_riders_10am?: RealtimeDeliveryRider[];
@@ -115,6 +133,7 @@ export function MorningDeliveryView() {
   const [realtimeDeliveryRiders, setRealtimeDeliveryRiders] = useState<RealtimeDeliveryRider[]>([]);
   const [realtimeDeliveryRiders10am, setRealtimeDeliveryRiders10am] = useState<RealtimeDeliveryRider[]>([]);
   const [absenceNoteDrafts, setAbsenceNoteDrafts] = useState<Record<string, AbsenceNoteDraft>>({});
+  const [pickupReplacements, setPickupReplacements] = useState<PickupReplacementRow[]>([]);
   const [selectedRider, setSelectedRider] = useState<MorningRider | null>(null);
   const [selectedDistrictId, setSelectedDistrictId] = useState(hcmDistricts[0]?.id ?? "");
   const [selectedWards, setSelectedWards] = useState<Set<string>>(new Set());
@@ -171,6 +190,7 @@ export function MorningDeliveryView() {
         ]),
       ),
     );
+    setPickupReplacements(result.pickup_replacements ?? []);
     setCanEdit(Boolean(result.can_edit));
     setCanManageRiders(Boolean(result.can_manage_riders));
     setLoading(false);
@@ -256,6 +276,27 @@ export function MorningDeliveryView() {
     () => new Map(realtimeDeliveryRiders10am.map((row) => [normalize(row.driver_id), row])),
     [realtimeDeliveryRiders10am],
   );
+  const riderNameByCode = useMemo(
+    () => new Map(riders.map((rider) => [normalize(rider.rider_code), rider.full_name])),
+    [riders],
+  );
+  const pickupReplacementByRider = useMemo(
+    () => {
+      const map = new Map<string, PickReplacementInfo>();
+      for (const row of pickupReplacements) {
+        if (!row.replacement_rider_code || row.status !== "ASSIGNED") continue;
+        map.set(normalize(row.replacement_rider_code), {
+          offRiderCode: row.rider_code,
+          offRiderName:
+            row.rider_name ??
+            riderNameByCode.get(normalize(row.rider_code)) ??
+            null,
+        });
+      }
+      return map;
+    },
+    [pickupReplacements, riderNameByCode],
+  );
   const requiredAbsentRiders = useMemo(
     () =>
       requiredRiders
@@ -264,13 +305,14 @@ export function MorningDeliveryView() {
           rider,
           attendance: attendanceByRider.get(rider.id) ?? attendanceByRider.get(normalize(rider.rider_code)) ?? null,
           realtime10am: realtime10amByRider.get(normalize(rider.rider_code)) ?? null,
+          pickReplacement: pickupReplacementByRider.get(normalize(rider.rider_code)) ?? null,
         }))
         .sort((a, b) =>
           kvSortRank(a.rider.kv) - kvSortRank(b.rider.kv)
           || absentStatusSortRank(a.attendance?.status) - absentStatusSortRank(b.attendance?.status)
           || a.rider.rider_code.localeCompare(b.rider.rider_code, "vi", { numeric: true }),
         ),
-    [assignedRiderIds, attendanceByRider, realtime10amByRider, requiredRiders],
+    [assignedRiderIds, attendanceByRider, pickupReplacementByRider, realtime10amByRider, requiredRiders],
   );
   const assignedRiderCount = new Set(
     assignments.filter((assignment) => assignment.checked_in_at).map((assignment) => assignment.rider_id),
@@ -996,6 +1038,10 @@ export function MorningDeliveryView() {
             <span className="w-fit rounded-md bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">
               {requiredAbsentRiders.length} rider
             </span>
+            <Button type="button" variant="secondary" disabled={loading || exporting} onClick={() => void load()}>
+              <RefreshCcw size={16} className={loading ? "animate-spin" : undefined} />
+              Reset kiểm tra
+            </Button>
             <Button type="button" variant="secondary" disabled={exporting} onClick={() => void exportAbsentRiders()}>
               <Download size={16} />
               {exporting ? "Đang xuất..." : "Xuất Excel"}
@@ -1019,10 +1065,19 @@ export function MorningDeliveryView() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {requiredAbsentRiders.map(({ rider, attendance: log, realtime10am }) => {
+                {requiredAbsentRiders.map(({ rider, attendance: log, realtime10am, pickReplacement }) => {
                   const off = isOffStatus(log?.status);
-                  const status = off ? attendanceStatusLabel(log?.status) : "Chưa điểm danh";
-                  const realtimeOrderCount = realtime10am?.total_assigned ?? 0;
+                  const realtimeOrderCount = Math.max(
+                    realtime10am?.total_assigned ?? 0,
+                    realtimeByRider.get(normalize(rider.rider_code))?.total_assigned ?? 0,
+                  );
+                  const status = pickReplacement
+                    ? "Đi pick thay"
+                    : off
+                      ? attendanceStatusLabel(log?.status)
+                      : realtimeOrderCount > 0
+                        ? "Chưa điểm danh"
+                        : "Chưa có mặt";
                   return (
                     <RequiredAbsentRiderRow
                       key={rider.id}
@@ -1032,6 +1087,7 @@ export function MorningDeliveryView() {
                       status={status}
                       hasRealtimeOrders={realtimeOrderCount > 0}
                       realtimeOrderCount={realtimeOrderCount}
+                      pickReplacement={pickReplacement}
                       canEdit={canEdit}
                       saving={savingNoteRiderId === rider.id}
                       onDraftChange={updateAbsenceNoteDraft}
@@ -1063,6 +1119,7 @@ function RequiredAbsentRiderRow({
   status,
   hasRealtimeOrders,
   realtimeOrderCount,
+  pickReplacement,
   canEdit,
   saving,
   onDraftChange,
@@ -1070,9 +1127,12 @@ function RequiredAbsentRiderRow({
 }: RequiredAbsentRiderRowProps) {
   const off = isOffStatus(attendance?.status);
   const statusNote = renderStatusNote(status, hasRealtimeOrders, realtimeOrderCount);
+  const pickReplacementNote = pickReplacement
+    ? "Đi pick thay cho " + pickReplacement.offRiderCode + (pickReplacement.offRiderName ? " - " + pickReplacement.offRiderName : "")
+    : null;
 
   return (
-    <tr className="transition hover:bg-slate-50">
+    <tr className={cn("transition hover:bg-slate-50", pickReplacement && "bg-sky-50/60 hover:bg-sky-50")}>
       <td className="px-4 py-3 font-black text-slate-950">{rider.rider_code}</td>
       <td className="px-4 py-3 font-semibold text-slate-700">{rider.full_name?.trim() || "Chưa có tên"}</td>
       <td className="px-4 py-3">
@@ -1083,23 +1143,31 @@ function RequiredAbsentRiderRow({
       <td className="px-4 py-3">
         <span className={cn(
           "inline-flex rounded-md px-2 py-1 text-[11px] font-bold",
-          off ? offStatusClass(attendance?.status) : "bg-red-50 text-red-700",
+          pickReplacement
+            ? "bg-sky-100 text-sky-800"
+            : off
+              ? offStatusClass(attendance?.status)
+              : status === "Chưa điểm danh"
+                ? "bg-orange-50 text-orange-700"
+                : "bg-red-50 text-red-700",
         )}>
           {status}
         </span>
       </td>
       <td className="max-w-[440px] px-4 py-3 text-slate-600">
-        {off ? attendance?.note?.trim() || "Có lịch OFF, chưa có ghi chú." : "-"}
+        {pickReplacementNote ?? (off ? attendance?.note?.trim() || "Có lịch OFF, chưa có ghi chú." : "-")}
       </td>
       <td className="px-4 py-3">
-        {statusNote}
+        {pickReplacement ? (
+          <p className="mb-2 text-sm font-semibold text-sky-700">Rider đi pick thay cho người OFF — không bắt buộc lên lấy hàng.</p>
+        ) : statusNote}
         <Input
           value={draft.reason}
           disabled={!canEdit || saving}
           onChange={(event) => onDraftChange(rider.id, { reason: event.target.value })}
           placeholder="Nhập lý do vắng"
           maxLength={500}
-          className={cn("min-w-64", statusNote && "mt-2")}
+          className={cn("min-w-64", (statusNote || pickReplacement) && "mt-2")}
         />
       </td>
       <td className="px-4 py-3 text-center">
@@ -1129,14 +1197,18 @@ function RequiredAbsentRiderRow({
 }
 
 function renderStatusNote(status: string, hasRealtimeOrders: boolean, realtimeOrderCount: number) {
-  if (status !== "Chưa điểm danh" || !hasRealtimeOrders) return null;
-
-  return (
-    <p className="text-sm font-semibold text-orange-500">
-      Có lấy hàng nhưng không điểm danh
-      {realtimeOrderCount > 0 ? <span className="font-medium"> ({realtimeOrderCount} đơn realtime)</span> : null}
-    </p>
-  );
+  if (status === "Chưa điểm danh" && hasRealtimeOrders) {
+    return (
+      <p className="text-sm font-semibold text-orange-500">
+        Có đơn nhưng chưa điểm danh
+        {realtimeOrderCount > 0 ? <span className="font-medium"> ({realtimeOrderCount} đơn realtime)</span> : null}
+      </p>
+    );
+  }
+  if (status === "Chưa có mặt") {
+    return <p className="text-sm font-semibold text-slate-400">Chưa có đơn, chưa thấy có mặt.</p>;
+  }
+  return null;
 }
 
 function RiderScanInput({ inputRef, onScan }: { inputRef: RefObject<HTMLInputElement | null>; onScan: (value: string) => void | Promise<void> }) {

@@ -3,6 +3,8 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { canManageOperations, canManageRiders } from "@/lib/auth/permissions";
+import { resolveOffScheduleSpreadsheetId } from "@/lib/google/off-schedule";
+import { readPickupReplacementsFromGoogleSheet } from "@/lib/google/pickup-replacements";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const assignSchema = z.object({
@@ -48,16 +50,26 @@ function isCot1(value: string | null) {
   return /\bcot\s*1\b/i.test(value ?? "") || value?.trim() === "1";
 }
 
+function normalizeName(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "d")
+    .toLowerCase()
+    .trim();
+}
+
 export async function GET(request: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 
-  const workDate = new URL(request.url).searchParams.get("date");
-  if (!dateSchema.safeParse(workDate).success) {
+  const rawWorkDate = new URL(request.url).searchParams.get("date");
+  if (!dateSchema.safeParse(rawWorkDate).success) {
     return NextResponse.json({ success: false, error: "Ngày không hợp lệ" }, { status: 400 });
   }
+  const workDate = rawWorkDate as string;
 
-  const [riderResult, assignmentResult, attendanceResult, absenceNoteResult, latestRealtimeDeliveryResult, realtime10amResult] = await Promise.all([
+  const [riderResult, assignmentResult, attendanceResult, absenceNoteResult, latestRealtimeDeliveryResult, realtime10amResult, pickupReplacementResult] = await Promise.all([
     session.admin
       .from("riders")
       .select("id,rider_code,full_name,kv,cot,pickup_district,pickup_ward,delivery_district,delivery_ward,status")
@@ -87,10 +99,81 @@ export async function GET(request: Request) {
       .from("realtime_delivery_riders_10am")
       .select("driver_id,total_assigned,delivered,delivering,failed,snapshot_at")
       .eq("work_date", workDate),
+    session.admin
+      .from("pickup_replacements")
+      .select("rider_code,replacement_rider_code,status,work_date")
+      .eq("work_date", workDate),
   ]);
 
-  const error = riderResult.error ?? assignmentResult.error ?? attendanceResult.error ?? absenceNoteResult.error ?? latestRealtimeDeliveryResult.error ?? realtime10amResult.error;
+  const error = riderResult.error ?? assignmentResult.error ?? attendanceResult.error ?? absenceNoteResult.error ?? latestRealtimeDeliveryResult.error ?? realtime10amResult.error ?? pickupReplacementResult.error;
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+
+  const allRiders = (riderResult.data ?? []) as Array<{
+    rider_code: string;
+    full_name: string | null;
+  }>;
+  const riderNameByCode = new Map(
+    allRiders.map((rider) => [normalizeName(rider.rider_code), rider.full_name]),
+  );
+  const riderCodeByNormalizedName = new Map(
+    allRiders
+      .filter((rider) => normalizeName(rider.full_name))
+      .map((rider) => [normalizeName(rider.full_name), rider.rider_code]),
+  );
+
+  const pickupReplacementMap = new Map<string, {
+    rider_code: string;
+    rider_name: string | null;
+    replacement_rider_code: string | null;
+    replacement_rider_name: string | null;
+    status: string;
+    work_date: string;
+  }>();
+  for (const row of (pickupReplacementResult.data ?? []) as Array<{
+    rider_code: string;
+    replacement_rider_code: string | null;
+    status: string;
+    work_date: string;
+  }>) {
+    const key = `${row.rider_code}|${row.work_date}`;
+    pickupReplacementMap.set(key, {
+      rider_code: row.rider_code,
+      rider_name: riderNameByCode.get(normalizeName(row.rider_code)) ?? null,
+      replacement_rider_code: row.replacement_rider_code,
+      replacement_rider_name: null,
+      status: row.status,
+      work_date: row.work_date,
+    });
+  }
+  try {
+    const spreadsheetId = resolveOffScheduleSpreadsheetId();
+    if (spreadsheetId) {
+      const sheetRows = await readPickupReplacementsFromGoogleSheet(
+        spreadsheetId,
+        workDate,
+        workDate,
+        AbortSignal.any([request.signal, AbortSignal.timeout(20_000)]),
+      );
+      for (const item of sheetRows) {
+        const replacementCode =
+          item.replacement_rider_code ??
+          (item.replacement_rider_name
+            ? riderCodeByNormalizedName.get(normalizeName(item.replacement_rider_name)) ?? null
+            : null);
+        const key = `${item.rider_code}|${item.work_date}`;
+        pickupReplacementMap.set(key, {
+          rider_code: item.rider_code,
+          rider_name: riderNameByCode.get(normalizeName(item.rider_code)) ?? null,
+          replacement_rider_code: replacementCode,
+          replacement_rider_name: item.replacement_rider_name,
+          status: replacementCode ? "ASSIGNED" : "MISSING",
+          work_date: item.work_date,
+        });
+      }
+    }
+  } catch {
+    // Sheet không đọc được — giữ dữ liệu DB đã gộp ở trên.
+  }
 
   const cot1Riders = (riderResult.data ?? []).filter((rider) => isCot1(rider.cot));
   const latestSnapshotId = latestRealtimeDeliveryResult.data?.snapshot_id ?? null;
@@ -122,6 +205,7 @@ export async function GET(request: Request) {
     assignments: assignmentResult.data ?? [],
     attendance: attendanceResult.data ?? [],
     absence_notes: absenceNoteResult.data ?? [],
+    pickup_replacements: Array.from(pickupReplacementMap.values()),
     active_delivery_rider_count: activeDeliveryRiderCount,
     realtime_delivery_riders: realtimeDeliveryRiders,
     realtime_delivery_riders_10am: realtime10amResult.data ?? [],
