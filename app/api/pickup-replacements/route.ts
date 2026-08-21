@@ -49,6 +49,15 @@ function shiftDate(value: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
+function normalizeName(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "d")
+    .toLowerCase()
+    .trim();
+}
+
 async function loadLatestPickupWardVolume(
   admin: ReturnType<typeof createAdminClient>,
 ) {
@@ -141,6 +150,11 @@ export async function GET(request: Request) {
   const databaseRows = (data ?? []) as ReplacementRow[];
   const riderRows = (riders ?? []) as RiderIdentity[];
   const riderByCode = new Map(riderRows.map((rider) => [rider.rider_code, rider]));
+  const riderByNormalizedName = new Map(
+    riderRows
+      .filter((rider) => normalizeName(rider.full_name))
+      .map((rider) => [normalizeName(rider.full_name), rider]),
+  );
   const merged = new Map(databaseRows.map((item) => [`${item.rider_code}|${item.work_date}`, item]));
   let sheetSync:
     | { success: true; spreadsheet_id: string; imported: number; skipped: number }
@@ -151,34 +165,46 @@ export async function GET(request: Request) {
     if (!spreadsheetId) throw new Error("Chưa cấu hình Google Sheet Khu 5-6");
     const sheetRows = await readPickupReplacementsFromGoogleSheet(
       spreadsheetId,
-      start,
+      historyStart,
       end,
       AbortSignal.any([request.signal, AbortSignal.timeout(20_000)]),
     );
     let imported = 0;
     let skipped = 0;
+    const sheetHistoryCounts = new Map<string, number>();
     for (const item of sheetRows) {
       const rider = riderByCode.get(item.rider_code);
       if (!rider) {
         skipped += 1;
         continue;
       }
+      const replacementCode =
+        item.replacement_rider_code ??
+        riderByNormalizedName.get(normalizeName(item.replacement_rider_name))?.rider_code ??
+        null;
+      if (replacementCode && item.work_date < start) {
+        const historyKey = `${item.rider_code}|${replacementCode}`;
+        sheetHistoryCounts.set(historyKey, (sheetHistoryCounts.get(historyKey) ?? 0) + 1);
+      }
+      if (item.work_date < start || item.work_date > end) continue;
       const key = `${item.rider_code}|${item.work_date}`;
       const current = merged.get(key);
-      const replacement = item.replacement_rider_code
-        ? riderByCode.get(item.replacement_rider_code)
-        : null;
+      const replacement = replacementCode ? riderByCode.get(replacementCode) : null;
       merged.set(key, {
         id: current?.id ?? `sheet:${key}`,
         rider_id: rider.id,
         rider_code: rider.rider_code,
         work_date: item.work_date,
         replacement_rider_id: replacement?.id ?? null,
-        replacement_rider_code: item.replacement_rider_code,
-        status: item.replacement_rider_code ? "ASSIGNED" : "MISSING",
-        note: item.replacement_rider_code ? null : "Chưa có pick thay",
+        replacement_rider_code: replacementCode,
+        status: replacementCode ? "ASSIGNED" : "MISSING",
+        note: replacementCode ? null : "Chưa có pick thay",
       });
       imported += 1;
+    }
+    if (sheetHistoryCounts.size > 0) {
+      historyCounts.clear();
+      for (const [key, count] of sheetHistoryCounts) historyCounts.set(key, count);
     }
     sheetSync = { success: true, spreadsheet_id: spreadsheetId, imported, skipped };
   } catch (sheetError) {
