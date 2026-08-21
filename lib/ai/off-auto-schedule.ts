@@ -63,15 +63,33 @@ export type OffAutoScheduleInput = {
 };
 
 /**
- * Assign each rider a DIFFERENT off day within the week per (ward, COT) group,
- * so no group ever has two riders off on the same day. COT1 and COT2 of the
- * same ward are independent: they may share a day. Riders that already have an
- * OFF in the week keep their schedule and are not touched.
+ * Assign each rider an OFF day within the week per (ward, COT) group, following
+ * operational rules:
+ *
+ * - COT1 and COT2 of the same ward are independent: they may share a day.
+ * - Riders that already have an OFF in the week keep their schedule.
+ * - Days with heavy volume are avoided: the 1st and 2nd of the month, the 15th
+ *   and 25th of the month, and the yearly sale days 06/06 and 07/07 are never
+ *   used for a NEW OFF. Monday is heavily restricted (only used when every
+ *   other day is full), while Wednesday onwards is allowed.
+ * - Sunday has the least volume: it is preferred first and allows one more
+ *   rider off than normal days.
+ * - Capacity per (ward, COT) group per day: groups with >= 4 riders may have
+ *   up to 2 riders off on a normal day (3 on Sunday); smaller groups only 1.
+ * - Days are spread across the whole week (Sunday first, then Saturday down to
+ *   Wednesday) so early-week days are not spammed.
  */
 export function buildOffAutoScheduleProposal(input: OffAutoScheduleInput): OffAutoScheduleProposal {
   const today = input.today ?? "2000-01-01";
   const weekDates: string[] = [];
   for (let index = 0; index < 7; index += 1) weekDates.push(shiftDate(input.weekStart, index));
+
+  // Preferred order: Sunday, Saturday, Friday, Thursday, Wednesday, Tuesday, Monday.
+  // Tuesday/Wednesday are allowed but come after the weekend; Monday is last.
+  const eligibleDays = weekDates
+    .filter((date) => date >= today)
+    .filter((date) => !isForbiddenOffDay(date))
+    .sort((a, b) => weekdayPriority(a) - weekdayPriority(b));
 
   const byGroup = new Map<string, AutoScheduleRider[]>();
   for (const rider of input.riders) {
@@ -95,6 +113,9 @@ export function buildOffAutoScheduleProposal(input: OffAutoScheduleInput): OffAu
     const skipped: AutoScheduleSkipped[] = [];
     const wardTaken = new Set(input.wardTakenDates.get(key) ?? []);
 
+    const maxOffPerDay = sorted.length >= 4 ? 2 : 1;
+    const sundayMaxOff = sorted.length >= 4 ? 3 : 1;
+
     for (const rider of sorted) {
       const riderTaken = input.riderTakenDates.get(rider.id);
       if (riderTaken && riderTaken.size > 0) {
@@ -110,11 +131,12 @@ export function buildOffAutoScheduleProposal(input: OffAutoScheduleInput): OffAu
         continue;
       }
 
-      const freeDay = weekDates.find((date) => {
-        if (date < today) return false;
+      const freeDay = eligibleDays.find((date) => {
         if (wardTaken.has(date)) return false;
-        if (assignments.some((assignment) => assignment.off_date === date)) return false;
         if (riderTaken?.has(date)) return false;
+        const countOnDay = assignments.filter((assignment) => assignment.off_date === date).length;
+        const capacity = isSunday(date) ? sundayMaxOff : maxOffPerDay;
+        if (countOnDay >= capacity) return false;
         return true;
       });
 
@@ -125,12 +147,11 @@ export function buildOffAutoScheduleProposal(input: OffAutoScheduleInput): OffAu
           rider_code: rider.rider_code,
           full_name: rider.full_name,
           ward,
-          reason: "Hết ngày trống trong phường/COT (không được trùng ngày OFF cùng COT)",
+          reason: "Hết ngày trống trong phường/COT (ưu tiên cuối tuần, tránh ngày cao điểm)",
         });
         continue;
       }
 
-      wardTaken.add(freeDay);
       totalAssignments += 1;
       assignments.push({
         rider_id: rider.id,
@@ -154,4 +175,24 @@ export function buildOffAutoScheduleProposal(input: OffAutoScheduleInput): OffAu
     total_skipped: totalSkipped,
     already_have_off: alreadyHaveOff,
   };
+}
+
+/** Days that should never host a NEW OFF: 1st/2nd/15th/25th of month and yearly sale days 06/06, 07/07. */
+function isForbiddenOffDay(date: string) {
+  const day = Number(date.slice(8, 10));
+  const month = Number(date.slice(5, 7));
+  if (day === 1 || day === 2 || day === 15 || day === 25) return true;
+  if ((month === 6 && day === 6) || (month === 7 && day === 7)) return true;
+  return false;
+}
+
+/** Lower = preferred. Sunday(0) first, then Sat(6), Fri(5), Thu(4), Wed(3), Tue(2), Mon(1) last. */
+function weekdayPriority(date: string) {
+  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+  const order = [0, 6, 5, 4, 3, 2, 1];
+  return order.indexOf(weekday);
+}
+
+function isSunday(date: string) {
+  return new Date(`${date}T00:00:00Z`).getUTCDay() === 0;
 }

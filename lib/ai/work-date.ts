@@ -10,8 +10,26 @@ export type WorkDateScope = {
 
 export function resolveWorkDateScope(question: string, now = new Date()): WorkDateScope {
   const normalized = normalizeForDate(question);
+
+  const range = resolveExplicitDateRange(normalized, now);
+  if (range) return { mode: "week", start: range.start, end: range.end, referenceDate: range.start, label: `${range.start}..${range.end}` };
+
   const explicitDate = resolveExplicitDate(normalized, now);
   if (explicitDate) return { mode: "day", start: explicitDate, end: explicitDate, referenceDate: explicitDate, label: explicitDate };
+
+  const weekNumberMatch = normalized.match(/\btuan\s+(\d{1,2})\b/);
+  if (weekNumberMatch) {
+    const year = Number(normalized.match(/\b(20\d{2})\b/)?.[1] ?? todayInVietnam(now).slice(0, 4));
+    const start = startOfWeekByWeekNumber(year, Number(weekNumberMatch[1]));
+    const end = shiftDate(start, 6);
+    return {
+      mode: "week",
+      start,
+      end,
+      referenceDate: todayInVietnam(now) >= start && todayInVietnam(now) <= end ? todayInVietnam(now) : start,
+      label: `tuần ${weekNumberMatch[1]} (${start}..${end})`,
+    };
+  }
 
   const weekMatch = normalized.match(/\btuan\s+(nay|toi|sau|truoc)\b/);
   if (weekMatch) {
@@ -30,6 +48,35 @@ export function resolveWorkDateScope(question: string, now = new Date()): WorkDa
 
   const day = resolveWorkDate(question, now);
   return { mode: "day", start: day, end: day, referenceDate: day, label: day };
+}
+
+/**
+ * Resolve an explicit date range like "24/08 - 30/08" or
+ * "24/08/2026 - 30/08/2026" into its start/end dates (yyyy-MM-dd).
+ */
+function resolveExplicitDateRange(normalized: string, now: Date) {
+  const match = normalized.match(
+    /\b(\d{1,2})[\/-](\d{1,2})(?:[\/-](20\d{2}))?\s*(?:-|den|toi|tren)\s*(\d{1,2})[\/-](\d{1,2})(?:[\/-](20\d{2}))?\b/,
+  );
+  if (!match) return null;
+  const currentYear = Number(todayInVietnam(now).slice(0, 4));
+  const start = validDate(
+    match[3] ? Number(match[3]) : currentYear,
+    Number(match[2]),
+    Number(match[1]),
+  );
+  const end = validDate(
+    match[6] ? Number(match[6]) : currentYear,
+    Number(match[5]),
+    Number(match[4]),
+  );
+  if (!start || !end) return null;
+  if (end < start) {
+    const shifted = validDate(currentYear + 1, Number(match[5]), Number(match[4]));
+    if (shifted) return { start, end: shifted };
+    return null;
+  }
+  return { start, end };
 }
 
 export function resolveWorkDate(question: string, now = new Date()) {
@@ -64,6 +111,16 @@ export function startOfWeekUtc(today: string, weekOffset: number) {
   const mondayOffset = (date.getUTCDay() + 6) % 7;
   date.setUTCDate(date.getUTCDate() - mondayOffset + weekOffset * 7);
   return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Start of week number N of a year, using the rule "week 1 = the week that
+ * contains 01/01, weeks start on Monday". E.g. week 35 of 2026 is
+ * 24/08/2026 - 30/08/2026.
+ */
+export function startOfWeekByWeekNumber(year: number, weekNumber: number) {
+  const week1Start = startOfWeekUtc(`${year}-01-01`, 0);
+  return shiftDate(week1Start, (weekNumber - 1) * 7);
 }
 
 function resolveExplicitDate(normalized: string, now: Date) {
