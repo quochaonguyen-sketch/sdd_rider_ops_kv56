@@ -201,6 +201,45 @@ export async function PUT(request: Request) {
     updatedLogs = data ?? [];
   }
 
+  // Populate outbox for Google Sheets sync
+  const outboxRows: Array<{
+    rider_code: string;
+    work_date: string;
+    attendance_status: string;
+    operation: "UPSERT" | "CLEAR";
+  }> = [];
+
+  for (const item of upsertItems) {
+    outboxRows.push({
+      rider_code: item.rider_code,
+      work_date: item.work_date,
+      attendance_status: item.status,
+      operation: "UPSERT",
+    });
+  }
+  for (const item of clearItems) {
+    outboxRows.push({
+      rider_code: riderCodes.get(item.rider_id) ?? "",
+      work_date: item.work_date,
+      attendance_status: "ON",
+      operation: "CLEAR",
+    });
+  }
+
+  if (outboxRows.length > 0) {
+    const { error: outboxError } = await session.admin
+      .from("attendance_sheet_sync_outbox")
+      .insert(outboxRows.map((row) => ({
+        ...row,
+        state: "PENDING",
+        attempts: 0,
+        next_attempt_at: new Date().toISOString(),
+      })));
+    if (outboxError) {
+      console.error("Failed to populate sync outbox:", outboxError);
+    }
+  }
+
   const sheetSync = await processAttendanceSheetSync(300, parsed.data.sheet_url);
 
   await session.admin.from("activity_logs").insert({

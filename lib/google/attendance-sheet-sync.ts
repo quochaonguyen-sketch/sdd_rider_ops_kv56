@@ -12,6 +12,9 @@ type OutboxRow = {
   attendance_status: GoogleScheduleStatus;
   operation: "UPSERT" | "CLEAR";
   attempts: number;
+  state?: string;
+  last_error?: string;
+  next_attempt_at?: string;
 };
 
 export type AttendanceSheetSyncResult = {
@@ -40,7 +43,7 @@ export async function processAttendanceSheetSync(
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("attendance_sheet_sync_outbox")
-    .select("id,rider_code,work_date,attendance_status,operation,attempts")
+    .select("id,rider_code,work_date,attendance_status,operation,attempts,state,last_error,next_attempt_at")
     .in("state", ["PENDING", "FAILED"])
     .lte("next_attempt_at", new Date().toISOString())
     .order("created_at", { ascending: true })
@@ -48,6 +51,7 @@ export async function processAttendanceSheetSync(
   if (error) throw new Error(error.message);
 
   const rows = (data ?? []) as OutboxRow[];
+  console.log("[Sync] Outbox rows to process:", rows.length, rows.map(r => ({ id: r.id, rider: r.rider_code, date: r.work_date, status: r.attendance_status, op: r.operation, state: r.state, attempts: r.attempts })));
   if (!rows.length) return { success: true, queued: 0, synced: 0 };
 
   const rowIds = rows.map((row) => row.id);
@@ -71,6 +75,7 @@ export async function processAttendanceSheetSync(
 
   try {
     const spreadsheetId = resolveOffScheduleSpreadsheetId(sheetUrl);
+    console.log("[Sync] Resolved spreadsheetId:", spreadsheetId);
     if (!spreadsheetId) throw new Error("Chưa cấu hình OFF_SCHEDULE_SPREADSHEET_ID trên máy chủ");
     await syncScheduleUpdatesToGoogleSheet(spreadsheetId, latest.map((row) => ({
       rider_code: row.rider_code,
@@ -78,6 +83,7 @@ export async function processAttendanceSheetSync(
       work_date: String(row.work_date).slice(0, 10),
       status: row.operation === "CLEAR" ? "ON" : row.attendance_status,
     })));
+    console.log("[Sync] Google Sheets updated successfully");
     const { error: completeError } = await admin
       .from("attendance_sheet_sync_outbox")
       .update({ state: "SYNCED", synced_at: new Date().toISOString(), last_error: null })
@@ -86,6 +92,7 @@ export async function processAttendanceSheetSync(
     return { success: true, queued: rows.length, synced: latest.length };
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : "Không thể đồng bộ Google Sheet";
+    console.error("[Sync] Failed:", message);
     await Promise.all(rows.map((row) => admin
       .from("attendance_sheet_sync_outbox")
       .update({

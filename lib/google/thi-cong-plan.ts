@@ -185,3 +185,123 @@ export async function readRidersFromThiCongPlan(signal?: AbortSignal): Promise<T
 
   return { riders: [...riders.values()], sheet_rows: rows.length, skipped_rows: skippedRows };
 }
+
+export async function writeRidersToThiCongPlan(
+  spreadsheetId: string,
+  sheetName: string,
+  riders: Array<{
+    kv: string | null;
+    home_district: string | null;
+    cot: string | null;
+    rider_code: string;
+    full_name: string | null;
+    pickup_district: string | null;
+    pickup_ward: string | null;
+    point_name: string | null;
+    delivery_district: string | null;
+    delivery_ward: string | null;
+    status: string | null;
+    updated_at: string;
+  }>,
+  signal?: AbortSignal,
+): Promise<{ updated: number; appended: number; cleared: number; sheet_rows: number }> {
+  const token = await googleAccessToken(signal);
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values`;
+  const readResponse = await fetch(
+    `${baseUrl}/${encodeURIComponent(a1Range("A1:L"))}?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`,
+    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store", signal },
+  );
+  const source = await readResponse.json().catch(() => null) as { values?: unknown[][]; error?: { message?: string } } | null;
+  if (!readResponse.ok) throw new Error(source?.error?.message ?? "Google Sheets API từ chối đọc tab Thi Công Plan");
+  const rows = source?.values ?? [];
+  if (rows.length === 0) throw new Error("Tab Thi Công Plan trống");
+
+  const [_header = [], ...existingRows] = rows;
+  const rowNumbersByKey = new Map<string, number>();
+  const blankRowNumbers: number[] = [];
+
+  existingRows.forEach((row, index) => {
+    if (index > 0 && !row.slice(0, 12).some((cell) => String(cell ?? "").trim())) {
+      blankRowNumbers.push(index + 1);
+      return;
+    }
+    const riderCode = String(row[3] ?? "").trim();
+    if (!riderCode) return;
+    const key = riderCode;
+    rowNumbersByKey.set(key, index + 1);
+  });
+
+  const latestByKey = new Map(
+    riders.map((rider) => [rider.rider_code, rider]),
+  );
+
+  const data: Array<{ range: string; majorDimension: "ROWS"; values: string[][] }> = [];
+  const clearRanges: string[] = [];
+  let addedRows = 0;
+
+  for (const [key, rider] of latestByKey) {
+    const rowNumber = rowNumbersByKey.get(key);
+    if (!rowNumber) {
+      const blankRow = blankRowNumbers.pop();
+      if (!blankRow) {
+        throw new Error("Tab Thi Công Plan đã hết hàng trống A:L. Cần tạo thêm hàng không khóa trước khi đồng bộ.");
+      }
+      data.push({
+        range: a1Range(`A${blankRow}:L${blankRow}`),
+        majorDimension: "ROWS",
+        values: [[
+          rider.kv ?? "",
+          rider.home_district ?? "",
+          rider.cot ?? "",
+          rider.rider_code,
+          rider.full_name ?? "",
+          rider.pickup_district ?? "",
+          rider.pickup_ward ?? "",
+          rider.point_name ?? "",
+          rider.delivery_district ?? "",
+          "",
+          "",
+          rider.delivery_ward ?? "",
+        ]],
+      });
+      addedRows += 1;
+    } else {
+      data.push({
+        range: a1Range(`A${rowNumber}:L${rowNumber}`),
+        majorDimension: "ROWS",
+        values: [[
+          rider.kv ?? "",
+          rider.home_district ?? "",
+          rider.cot ?? "",
+          rider.rider_code,
+          rider.full_name ?? "",
+          rider.pickup_district ?? "",
+          rider.pickup_ward ?? "",
+          rider.point_name ?? "",
+          rider.delivery_district ?? "",
+          "",
+          "",
+          rider.delivery_ward ?? "",
+        ]],
+      });
+    }
+  }
+
+  if (data.length) {
+    await fetch(`${baseUrl}:batchUpdate`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ valueInputOption: "RAW", data }),
+      cache: "no-store",
+      signal,
+    });
+  }
+
+  return {
+    updated: data.length - addedRows,
+    appended: addedRows,
+    cleared: clearRanges.length,
+    sheet_rows: rows.length,
+  };
+}

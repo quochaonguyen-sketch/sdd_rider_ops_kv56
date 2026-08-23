@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { addDays, addWeeks, format, getISOWeek, parseISO, startOfWeek } from "date-fns";
 import { vi } from "date-fns/locale";
@@ -64,7 +65,7 @@ interface WeeklyAttendanceDashboardProps {
   actions: React.ReactNode;
 }
 
-export function WeeklyAttendanceDashboard({
+export const WeeklyAttendanceDashboard = memo(function WeeklyAttendanceDashboard({
   riders,
   logs,
   selectedDate,
@@ -88,29 +89,41 @@ export function WeeklyAttendanceDashboard({
   onStatusChange,
   actions,
 }: WeeklyAttendanceDashboardProps) {
-  const weekStart = startOfWeek(parseISO(selectedDate), { weekStartsOn: 1 });
-  const weekDays = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
+  const [tablePage, setTablePage] = useState(1);
+  const tablePageSize = 50;
 
-  const riderIdByCode = new Map(riders.map((rider) => [rider.rider_code, rider.id]));
-  const logMap = new Map<string, AttendanceLog>();
-  for (const log of logs) {
-    const riderId = log.rider_id ?? riderIdByCode.get(log.rider_code);
-    if (riderId) logMap.set(`${riderId}:${log.work_date.slice(0, 10)}`, log);
-  }
+  const weekStart = useMemo(() => startOfWeek(parseISO(selectedDate), { weekStartsOn: 1 }), [selectedDate]);
+  const weekDays = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
 
-  const summaries = weekDays.map((day) => summarizeDay(format(day, "yyyy-MM-dd"), riders, logMap));
-  const statusFilteredRiders = riders.filter((rider) => {
+  const logMap = useMemo(() => {
+    const riderIdByCode = new Map(riders.map((rider) => [rider.rider_code, rider.id]));
+    const map = new Map<string, AttendanceLog>();
+    for (const log of logs) {
+      const riderId = log.rider_id ?? riderIdByCode.get(log.rider_code);
+      if (riderId) map.set(`${riderId}:${log.work_date.slice(0, 10)}`, log);
+    }
+    return map;
+  }, [riders, logs]);
+
+  const summaries = useMemo(() => weekDays.map((day) => summarizeDay(format(day, "yyyy-MM-dd"), riders, logMap)), [weekDays, riders, logMap]);
+  const statusFilteredRiders = useMemo(() => riders.filter((rider) => {
     if (attendanceFilter === "all") return true;
     const status = attendanceStatus(logMap.get(`${rider.id}:${selectedDate}`));
     return attendanceFilter === "working" ? status === "working" : status !== "working";
-  });
-  const displayedRiders = (onlyExceptions
+  }), [riders, logMap, selectedDate, attendanceFilter]);
+  const displayedRiders = useMemo(() => (onlyExceptions
     ? statusFilteredRiders.filter((rider) => weekDays.some((day) => {
         const status = attendanceStatus(logMap.get(`${rider.id}:${format(day, "yyyy-MM-dd")}`));
         return status === "off" || status === "incident";
       }))
-    : statusFilteredRiders).sort(compareRidersByOperationOrder);
-  const districtRows = summarizeDistricts(selectedDate, riders, logMap);
+    : statusFilteredRiders).sort(compareRidersByOperationOrder), [statusFilteredRiders, weekDays, logMap, onlyExceptions]);
+  const districtRows = useMemo(() => summarizeDistricts(selectedDate, riders, logMap), [selectedDate, riders, logMap]);
+
+  const tablePageCount = Math.max(1, Math.ceil(displayedRiders.length / tablePageSize));
+  const safeTablePage = Math.min(tablePage, tablePageCount);
+  const paginatedTableRiders = useMemo(() => displayedRiders.slice((safeTablePage - 1) * tablePageSize, safeTablePage * tablePageSize), [displayedRiders, safeTablePage]);
+
+  const resetTablePage = useCallback(() => setTablePage(1), []);
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-6">
@@ -163,12 +176,12 @@ export function WeeklyAttendanceDashboard({
             <p className="mt-0.5 text-sm text-slate-500">{displayedRiders.length} rider · sắp xếp theo cột, quận, phường</p>
           </div>
           <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-600">
-            <input type="checkbox" checked={onlyExceptions} onChange={(event) => onOnlyExceptionsChange(event.target.checked)} className="size-4 rounded border-slate-300 accent-blue-600" />
+            <input type="checkbox" checked={onlyExceptions} onChange={(event) => { onOnlyExceptionsChange(event.target.checked); resetTablePage(); }} className="size-4 rounded border-slate-300 accent-blue-600" />
             Chỉ hiện rider có OFF / sự cố
           </label>
         </div>
         <AttendanceTable
-          riders={displayedRiders}
+          riders={paginatedTableRiders}
           days={weekDays}
           logMap={logMap}
           selectedDate={selectedDate}
@@ -177,10 +190,24 @@ export function WeeklyAttendanceDashboard({
           savingCells={savingCells}
           onStatusChange={onStatusChange}
         />
+        <div className="flex flex-col gap-3 border-t border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs font-semibold text-slate-500">
+            {(safeTablePage - 1) * tablePageSize + 1}–{Math.min(safeTablePage * tablePageSize, displayedRiders.length)} / {displayedRiders.length}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="secondary" className="size-9 p-0" disabled={safeTablePage <= 1} onClick={() => setTablePage((p) => p - 1)} aria-label="Trang trước">
+              <ChevronLeft size={16} />
+            </Button>
+            <span className="min-w-20 text-center text-xs font-bold text-slate-700">Trang {safeTablePage}/{tablePageCount}</span>
+            <Button type="button" variant="secondary" className="size-9 p-0" disabled={safeTablePage >= tablePageCount} onClick={() => setTablePage((p) => p + 1)} aria-label="Trang sau">
+              <ChevronRight size={16} />
+            </Button>
+          </div>
+        </div>
       </section>
     </div>
   );
-}
+});
 
 export function WeekSelector({ weekStart, onPrevious, onNext }: { weekStart: Date; onPrevious: () => void; onNext: () => void }) {
   const weekEnd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6);
@@ -197,9 +224,9 @@ function DistrictAttendanceBreakdown({ date, rows }: { date: string; rows: Array
 
 function StatLine({ label, value, dot }: { label: string; value: number; dot: string }) { return <div className="flex items-center justify-between gap-2"><span className="flex items-center gap-1.5 text-slate-500"><span className={`size-1.5 rounded-full ${dot}`} />{label}</span><strong className="tabular-nums text-slate-800">{value}</strong></div>; }
 
-export function AttendanceTable({ riders, days, logMap, selectedDate, loading, canEdit, savingCells, onStatusChange }: { riders: Rider[]; days: Date[]; logMap: Map<string, AttendanceLog>; selectedDate: string; loading: boolean; canEdit: boolean; savingCells: Set<string>; onStatusChange: (rider: Rider, date: string, status: WeeklyScheduleValue) => void }) {
+export const AttendanceTable = memo(function AttendanceTable({ riders, days, logMap, selectedDate, loading, canEdit, savingCells, onStatusChange }: { riders: Rider[]; days: Date[]; logMap: Map<string, AttendanceLog>; selectedDate: string; loading: boolean; canEdit: boolean; savingCells: Set<string>; onStatusChange: (rider: Rider, date: string, status: WeeklyScheduleValue) => void }) {
   return <div className="max-h-[640px] overflow-auto"><table className="w-full min-w-[1240px] border-separate border-spacing-0 text-left"><thead className="sticky top-0 z-30 bg-slate-50"><tr><th className="sticky left-0 z-40 w-72 border-b border-r border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Rider · Cột · Quận · Phường</th>{days.map((day) => { const date = format(day, "yyyy-MM-dd"); return <th key={date} className={`min-w-36 border-b border-slate-200 px-2 py-3 text-center ${date === selectedDate ? "bg-blue-50" : ""}`}><p className="text-xs font-semibold uppercase text-slate-500">{format(day, "EEE", { locale: vi })}</p><p className="mt-0.5 text-sm font-bold text-slate-900">{format(day, "dd/MM")}</p></th>; })}</tr></thead><tbody>{loading ? <tr><td colSpan={8} className="h-48 text-center text-sm text-slate-500">Đang tải dữ liệu chấm công…</td></tr> : riders.length === 0 ? <tr><td colSpan={8} className="h-48 text-center text-sm text-slate-500">Không có rider phù hợp với bộ lọc.</td></tr> : riders.map((rider, index) => <tr key={rider.id} className="group"><td className={`sticky left-0 z-20 border-b border-r border-slate-200 px-4 py-3 ${index % 2 ? "bg-slate-50" : "bg-white"}`}><div className="flex items-start gap-2"><Link href={`/attendance/riders/${rider.id}?month=${format(days[0], "yyyy-MM")}`} className="block max-w-44 truncate text-sm font-semibold text-slate-900 hover:text-blue-700">{rider.full_name ?? rider.rider_code}</Link>{hasWeekOff(rider, days, logMap) ? <span className="inline-flex shrink-0 rounded-full bg-slate-200/80 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-600" title="Tuần này có lịch OFF">OFF</span> : null}</div><p className="mt-0.5 font-mono text-[11px] text-slate-500">{rider.rider_code}</p><p className="mt-1 truncate text-[11px] text-slate-400">Cột {rider.cot ?? "—"} · {canonicalDistrictShortName(rider.delivery_district) || "Chưa xếp quận"} · {rider.delivery_ward ?? "Chưa xếp phường"}</p></td>{days.map((day) => { const date = format(day, "yyyy-MM-dd"); const key = `${rider.id}:${date}`; const log = logMap.get(key); const saving = savingCells.has(key); const currentStatus = scheduleValue(log); return <td key={date} className={`border-b border-slate-100 px-2 py-3 text-center ${date === selectedDate ? "bg-blue-50/50" : ""}`}><Select aria-label={`Trạng thái ${rider.full_name ?? rider.rider_code} ngày ${format(day, "dd/MM/yyyy")}`} title={statusTooltip(log)} className={`h-9 min-w-32 border font-semibold shadow-sm transition-colors ${saving ? "border-slate-200 bg-slate-100 text-slate-500" : scheduleToneClass(currentStatus)}`} value={currentStatus} disabled={!canEdit || saving} onChange={(event) => onStatusChange(rider, date, event.target.value as WeeklyScheduleValue)}>{WEEKLY_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{saving && option.value === currentStatus ? "Đang lưu…" : option.label}</option>)}</Select></td>; })}</tr>)}</tbody></table></div>;
-}
+});
 
 export function StatusBadge({ status, saving = false }: { status: WeeklyAttendanceStatus; saving?: boolean }) {
   const config: Record<WeeklyAttendanceStatus, { label: string; dot: string; text: string }> = { working: { label: "Đi làm", dot: "bg-blue-600", text: "text-slate-700" }, off: { label: "OFF", dot: "bg-slate-300", text: "text-slate-500" }, incident: { label: "Sự cố", dot: "bg-amber-500", text: "text-amber-800" } }; const item = config[status]; return <span className={`inline-flex min-w-16 items-center justify-center gap-1.5 text-xs font-semibold ${item.text}`}><span className={`size-2 rounded-full ${saving ? "animate-pulse bg-slate-300" : item.dot}`} />{saving ? "Đang lưu" : item.label}</span>;

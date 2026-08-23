@@ -128,7 +128,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   const [importIssues, setImportIssues] = useState<ImportIssue[]>([]);
   const [issuesImportedPartially, setIssuesImportedPartially] = useState(false);
   const [riderPage, setRiderPage] = useState(1);
-  const [riderPageSize, setRiderPageSize] = useState(25);
+  const [riderPageSize, setRiderPageSize] = useState(50);
   const [issuePage, setIssuePage] = useState(1);
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
   const [editor, setEditor] = useState<CellEditor | null>(null);
@@ -143,22 +143,15 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const anchor = parseISO(`${month}-01`);
-    const requestedMonths = [subMonths(anchor, 1), anchor, addMonths(anchor, 1)].map((date) => format(date, "yyyy-MM"));
-    const responses = await Promise.all(requestedMonths.map(async (requestedMonth) => {
-      const response = await fetch(`/api/attendance/schedule?month=${requestedMonth}`, { cache: "no-store" });
-      const result = (await response.json().catch(() => null)) as ScheduleResponse | null;
-      return { response, result, requestedMonth };
-    }));
-    const current = responses.find((item) => item.requestedMonth === month) ?? responses[1];
-    const failed = responses.find((item) => !item.response.ok || !item.result?.success);
+    const response = await fetch(`/api/attendance/schedule?month=${month}`, { cache: "no-store" });
+    const result = (await response.json().catch(() => null)) as ScheduleResponse | null;
 
-    if (failed || !current.result?.success) {
-      setError(failed?.result?.error ?? current.result?.error ?? "Không thể tải lịch rider");
+    if (!response.ok || !result?.success) {
+      setError(result?.error ?? "Không thể tải lịch rider");
     } else {
-      setRiders(current.result.riders ?? []);
-      setLogs(responses.flatMap((item) => item.result?.logs ?? []));
-      setCanEdit(Boolean(current.result.can_edit));
+      setRiders(result.riders ?? []);
+      setLogs(result.logs ?? []);
+      setCanEdit(Boolean(result.can_edit));
     }
     setLoading(false);
   }, [month]);
@@ -1198,7 +1191,7 @@ const DesktopScheduleCell = memo(function DesktopScheduleCell({
   );
 });
 
-function StatusSelect({
+const StatusSelect = memo(function StatusSelect({
   value,
   onChange,
   disabled,
@@ -1228,9 +1221,9 @@ function StatusSelect({
       ))}
     </select>
   );
-}
+});
 
-function AttendanceKpi({ label, value, helper, tone, icon, active, onClick, className }: { label: string; value: number | string; helper: string; tone: "green" | "red" | "amber" | "blue"; icon: React.ReactNode; active: boolean; onClick: () => void; className?: string }) { const colors = { green: "bg-emerald-50 text-emerald-700", red: "bg-red-50 text-red-700", amber: "bg-amber-50 text-amber-700", blue: "bg-blue-50 text-blue-700" }; return <button type="button" aria-pressed={active} onClick={onClick} className={`${className ?? ""} min-h-36 rounded-xl border bg-white p-4 text-left transition hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 ${active ? "border-blue-300 ring-1 ring-blue-100" : "border-slate-200"}`}><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium text-slate-600">{label}</p><p className="mt-2 text-2xl font-bold tabular-nums text-slate-950">{value}</p></div><span className={`grid size-9 place-items-center rounded-lg ${colors[tone]}`}>{icon}</span></div><p className="mt-4 text-xs text-slate-500">{helper}</p></button>; }
+const AttendanceKpi = memo(function AttendanceKpi({ label, value, helper, tone, icon, active, onClick, className }: { label: string; value: number | string; helper: string; tone: "green" | "red" | "amber" | "blue"; icon: React.ReactNode; active: boolean; onClick: () => void; className?: string }) { const colors = { green: "bg-emerald-50 text-emerald-700", red: "bg-red-50 text-red-700", amber: "bg-amber-50 text-amber-700", blue: "bg-blue-50 text-blue-700" }; return <button type="button" aria-pressed={active} onClick={onClick} className={`${className ?? ""} min-h-36 rounded-xl border bg-white p-4 text-left transition hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 ${active ? "border-blue-300 ring-1 ring-blue-100" : "border-slate-200"}`}><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium text-slate-600">{label}</p><p className="mt-2 text-2xl font-bold tabular-nums text-slate-950">{value}</p></div><span className={`grid size-9 place-items-center rounded-lg ${colors[tone]}`}>{icon}</span></div><p className="mt-4 text-xs text-slate-500">{helper}</p></button>; });
 
 function AttendanceBadge({ category }: { category: AttendanceCategory }) { const styles = { present: "bg-emerald-50 text-emerald-700 ring-emerald-600/20", absent: "bg-red-50 text-red-700 ring-red-600/20", late: "bg-amber-50 text-amber-800 ring-amber-600/20", leave: "bg-blue-50 text-blue-700 ring-blue-600/20" }; return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${styles[category]}`}>{attendanceCategoryLabel(category)}</span>; }
 

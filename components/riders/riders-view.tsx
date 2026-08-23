@@ -147,6 +147,7 @@ export function RidersView({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [planSyncing, setPlanSyncing] = useState(false);
+  const [planWriteSyncing, setPlanWriteSyncing] = useState(false);
   const [importIssues, setImportIssues] = useState<ImportIssue[]>([]);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -378,6 +379,33 @@ export function RidersView({
     await load();
   }
 
+  async function syncRidersToPlan() {
+    muteBulkRealtime(true);
+    setPlanWriteSyncing(true);
+    setError(null);
+    setSuccess(null);
+    const response = await fetch("/api/riders/thi-cong-plan/write", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kv: kv === "all" ? null : kv,
+        cot: cot === "all" ? null : cot,
+        deliveryDistrict: deliveryDistrict === "all" ? null : deliveryDistrict,
+        status: status === "all" ? null : status,
+      }),
+    });
+    const result = await response.json().catch(() => null) as { success?: boolean; updated?: number; appended?: number; cleared?: number; error?: string } | null;
+    setPlanWriteSyncing(false);
+    if (!response.ok || !result?.success) {
+      muteRealtimeUntilRef.current = 0;
+      setError(result?.error ?? "Không thể đồng bộ lên Thi Công Plan");
+      return;
+    }
+    setSuccess(`Đã đẩy ${(result.updated ?? 0) + (result.appended ?? 0)} rider từ web lên Thi Công Plan: cập nhật ${result.updated ?? 0}, thêm mới ${result.appended ?? 0}${result.cleared ? `, xóa ${result.cleared}` : ""}.`);
+    muteBulkRealtime();
+    await load();
+  }
+
   async function importExcel(file: File) {
     muteBulkRealtime(true);
     setImporting(true);
@@ -546,6 +574,11 @@ export function RidersView({
               <CloudDownload size={16} />
               <span className="hidden sm:inline">{planSyncing ? "Đang đồng bộ..." : "Đồng bộ Plan"}</span>
               <span className="sm:hidden">Plan</span>
+            </Button>
+            <Button type="button" variant="secondary" className="riders-action" disabled={planWriteSyncing} onClick={() => void syncRidersToPlan()} title="Đẩy rider từ website lên tab Thi Công Plan">
+              <Upload size={16} />
+              <span className="hidden sm:inline">{planWriteSyncing ? "Đang đẩy..." : "Đẩy lên Plan"}</span>
+              <span className="sm:hidden">Lên Plan</span>
             </Button>
             <Button type="button" variant="secondary" className="riders-action" disabled={importing} onClick={() => fileInputRef.current?.click()}>
               <Upload size={16} />
