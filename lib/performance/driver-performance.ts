@@ -19,6 +19,7 @@ export type PerformanceFilters = {
   q: string;
   kv: PerformanceKvFilter;
   district: string;
+  ward: string;
   cot: string;
   sort: PerformanceSortKey;
   dir: PerformanceDirection;
@@ -35,6 +36,7 @@ export type PerformanceRow = {
   cot: string | null;
   pickup_district: string | null;
   delivery_district: string | null;
+  delivery_ward: string | null;
   delivery_assigned: number;
   delivery_delivered: number;
   pickup_assigned: number;
@@ -52,13 +54,24 @@ export type PerformanceSummary = {
   pickup_picked: number;
 };
 
+export type PerformanceWardRow = {
+  ward: string | null;
+  district: string | null;
+  delivery_assigned: number;
+  delivery_delivered: number;
+  on_hold: number;
+  rate: number | null;
+};
+
 export type PerformanceResult = {
   filters: PerformanceFilters;
   rows: PerformanceRow[];
   summary: PerformanceSummary;
+  wardOnHold: PerformanceWardRow[];
   options: {
     districts: string[];
     cots: string[];
+    wards: string[];
   };
 };
 
@@ -108,6 +121,7 @@ export function parsePerformanceFilters(params: SearchParamsLike): PerformanceFi
     q: (getParam(params, "q") ?? "").trim().slice(0, 80),
     kv: performanceKvSchema.catch("all").parse(getParam(params, "kv")),
     district: (getParam(params, "district") ?? "all").trim().slice(0, 80) || "all",
+    ward: (getParam(params, "ward") ?? "all").trim().slice(0, 80) || "all",
     cot: (getParam(params, "cot") ?? "all").trim().slice(0, 40) || "all",
     sort: performanceSortSchema.catch("area").parse(getParam(params, "sort")),
     dir: performanceDirectionSchema.catch("asc").parse(getParam(params, "dir")),
@@ -152,6 +166,7 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
   const likeQuery = `%${filters.q}%`;
   const kvClause = filters.kv === "all" ? Prisma.empty : Prisma.sql`and upper(coalesce(kv, '')) = ${filters.kv}`;
   const districtClause = filters.district === "all" ? Prisma.empty : Prisma.sql`and delivery_district = ${filters.district}`;
+  const wardClause = filters.ward === "all" ? Prisma.empty : Prisma.sql`and delivery_ward = ${filters.ward}`;
   const cotClause = filters.cot === "all" ? Prisma.empty : Prisma.sql`and cot = ${filters.cot}`;
   const searchClause = filters.q
     ? Prisma.sql`and (
@@ -163,6 +178,7 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
         or r.cot ilike ${likeQuery}
         or r.pickup_district ilike ${likeQuery}
         or r.delivery_district ilike ${likeQuery}
+        or r.delivery_ward ilike ${likeQuery}
       )`
     : Prisma.empty;
 
@@ -176,6 +192,7 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
       cot: string | null;
       pickup_district: string | null;
       delivery_district: string | null;
+      delivery_ward: string | null;
       delivery_assigned: bigint;
       delivery_delivered: bigint;
       pickup_assigned: bigint;
@@ -197,11 +214,13 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
         kv,
         cot,
         pickup_district,
-        delivery_district
+        delivery_district,
+        delivery_ward
       from public.riders
       where upper(coalesce(kv, '')) in ('KV5', 'KV6')
         ${kvClause}
         ${districtClause}
+        ${wardClause}
         ${cotClause}
     ),
     grouped as (
@@ -214,6 +233,7 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
         max(r.cot) as cot,
         max(r.pickup_district) as pickup_district,
         max(r.delivery_district) as delivery_district,
+        max(r.delivery_ward) as delivery_ward,
         sum(coalesce(p.delivery_assigned, 0))::bigint as delivery_assigned,
         sum(coalesce(p.delivery_delivered, 0))::bigint as delivery_delivered,
         sum(coalesce(p.pickup_assigned, 0))::bigint as pickup_assigned,
@@ -275,6 +295,49 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
     order by delivery_district asc nulls last, cot asc nulls last
   `;
 
+  const wardOptions = await prisma.$queryRaw<Array<{ delivery_ward: string | null }>>`
+    with rider_scope as (
+      select
+        rider_code,
+        delivery_district,
+        delivery_ward
+      from public.riders
+      where upper(coalesce(kv, '')) in ('KV5', 'KV6')
+        ${kvClause}
+        ${districtClause}
+    )
+    select distinct
+      nullif(trim(r.delivery_ward), '') as delivery_ward
+    from public.driver_performance_daily p
+    join rider_scope r on r.rider_code = p.driver_id
+    where p.report_date between ${start}::date and ${end}::date
+    order by delivery_ward asc nulls last
+  `;
+
+  const wardOnHoldRows = await prisma.$queryRaw<
+    Array<{ delivery_ward: string | null; delivery_district: string | null; delivery_assigned: bigint; delivery_delivered: bigint }>
+  >`
+    with rider_scope as (
+      select
+        rider_code,
+        delivery_district,
+        delivery_ward
+      from public.riders
+      where upper(coalesce(kv, '')) in ('KV5', 'KV6')
+        ${kvClause}
+        ${districtClause}
+    )
+    select
+      max(r.delivery_ward) as delivery_ward,
+      max(r.delivery_district) as delivery_district,
+      sum(coalesce(p.delivery_assigned, 0))::bigint as delivery_assigned,
+      sum(coalesce(p.delivery_delivered, 0))::bigint as delivery_delivered
+    from public.driver_performance_daily p
+    join rider_scope r on r.rider_code = p.driver_id
+    where p.report_date between ${start}::date and ${end}::date
+    group by r.delivery_ward, r.delivery_district
+  `;
+
   const first = rows[0];
   return {
     filters,
@@ -287,6 +350,7 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
       cot: row.cot,
       pickup_district: row.pickup_district,
       delivery_district: row.delivery_district,
+      delivery_ward: row.delivery_ward,
       delivery_assigned: Number(row.delivery_assigned),
       delivery_delivered: Number(row.delivery_delivered),
       pickup_assigned: Number(row.pickup_assigned),
@@ -304,11 +368,30 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
           pickup_picked: decimalToNumber(first.total_pickup_picked) ?? 0,
         }
       : emptySummary,
+    wardOnHold: wardOnHoldRows
+      .map((row) => {
+        const assigned = Number(row.delivery_assigned);
+        const delivered = Number(row.delivery_delivered);
+        const onHold = Math.max(0, assigned - delivered);
+        return {
+          ward: row.delivery_ward?.trim() || null,
+          district: row.delivery_district?.trim() || null,
+          delivery_assigned: assigned,
+          delivery_delivered: delivered,
+          on_hold: onHold,
+          rate: assigned > 0 ? (onHold / assigned) * 100 : null,
+        };
+      })
+      .filter((row) => row.delivery_assigned > 0)
+      .sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1) || b.on_hold - a.on_hold),
     options: {
       districts: Array.from(new Set(options.map((option) => option.delivery_district).filter(Boolean) as string[])).sort((a, b) =>
         a.localeCompare(b, "vi"),
       ),
       cots: Array.from(new Set(options.map((option) => option.cot).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b, "vi")),
+      wards: Array.from(new Set(wardOptions.map((option) => option.delivery_ward).filter(Boolean) as string[])).sort((a, b) =>
+        a.localeCompare(b, "vi"),
+      ),
     },
   };
 });

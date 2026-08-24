@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, ChevronRight, CircleAlert, Clock3, MapPin, PackageCheck, PackageOpen, PackageX, RefreshCcw, TimerOff, Truck, UserRoundX } from "lucide-react";
+import { Activity, ChevronRight, CircleAlert, Clock3, Hourglass, MapPin, PackageCheck, PackageOpen, PackageX, RefreshCcw, TimerOff, Truck, UserRoundX } from "lucide-react";
 import { format, subDays } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
@@ -25,9 +25,13 @@ type ReturnOverdueState = { thresholdHours: number; totalOrders: number; missing
 type DashboardState = { riders: Rider[]; activity: ActivityLog[]; delivery: VolumeRow[]; pickup: VolumeRow[]; realtime: RealtimeRow[]; returnOverdue: ReturnOverdueState; failedLeaders: FailedLeaders };
 type FailedLeader = { riderCode: string; riderName: string; district: string; failed: number; assigned: number };
 type FailedLeaders = { day: FailedLeader[]; week: FailedLeader[] };
+type DistrictOnHold = { district: string; area: "KV5" | "KV6"; onHold: number; assigned: number; delivered: number; riders: number; worstRider: { riderCode: string; riderName: string; onHold: number } | null };
+type DistrictOnHoldDaily = { date: string; district: string; area: "KV5" | "KV6"; onHold: number; assigned: number };
+type DistrictOnHoldState = { day: DistrictOnHold[]; week: DistrictOnHold[]; daily: DistrictOnHoldDaily[] };
 type AreaTotals = { deliveryVolume: number; pickupVolume: number; assigned: number; delivered: number; delivering: number; failed: number };
 type AreaBreakdown = { kv5: AreaTotals; kv6: AreaTotals };
 const emptyReturnOverdue: ReturnOverdueState = { thresholdHours: 48, totalOrders: 0, missingStartedAt: 0, snapshotAt: null, riders: [] };
+const emptyDistrictOnHold: DistrictOnHoldState = { day: [], week: [], daily: [] };
 const emptyState: DashboardState = { riders: [], activity: [], delivery: [], pickup: [], realtime: [], returnOverdue: emptyReturnOverdue, failedLeaders: { day: [], week: [] } };
 
 export function DashboardView() {
@@ -140,6 +144,11 @@ export function DashboardView() {
     <section aria-labelledby="failed-ranking" className="space-y-3">
       <DashboardSectionHeading id="failed-ranking" index="05" title="Top rider Failed (On Hold)" description="Xếp hạng rider KV5/KV6 theo đơn chưa giao (assigned − delivered) từ dữ liệu Performance." />
       <div className="grid gap-3 lg:grid-cols-2"><FailedLeaderboard title="Selected day" subtitle={formatDate(dateRange.end)} rows={state.failedLeaders.day} loading={loading} /><FailedLeaderboard title="Last 7 days" subtitle={`${formatDate(shiftDate(dateRange.end, -6))}–${formatDate(dateRange.end)}`} rows={state.failedLeaders.week} loading={loading} /></div>
+    </section>
+
+    <section aria-labelledby="district-onhold" className="space-y-3">
+      <DashboardSectionHeading id="district-onhold" index="06" title="On Hold theo quận" description="Đơn chưa giao (assigned − delivered) tổng hợp theo quận KV5/KV6; so sánh ngày đã chọn với trung bình 7 ngày." />
+      <DistrictOnHoldCard initialEndDate={dateRange.end} />
     </section>
 
     <section id="alerts" className="grid grid-cols-12 gap-3"><AlertsList className="col-span-12 xl:col-span-7" alerts={alerts} /><SectionCard className="col-span-12 xl:col-span-5" title="Lối tắt vận hành" description="Đi nhanh đến màn hình chuyên sâu" href="/realtime-dashboard" linkLabel="Mở realtime"><div className="grid grid-cols-2 gap-2">{[["Morning Dispatch", "/morning-delivery"], ["Delivery Volume", "/volume/delivery"], ["Pickup Volume", "/volume/pickup"], ["Riders", "/riders"]].map(([label, href]) => <Link key={href} href={href} className="dashboard-shortcut">{label}</Link>)}</div><div className="mt-4 border-t border-slate-100 pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Cập nhật gần đây</p>{state.activity.slice(0, 3).map((item) => <p key={item.id} className="mt-2 line-clamp-1 text-sm text-slate-600">{item.message}</p>)}</div></SectionCard></section>
@@ -305,6 +314,178 @@ function FailedLeaderboard({ title, subtitle, rows, loading }: { title: string; 
   </article>;
 }
 
+function DistrictOnHoldCard({ initialEndDate }: { initialEndDate: string }) {
+  const [endDate, setEndDate] = useState(initialEndDate);
+  const [data, setData] = useState<DistrictOnHoldState>(emptyDistrictOnHold);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const response = await fetch(`/api/dashboard/district-onhold?end=${encodeURIComponent(endDate)}`, { cache: "no-store" });
+    const result = (await response.json().catch(() => null)) as { success?: boolean; error?: string; onhold?: DistrictOnHoldState } | null;
+    if (!response.ok || !result?.success || !result.onhold) {
+      setError(result?.error ?? "Không thể tải thống kê On Hold theo quận");
+    } else {
+      setData(result.onhold);
+    }
+    setLoading(false);
+  }, [endDate]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
+  }, [load]);
+
+  const distanceSeries = useMemo(() => {
+    const byDate = new Map<string, { onHold: number; assigned: number }>();
+    for (const row of data.daily) {
+      const item = byDate.get(row.date) ?? { onHold: 0, assigned: 0 };
+      item.onHold += row.onHold;
+      item.assigned += row.assigned;
+      byDate.set(row.date, item);
+    }
+    return Array.from(byDate, ([date, { onHold, assigned }]) => ({
+      date,
+      onHold,
+      assigned,
+      ohPercent: assigned ? Math.round((onHold / assigned) * 1000) / 10 : 0,
+    })).sort((a, b) => a.date.localeCompare(b.date));
+  }, [data.daily]);
+
+  const donutRows = useMemo(() => {
+    const total = data.day.reduce((sum, row) => sum + row.onHold, 0);
+    return data.day
+      .map((row) => ({ ...row, shortName: shortDistrictLabel(row.district), share: total ? row.onHold / total : 0 }))
+      .filter((row) => row.onHold > 0)
+      .sort((a, b) => b.onHold - a.onHold || a.district.localeCompare(b.district, "vi"));
+  }, [data.day]);
+
+  const summary = useMemo(() => {
+    const totalOnHold = data.day.reduce((sum, row) => sum + row.onHold, 0);
+    const totalRiders = data.day.reduce((sum, row) => sum + row.riders, 0);
+    const assigned = data.day.reduce((sum, row) => sum + row.assigned, 0);
+    const delivered = data.day.reduce((sum, row) => sum + row.delivered, 0);
+    return {
+      totalOnHold,
+      districts: data.day.length,
+      totalRiders,
+      deliveryRate: assigned ? Math.round(delivered / assigned * 100) : 0,
+    };
+  }, [data.day]);
+
+  const chartColor = (index: number) => `var(--color-chart-${(index % 7) + 1})`;
+  const donutTotal = donutRows.reduce((sum, row) => sum + row.onHold, 0);
+  const circumference = 263.89;
+
+  const maxPercent = Math.max(...distanceSeries.map((d) => d.ohPercent), 0);
+  const lineMax = Math.max(20, Math.ceil(maxPercent / 20) * 20);
+  const lineWidth = 640;
+  const lineLeft = 46;
+  const lineRight = 16;
+  const lineTop = 18;
+  const lineBottom = 30;
+  const lineHeight = 232;
+  const plotW = lineWidth - lineLeft - lineRight;
+  const plotH = lineHeight - lineTop - lineBottom;
+  const points = distanceSeries.map((d, index) => ({
+    ...d,
+    x: distanceSeries.length > 1 ? lineLeft + (index / (distanceSeries.length - 1)) * plotW : lineLeft + plotW / 2,
+    y: lineTop + (1 - d.ohPercent / lineMax) * plotH,
+  }));
+
+  const hasData = loading || summary.districts > 0 || distanceSeries.length > 0;
+
+  return <article className="dashboard-hold-card district-onhold-card">
+    <div className="district-onhold-head">
+      <div className="dashboard-card-title">
+        <span><Hourglass size={17} /></span>
+        <div><h3>Đơn On Hold theo quận</h3><p>Ngày {formatDate(endDate)} · KV5 + KV6</p></div>
+      </div>
+      <label className="district-onhold-date">
+        <span>Ngày</span>
+        <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+      </label>
+    </div>
+
+    <div className="district-onhold-summary">
+      <div><strong>{loading ? "—" : summary.totalOnHold.toLocaleString("vi-VN")}</strong><span>đơn on hold</span></div>
+      <div><strong>{loading ? "—" : summary.districts.toLocaleString("vi-VN")}</strong><span>quận có dữ liệu</span></div>
+      <div><strong>{loading ? "—" : summary.totalRiders.toLocaleString("vi-VN")}</strong><span>rider chạy đơn</span></div>
+      <div><strong>{loading ? "—" : `${summary.deliveryRate}%`}</strong><span>giao thành công</span></div>
+    </div>
+
+    {error ? <p role="alert" className="district-onhold-error">{error}</p> : null}
+
+    {loading ? (
+      <div className="district-onhold-charts is-loading" aria-hidden="true" />
+    ) : !hasData ? (
+      <Empty text="Không có dữ liệu On Hold theo quận trong kỳ này." />
+    ) : (
+      <div className="district-onhold-charts">
+        <section className="district-onhold-panel">
+          <header className="district-onhold-panel-title">
+            <h4>% Đơn On Hold theo ngày</h4>
+            <p>Biến động 7 ngày gần nhất</p>
+          </header>
+          {distanceSeries.length > 0 ? (
+            <div className="district-onhold-line">
+              <svg viewBox={`0 0 ${lineWidth} ${lineHeight}`} role="img" aria-label="Phần trăm đơn on hold theo ngày">
+                {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+                  const y = lineTop + (1 - ratio) * plotH;
+                  return (
+                    <g key={ratio}>
+                      <line x1={lineLeft} y1={y} x2={lineLeft + plotW} y2={y} stroke="var(--color-rule)" strokeDasharray={ratio === 0 ? undefined : "3 4"} />
+                      <text x={lineLeft - 8} y={y + 4} textAnchor="end" fontSize="10" fill="var(--color-muted)" style={{ fontFamily: "var(--font-mono)" }}>{Math.round(lineMax * ratio)}%</text>
+                    </g>
+                  );
+                })}
+                {points.length > 1 ? <polyline points={points.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke="var(--color-accent)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" /> : null}
+                {points.map((p) => (
+                  <g key={p.date}>
+                    <rect x={p.x - 5} y={p.y - 5} width={10} height={10} fill="var(--color-accent)" stroke="var(--color-paper)" strokeWidth="2">
+                      <title>{`${formatFullDate(p.date)} · ${p.ohPercent}% on hold · ${p.onHold.toLocaleString("vi-VN")} / ${p.assigned.toLocaleString("vi-VN")} đơn gán`}</title>
+                    </rect>
+                    <text x={p.x} y={lineTop + plotH + 20} textAnchor="middle" fontSize="9" fill="var(--color-muted)">{formatDate(p.date)}</text>
+                  </g>
+                ))}
+              </svg>
+            </div>
+          ) : <Empty text="Không có dữ liệu ngày trong 7 ngày này." />}
+        </section>
+
+        <section className="district-onhold-panel">
+          <header className="district-onhold-panel-title">
+            <h4>Phân bố On Hold theo quận</h4>
+            <p>Ngày {formatDate(endDate)}</p>
+          </header>
+          {donutRows.length > 0 ? (
+            <div className="district-onhold-donut">
+              <div className="district-onhold-donut-figure">
+                <svg viewBox="0 0 120 120" role="img" aria-label={`Phân bố on hold theo quận ngày ${formatDate(endDate)}`}>
+                  <circle cx="60" cy="60" r="42" className="district-onhold-donut-track" />
+                  {donutRows.map((row, index) => {
+                    const length = (row.onHold / donutTotal) * circumference;
+                    const dashOffset = donutRows.slice(0, index).reduce((sum, r) => sum + (r.onHold / donutTotal) * circumference, 0);
+                    return <circle key={row.district} cx="60" cy="60" r="42" className="district-onhold-donut-segment" stroke={chartColor(index)} strokeDasharray={`${length} ${circumference - length}`} strokeDashoffset={-dashOffset}><title>{`${row.shortName}: ${Math.round(row.share * 100)}% (${row.onHold.toLocaleString("vi-VN")} đơn)`}</title></circle>;
+                  })}
+                </svg>
+                <div><strong>{donutTotal.toLocaleString("vi-VN")}</strong><span>đơn OH</span></div>
+              </div>
+              <ul className="district-onhold-donut-legend">
+                {donutRows.map((row, index) => (
+                  <li key={row.district}><i style={{ background: chartColor(index) }} /><span>{row.shortName}</span><strong>{Math.round(row.share * 100)}%</strong><em>{row.onHold.toLocaleString("vi-VN")} đơn</em></li>
+                ))}
+              </ul>
+            </div>
+          ) : <Empty text="Không có đơn on hold trong ngày này." />}
+        </section>
+      </div>
+    )}
+  </article>;
+}
+
 function ReturnOverdueCard({ data, loading }: { data: ReturnOverdueState; loading: boolean }) {
   return <article className={cn("dashboard-return-overdue", data.totalOrders > 0 && "has-overdue")}>
     <header>
@@ -444,6 +625,12 @@ function buildDistrictAverages(rows: VolumeRow[], endDate: string) {
 }
 
 function buildAlerts(state: DashboardState, summary: ReturnType<typeof buildSummary>) { const alerts: Array<{ title: string; description: string; severity: "critical" | "warning"; href: string }> = []; if (state.returnOverdue.totalOrders > 0) alerts.push({ title: `${state.returnOverdue.totalOrders} đơn trả quá 48 giờ`, description: `${state.returnOverdue.riders.length} rider đang giữ đơn nhưng chưa quét bàn giao trả.`, severity: "critical", href: "/return-orders?status=returning&sort=aging_desc&page=1&pageSize=50" }); if (state.returnOverdue.missingStartedAt > 0) alerts.push({ title: `${state.returnOverdue.missingStartedAt} đơn trả thiếu mốc thời gian`, description: "Chưa thể xác định các đơn này có vượt 48 giờ hay không.", severity: "warning", href: "/return-orders?status=returning&page=1&pageSize=50" }); if (summary.failed > 0) alerts.push({ title: `${summary.failed} Failed deliveries`, description: "Kiểm tra rider và quận trong snapshot KV5/KV6 mới nhất.", severity: "critical", href: "/realtime-dashboard" }); if (summary.idleRiders > 0) alerts.push({ title: `${summary.idleRiders} riders idle trên 1 giờ`, description: "Rider vẫn còn đơn Delivering nhưng không có tiến triển.", severity: "critical", href: "/realtime-dashboard" }); return alerts; }
+
+function shortDistrictLabel(value: string) {
+  const mapped = resolveKvDistrict(value);
+  if (mapped) return mapped.shortName;
+  return value.replace(/^Thành phố\s+/i, "TP ").replace(/^Quận\s+/i, "Q. ").replace(/^Huyện\s+/i, "H. ");
+}
 function normalizeRiderCode(value: string) { return value.trim().toUpperCase(); }
 function isKv56(value: string | null | undefined) { return /^(?:(?:kv|khu).*?)?[56]$/i.test(normalizeText(value ?? "").replace(/\s+/g, " ")); }
 function kvNumber(value: string | null | undefined): 5 | 6 | null {

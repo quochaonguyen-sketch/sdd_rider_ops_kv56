@@ -16,6 +16,7 @@ import {
   type PerformanceRow,
   type PerformanceSortKey,
   type PerformanceSummary,
+  type PerformanceWardRow,
 } from "@/lib/performance/driver-performance";
 
 type Props = {
@@ -39,6 +40,7 @@ const emptySummary: PerformanceSummary = {
 const emptyOptions: PerformanceResult["options"] = {
   districts: [],
   cots: [],
+  wards: [],
 };
 
 export function DriverPerformanceView({ result, filters, error, loadedKey }: Props) {
@@ -50,6 +52,7 @@ export function DriverPerformanceView({ result, filters, error, loadedKey }: Pro
   const rows = result?.rows ?? [];
   const summary = result?.summary ?? emptySummary;
   const options = result?.options ?? emptyOptions;
+  const wardOnHold = result?.wardOnHold ?? [];
   const pageCount = Math.max(1, Math.ceil(summary.groups / filters.pageSize));
   const isLoading = isPending || clientLoading;
 
@@ -117,6 +120,8 @@ export function DriverPerformanceView({ result, filters, error, loadedKey }: Pro
       ) : null}
 
       <PerformanceKpiCards summary={summary} page={filters.page} pageCount={pageCount} pageSize={filters.pageSize} isLoading={isLoading} />
+
+      <WardOnHoldChart rows={wardOnHold} filters={filters} isLoading={isLoading} />
 
       <RiderPerformanceTable
         rows={rows}
@@ -199,14 +204,16 @@ function PerformanceFilters({
     });
   }
 
-  function changeFilter(field: "kv" | "district" | "cot", value: string) {
+  function changeFilter(field: "kv" | "district" | "ward" | "cot", value: string) {
     updateParams((params) => {
       if (value === "all") params.delete(field);
       else params.set(field, value);
       if (field === "kv") {
         params.delete("district");
+        params.delete("ward");
         params.delete("cot");
       }
+      if (field === "district") params.delete("ward");
       params.set("page", "1");
     });
   }
@@ -266,6 +273,16 @@ function PerformanceFilters({
           </Select>
         </label>
 
+        <label className="block" htmlFor="performance-ward">
+          <span className="perf-field-label">Phường</span>
+          <Select id="performance-ward" value={filters.ward} onChange={(event) => changeFilter("ward", event.target.value)} aria-label="Lọc theo phường giao">
+            <option value="all">Tất cả phường</option>
+            {options.wards.map((ward) => (
+              <option key={ward} value={ward}>{ward}</option>
+            ))}
+          </Select>
+        </label>
+
         <label className="block" htmlFor="performance-cot">
           <span className="perf-field-label">COT</span>
           <Select id="performance-cot" value={filters.cot} onChange={(event) => changeFilter("cot", event.target.value)} aria-label="Lọc theo COT">
@@ -277,7 +294,7 @@ function PerformanceFilters({
         </label>
 
         <label className="block" htmlFor="performance-search">
-          <span className="perf-field-label">Tìm rider / quận / COT</span>
+          <span className="perf-field-label">Tìm rider / quận / phường / COT</span>
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" size={16} />
             <Input
@@ -285,7 +302,7 @@ function PerformanceFilters({
               className="pl-9"
               value={queryInput}
               onChange={(event) => setQueryInput(event.target.value)}
-              placeholder="Tên, ID, KV, COT, quận..."
+              placeholder="Tên, ID, KV, COT, quận, phường..."
               aria-describedby="performance-search-help"
             />
           </div>
@@ -343,6 +360,98 @@ function PerformanceKpiCards({
   );
 }
 
+function WardOnHoldChart({ rows, filters, isLoading }: { rows: PerformanceWardRow[]; filters: PerformanceFilters; isLoading: boolean }) {
+  const [sortKey, setSortKey] = useState<"rate" | "count">("rate");
+  const isAllDistricts = filters.district === "all";
+
+  const items = useMemo(() => {
+    if (isAllDistricts) {
+      const map = new Map<string, { name: string; assigned: number; delivered: number }>();
+      for (const row of rows) {
+        const name = row.district ?? "Chưa xác định";
+        const item = map.get(name) ?? { name, assigned: 0, delivered: 0 };
+        item.assigned += row.delivery_assigned;
+        item.delivered += row.delivery_delivered;
+        map.set(name, item);
+      }
+      return Array.from(map.values()).map((item) => {
+        const onHold = Math.max(0, item.assigned - item.delivered);
+        return { key: item.name, name: item.name, onHold, assigned: item.assigned, rate: item.assigned > 0 ? (onHold / item.assigned) * 100 : null };
+      });
+    }
+    return rows
+      .filter((row) => row.ward)
+      .map((row) => {
+        const onHold = Math.max(0, row.delivery_assigned - row.delivery_delivered);
+        return { key: `${row.district}-${row.ward}`, name: row.ward as string, onHold, assigned: row.delivery_assigned, rate: row.rate };
+      });
+  }, [rows, isAllDistricts]);
+
+  const data = useMemo(
+    () =>
+      [...items]
+        .sort((a, b) =>
+          sortKey === "rate"
+            ? (b.rate ?? -1) - (a.rate ?? -1) || b.onHold - a.onHold
+            : b.onHold - a.onHold || (b.rate ?? -1) - (a.rate ?? -1),
+        )
+        .slice(0, 12),
+    [items, sortKey],
+  );
+
+  const totalOnHold = data.reduce((sum, row) => sum + row.onHold, 0);
+  const scope = periodScopeLabel(filters);
+  const title = isAllDistricts ? "Quận On Hold cao nhất" : "Phường On Hold cao nhất";
+
+  return (
+    <section className="perf-ward-onhold" aria-label={title}>
+      <div className="perf-ward-head">
+        <div>
+          <h2>{title}</h2>
+          <p>
+            {scope} · {isAllDistricts ? "tất cả quận" : filters.district} · {formatNumber(totalOnHold)} đơn OH · xếp theo{" "}
+            {sortKey === "rate" ? "tỉ lệ" : "số đơn"}
+          </p>
+        </div>
+        <div className="perf-period-toggle" role="group" aria-label="Xếp hạng on hold">
+          <button type="button" aria-pressed={sortKey === "rate"} className={cn("perf-period-option", sortKey === "rate" && "is-active")} onClick={() => setSortKey("rate")}>
+            Theo tỉ lệ
+          </button>
+          <button type="button" aria-pressed={sortKey === "count"} className={cn("perf-period-option", sortKey === "count" && "is-active")} onClick={() => setSortKey("count")}>
+            Theo số đơn
+          </button>
+        </div>
+      </div>
+
+      {isLoading && data.length === 0 ? (
+        <div className="perf-ward-list is-loading" aria-hidden="true">
+          {Array.from({ length: 6 }, (_, index) => <div key={index} className="perf-ward-row" />)}
+        </div>
+      ) : data.length === 0 ? (
+        <p className="perf-ward-empty">Không có dữ liệu On Hold trong phạm vi đang chọn.</p>
+      ) : (
+        <div className="perf-ward-list">
+          {data.map((row, index) => (
+            <div className="perf-ward-row" key={row.key}>
+              <span className="perf-ward-rank">{String(index + 1).padStart(2, "0")}</span>
+              <div className="perf-ward-main">
+                <p className="perf-ward-name" title={row.name}>{row.name}</p>
+                <div className="perf-ward-track" aria-hidden="true">
+                  <span className="perf-ward-fill" style={{ width: `${Math.min(100, row.rate ?? 0)}%` }} />
+                </div>
+              </div>
+              <div className="perf-ward-value">
+                <strong className={scoreTextClass(row.rate)}>{formatRate(row.rate)}</strong>
+                <span>{formatNumber(row.onHold)} đơn OH</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function RiderPerformanceTable({
   rows,
   summary,
@@ -367,6 +476,7 @@ function RiderPerformanceTable({
       periodScopeLabel(filters),
       filters.kv === "all" ? "KV5/KV6" : filters.kv,
       filters.district === "all" ? "Tất cả quận giao" : filters.district,
+      filters.ward === "all" ? "Tất cả phường" : filters.ward,
       filters.cot === "all" ? "Tất cả COT" : filters.cot,
       `${formatNumber(rows.length)}/${formatNumber(summary.groups)} dòng`,
     ];
@@ -462,7 +572,10 @@ function PerformanceTableRow({ row, index }: { row: PerformanceRow; index: numbe
       </td>
       <td className="px-4 py-3">
         <p className="max-w-56 truncate font-semibold text-[var(--color-ink-2)]" title={row.delivery_district ?? undefined}>{row.delivery_district ?? "Chưa có quận giao"}</p>
-        <span className="mt-1 inline-flex max-w-56 rounded-full bg-[var(--color-paper-2)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-muted)]">
+        <span className="mt-1 inline-flex max-w-56 truncate rounded-full bg-[var(--color-paper-2)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-muted)]" title={row.delivery_ward ?? undefined}>
+          {row.delivery_ward ?? "Chưa có phường"}
+        </span>
+        <span className="mt-1 inline-flex max-w-56 truncate rounded-full bg-[var(--color-paper-2)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-muted)]" title={row.pickup_district ?? undefined}>
           Pick: {row.pickup_district ?? "—"}
         </span>
       </td>
@@ -613,6 +726,7 @@ function EmptyState({ filters }: { filters: PerformanceFilters }) {
   const scope = [
     filters.kv === "all" ? "KV5/KV6" : filters.kv,
     filters.district === "all" ? "tất cả quận giao" : filters.district,
+    filters.ward === "all" ? "tất cả phường" : filters.ward,
     filters.cot === "all" ? "tất cả COT" : filters.cot,
   ].join(" · ");
 

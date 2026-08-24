@@ -36,6 +36,7 @@ async function PerformanceContent({
     filters.q,
     filters.kv,
     filters.district,
+    filters.ward,
     filters.cot,
     filters.sort,
     filters.dir,
