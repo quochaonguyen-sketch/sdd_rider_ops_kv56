@@ -4,13 +4,11 @@ import { ReturnOrderFilters } from "@/components/return-orders/return-order-filt
 import { ReturnOrderLookupScanner } from "@/components/return-orders/return-order-lookup-scanner";
 import { ReturnRiderAssignment } from "@/components/return-orders/return-rider-assignment";
 import { ReturnHandoverScanner } from "@/components/return-orders/return-handover-scanner";
+import { ReturnOrdersSwitcher } from "@/components/return-orders/return-orders-tabs";
 import { ReturningRiderBoard } from "@/components/return-orders/returning-rider-board";
-import {
-  getReturnDriverCots,
-  getReturnOrders,
-  parseReturnOrderFilters,
-  RETURN_ORDER_DISTRICTS,
-} from "@/lib/return-orders/return-orders";
+import { ReturnPivotBoard } from "@/components/return-orders/return-dispatch-pivot";
+import { ReturnAssignBoard } from "@/components/return-orders/return-assign-board";
+import { getReturnAssignData, getReturnDriverCots, getReturnOrders, getReturnPivotData, parseReturnOrderFilters, returnViewFrom, RETURN_ORDER_DISTRICTS } from "@/lib/return-orders/return-orders";
 
 function fmt(value: string | null) {
   if (!value) return "—";
@@ -96,10 +94,94 @@ export default async function ReturnOrdersPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const raw = await searchParams;
+  const view = returnViewFrom(Array.isArray(raw.view) ? raw.view[0] : raw.view);
+  if (view === "rider") {
+    return <ProtectedPage><ReturnRiderContent /></ProtectedPage>;
+  }
+  if (view === "pivot") {
+    return <ProtectedPage><ReturnPivotContent /></ProtectedPage>;
+  }
   return (
     <ProtectedPage>
       <ReturnOrdersContent searchParams={searchParams} />
     </ProtectedPage>
+  );
+}
+
+async function ReturnRiderContent() {
+  let result;
+  try {
+    result = await getReturnOrders({ q: "", status: "", district: "", sort: "district_ward", page: 1, pageSize: 50 });
+  } catch (error) {
+    return (
+      <section className="return-orders-page">
+        <ReturnOrdersSwitcher />
+        <div className="return-error" role="alert">
+          <strong>Không tải được danh sách rider trả.</strong>
+          <span>{errorMessage(error)}</span>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="return-orders-page">
+      <ReturnOrdersSwitcher />
+      <header className="return-title">
+        <div className="return-title-copy">
+          <p>RETURN OPERATIONS</p>
+          <h1>Rider đang trả hàng</h1>
+          <span>Danh sách rider đã nhận trả và kế hoạch trả theo zone/COT.</span>
+        </div>
+        <div className="return-sync">
+          <span>Dữ liệu snapshot</span>
+          <strong>{fmt(result.snapshotAt)}</strong>
+          <small>Mốc “Delivering time” lấy từ trường SPX delivering_time.</small>
+        </div>
+      </header>
+
+      <dl className="return-stats is-two-state" aria-label="Tổng quan hàng tồn và đang trả">
+        <div className="is-backlog">
+          <dt><span aria-hidden="true" />Tồn</dt>
+          <dd>{(result.summary.fmHub + result.summary.lmHub).toLocaleString("vi-VN")}</dd>
+          <small>Đơn đang chờ rider trả</small>
+        </div>
+        <div className="is-returning">
+          <dt><span aria-hidden="true" />Đang trả</dt>
+          <dd>{result.summary.returning.toLocaleString("vi-VN")}</dd>
+          <small>Đã có rider nhận trả</small>
+        </div>
+      </dl>
+
+      <ReturningRiderBoard riders={result.summary.returningRiders} totalOrders={result.summary.returning} />
+    </section>
+  );
+}
+
+async function ReturnPivotContent() {
+  let assignData;
+  let pivotData;
+  try {
+    [assignData, pivotData] = await Promise.all([getReturnAssignData(), getReturnPivotData()]);
+  } catch (error) {
+    return (
+      <section className="return-orders-page">
+        <ReturnOrdersSwitcher />
+        <div className="return-error" role="alert">
+          <strong>Không tải được dữ liệu phân công.</strong>
+          <span>{errorMessage(error)}</span>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="return-orders-page">
+      <ReturnOrdersSwitcher />
+      <ReturnAssignBoard data={assignData} />
+      <ReturnPivotBoard data={pivotData} />
+    </section>
   );
 }
 
@@ -116,6 +198,7 @@ async function ReturnOrdersContent({
   } catch (error) {
     return (
       <section className="return-orders-page">
+        <ReturnOrdersSwitcher />
         <div className="return-error" role="alert">
           <strong>Không tải được dữ liệu hàng trả.</strong>
           <span>{errorMessage(error)}</span>
@@ -154,6 +237,8 @@ async function ReturnOrdersContent({
         </div>
       </header>
 
+      <ReturnOrdersSwitcher />
+
       <dl className="return-stats is-two-state" aria-label="Tổng quan hàng tồn và đang trả">
         <div className="is-backlog">
           <dt><span aria-hidden="true" />Tồn</dt>
@@ -166,11 +251,6 @@ async function ReturnOrdersContent({
           <small>Đã có rider nhận trả</small>
         </div>
       </dl>
-
-      <ReturningRiderBoard
-        riders={result.summary.returningRiders}
-        totalOrders={result.summary.returning}
-      />
 
       {Object.keys(result.summary.districts).length ? (
         <div className="return-district-block">

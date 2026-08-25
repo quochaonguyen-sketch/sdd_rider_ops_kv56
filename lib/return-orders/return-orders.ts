@@ -529,3 +529,298 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
     },
   };
 }
+
+export type ReturnView = "ledger" | "rider" | "pivot";
+
+export function returnViewFrom(value: string | null | undefined): ReturnView {
+  return value === "rider" ? "rider" : value === "pivot" ? "pivot" : "ledger";
+}
+
+export type ReturnPivotCell = { cot1: number; cot2: number; unassigned: number; total: number };
+export type ReturnPivotRider = {
+  riderCode: string;
+  riderName: string;
+  kv: string;
+  cot: string;
+  orders: ReturnPivotCell;
+};
+export type ReturnPivotData = {
+  snapshotAt: string | null;
+  totalOrders: number;
+  unassigned: number;
+  rows: ReturnPivotRider[];
+};
+
+function emptyPivotCell(): ReturnPivotCell {
+  return { cot1: 0, cot2: 0, unassigned: 0, total: 0 };
+}
+
+function addToPivotCell(cell: ReturnPivotCell, cot: string) {
+  const key = cot === "COT1" ? "cot1" : cot === "COT2" ? "cot2" : "unassigned";
+  cell[key] += 1;
+  cell.total += 1;
+}
+
+function normalizeCotLabel(value: string | null | undefined): "COT1" | "COT2" | "" {
+  const normalized = (value ?? "").trim().toLocaleUpperCase("vi").replace(/\s+/g, " ");
+  if (!normalized || normalized === "ON") return "";
+  if (/^(COT)?1$/.test(normalized)) return "COT1";
+  if (/^(COT)?2$/.test(normalized)) return "COT2";
+  return "";
+}
+
+export async function getReturnPivotData(): Promise<ReturnPivotData> {
+  const supabase = createAdminClient();
+  const { data: latest, error: latestError } = await supabase
+    .from("return_order_snapshots")
+    .select("snapshot_id,snapshot_at")
+    .order("snapshot_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestError) throw latestError;
+  if (!latest) {
+    return { snapshotAt: null, totalOrders: 0, unassigned: 0, rows: [] };
+  }
+
+  const pageSize = 1000;
+  const orders: Array<{
+    shipment_id: string;
+    return_driver_id: string;
+    return_driver_name: string;
+    return_riders_cot1: string;
+    return_riders_cot2: string;
+  }> = [];
+  for (let from = 0; ; from += pageSize) {
+    const result = await supabase
+      .from("return_order_snapshots")
+      .select("shipment_id,return_driver_id,return_driver_name,return_riders_cot1,return_riders_cot2")
+      .eq("snapshot_id", latest.snapshot_id)
+      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("order_status", [10, 67, 72])
+      .range(from, from + pageSize - 1);
+    if (result.error) throw result.error;
+    const page = (result.data ?? []) as typeof orders;
+    orders.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  const { data: assignments, error: assignmentError } = await supabase
+    .from("return_order_assignments")
+    .select("shipment_id,rider_code,rider_name,cot");
+  if (assignmentError) throw assignmentError;
+
+  const { data: riderProfiles, error: riderError } = await supabase
+    .from("riders")
+    .select("rider_code,full_name,kv,cot");
+  if (riderError) throw riderError;
+
+  const assignmentsByShipment = new Map(
+    (assignments ?? []).map((assignment) => [assignment.shipment_id, assignment]),
+  );
+  const normalizeIdentity = (value: unknown) =>
+    String(value ?? "").trim().toLocaleLowerCase("vi");
+  const riderByCode = new Map(
+    (riderProfiles ?? []).map((rider) => [normalizeIdentity(rider.rider_code), rider]),
+  );
+  const riderByName = new Map(
+    (riderProfiles ?? [])
+      .filter((rider) => normalizeIdentity(rider.full_name))
+      .map((rider) => [normalizeIdentity(rider.full_name), rider]),
+  );
+  const riderProfileFor = (id: unknown, name: unknown) =>
+    riderByCode.get(normalizeIdentity(id)) ?? riderByName.get(normalizeIdentity(name));
+
+  const riderMap = new Map<
+    string,
+    { riderCode: string; riderName: string; kv: string; cot: string; orders: ReturnPivotCell }
+  >();
+  let unassigned = 0;
+
+  const ensureRider = (riderCode: string, riderName: string, profile: { full_name?: string | null; kv?: string | null; cot?: string | null } | undefined) => {
+    const key = normalizeIdentity(riderCode) || normalizeIdentity(riderName);
+    if (!key) return null;
+    const existing = riderMap.get(key);
+    if (existing) {
+      if (!existing.kv && profile?.kv) existing.kv = String(profile.kv).trim();
+      if (!existing.cot && profile?.cot) existing.cot = String(profile.cot).trim();
+      return existing;
+    }
+    const entry = {
+      riderCode,
+      riderName: String(profile?.full_name || riderName || riderCode).trim(),
+      kv: String(profile?.kv || "").trim(),
+      cot: String(profile?.cot || "").trim(),
+      orders: emptyPivotCell(),
+    };
+    riderMap.set(key, entry);
+    return entry;
+  };
+
+  for (const row of orders) {
+    const assignment = assignmentsByShipment.get(row.shipment_id);
+    const driverId = String(assignment?.rider_code || row.return_driver_id || "").trim();
+    const driverName = String(assignment?.rider_name || row.return_driver_name || "").trim();
+
+    if (!driverId && !driverName) {
+      unassigned += 1;
+      continue;
+    }
+
+    const profile = riderProfileFor(driverId, driverName);
+    const assignedCot = normalizeCotLabel(assignment?.cot || profile?.cot);
+    const entry = ensureRider(driverId, driverName, profile);
+    if (!entry) {
+      unassigned += 1;
+      continue;
+    }
+    addToPivotCell(entry.orders, assignedCot || normalizeCotLabel(entry.cot) || "");
+  }
+
+  const rows: ReturnPivotRider[] = Array.from(riderMap.values())
+    .map(({ orders, ...rider }) => ({ ...rider, orders }))
+    .sort(
+      (a, b) =>
+        (a.cot === b.cot ? 0 : a.cot === "COT1" ? -1 : b.cot === "COT1" ? 1 : a.cot === "COT2" ? -1 : 1) ||
+        b.orders.total - a.orders.total ||
+        a.riderName.localeCompare(b.riderName, "vi"),
+    );
+  const totalOrders = rows.reduce((sum, rider) => sum + rider.orders.total, 0);
+
+  return { snapshotAt: latest.snapshot_at, totalOrders, unassigned, rows };
+}
+
+export type ReturnAssignableRider = {
+  id: string;
+  riderCode: string;
+  riderName: string;
+  kv: string;
+  cot: string;
+  zone: string;
+};
+
+export type ReturnAssignableOrder = {
+  shipmentId: string;
+  status: number;
+  district: string;
+  ward: string;
+  area: string;
+  zone: string;
+  createdTime: string | null;
+  assignedRider: { id: string; riderCode: string; riderName: string; kv: string } | null;
+};
+
+export type ReturnAssignData = {
+  snapshotAt: string | null;
+  riders: ReturnAssignableRider[];
+  orders: ReturnAssignableOrder[];
+};
+
+function isKv56Value(value: string | null | undefined) {
+  const normalized = (value ?? "").replace(/\s+/g, " ").trim().toUpperCase();
+  return /^(?:(?:KV|KHU)[\s.]*)?[56]$/.test(normalized);
+}
+
+export async function getReturnAssignData(): Promise<ReturnAssignData> {
+  const supabase = createAdminClient();
+  const { data: latest, error: latestError } = await supabase
+    .from("return_order_snapshots")
+    .select("snapshot_id,snapshot_at")
+    .order("snapshot_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestError) throw latestError;
+
+  const [{ data: riders, error: riderError }, { data: assignments, error: assignmentError }, { data: zones, error: zonesError }] =
+    await Promise.all([
+      supabase
+        .from("riders")
+        .select("id,rider_code,full_name,cot,kv,zone_id")
+        .eq("status", "active")
+        .order("full_name"),
+      supabase
+        .from("return_order_assignments")
+        .select("shipment_id,rider_id,rider_code,rider_name"),
+      supabase
+        .from("zones")
+        .select("id,name"),
+    ]);
+  if (riderError) throw riderError;
+  if (assignmentError) throw assignmentError;
+  if (zonesError) throw zonesError;
+
+  const zoneNameById = new Map((zones ?? []).map((zone) => [String(zone.id), String(zone.name).trim()]));
+
+  const kv56Riders = (riders ?? [])
+    .filter((rider) => isKv56Value(rider.kv))
+    .map((rider) => ({
+      id: String(rider.id),
+      riderCode: String(rider.rider_code).trim(),
+      riderName: String(rider.full_name || rider.rider_code).trim(),
+      kv: String(rider.kv || "").trim(),
+      cot: String(rider.cot || "").trim(),
+      zone: rider.zone_id ? zoneNameById.get(String(rider.zone_id)) ?? "" : "",
+    }))
+    .sort((a, b) => a.riderName.localeCompare(b.riderName, "vi"));
+
+  const assignmentByShipment = new Map(
+    (assignments ?? []).map((assignment) => [assignment.shipment_id, assignment]),
+  );
+  const riderById = new Map(kv56Riders.map((rider) => [rider.id, rider]));
+  const riderByCode = new Map(kv56Riders.map((rider) => [rider.riderCode, rider]));
+
+  if (!latest) {
+    return { snapshotAt: null, riders: kv56Riders, orders: [] };
+  }
+
+  const pageSize = 1000;
+  const backlogOrders: Array<{
+    shipment_id: string;
+    order_status: number;
+    seller_district: string;
+    seller_ward: string;
+    seller_new_ward: string;
+    seller_area: string;
+    return_zone: string;
+    create_time: string | null;
+  }> = [];
+  for (let from = 0; ; from += pageSize) {
+    const result = await supabase
+      .from("return_order_snapshots")
+      .select("shipment_id,order_status,seller_district,seller_ward,seller_new_ward,seller_area,return_zone,create_time")
+      .eq("snapshot_id", latest.snapshot_id)
+      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("order_status", [10, 67])
+      .order("create_time", { ascending: true, nullsFirst: false })
+      .range(from, from + pageSize - 1);
+    if (result.error) throw result.error;
+    const page = (result.data ?? []) as typeof backlogOrders;
+    backlogOrders.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  const orders: ReturnAssignableOrder[] = backlogOrders.map((row) => {
+    const assignment = assignmentByShipment.get(row.shipment_id);
+    const assignedMember = assignment
+      ? riderById.get(String(assignment.rider_id ?? "")) ||
+        riderByCode.get(String(assignment.rider_code ?? "").trim()) ||
+        {
+          id: String(assignment.rider_id ?? ""),
+          riderCode: String(assignment.rider_code ?? "").trim(),
+          riderName: String(assignment.rider_name ?? "").trim(),
+          kv: "",
+        }
+      : null;
+    return {
+      shipmentId: row.shipment_id,
+      status: row.order_status,
+      district: String(row.seller_district || "").trim(),
+      ward: String(row.seller_new_ward || row.seller_ward || "").trim(),
+      area: String(row.seller_area || "").trim(),
+      zone: String(row.return_zone || "").trim(),
+      createdTime: row.create_time,
+      assignedRider: assignedMember,
+    };
+  });
+
+  return { snapshotAt: latest.snapshot_at, riders: kv56Riders, orders };
+}
