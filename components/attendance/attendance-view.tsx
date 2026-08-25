@@ -136,6 +136,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   const [success, setSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const realtimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressRealtimeUntilRef = useRef(0);
   const sheetSyncAbortRef = useRef<AbortController | null>(null);
   const busyRef = useRef(false);
   const deferredQuery = useDeferredValue(query);
@@ -166,7 +167,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   }, [importing, savingCells]);
 
   const requestRealtimeRefresh = useCallback(() => {
-    if (busyRef.current) return;
+    if (busyRef.current || Date.now() < suppressRealtimeUntilRef.current) return;
     if (realtimeTimerRef.current) clearTimeout(realtimeTimerRef.current);
     realtimeTimerRef.current = setTimeout(() => {
       void load();
@@ -301,6 +302,7 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
       return false;
     }
 
+    suppressRealtimeUntilRef.current = Date.now() + 2000;
     const changedKeys = new Set(keys);
     const riderIdByCode = new Map(riders.map((rider) => [rider.rider_code, rider.id]));
     setLogs((current) => [

@@ -84,8 +84,10 @@ export function resolveOffScheduleSpreadsheetId(sheetUrl?: string | null) {
   }
 
   const configuredId = extractSpreadsheetId(
-    process.env.OFF_SCHEDULE_SPREADSHEET_ID
-      || process.env.THI_CONG_PLAN_SPREADSHEET_ID
+    cleanGoogleCredential(
+      process.env.OFF_SCHEDULE_SPREADSHEET_ID
+      || process.env.THI_CONG_PLAN_SPREADSHEET_ID,
+    )
       || "1nc-jsQGOdUHIGjmIWQf01HUXJGS82XYglj46eXSzp8c",
   );
   if (configuredId) return configuredId;

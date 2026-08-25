@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeSearch } from "@/lib/gpt-actions/server";
 import { resolveWorkDateScope, type WorkDateScope } from "@/lib/ai/work-date";
+import { fetchOffScheduleFromSheet } from "@/lib/ai/sheets-off-schedule";
 
 type RiderRow = {
   id: string;
@@ -80,7 +81,7 @@ export async function loadAiOperationsContext({
   const workDate = dateScope.referenceDate;
   const includeVolume = /volume|pickup|delivery|đơn|don/i.test(question);
 
-  const [riderResult, attendanceResult, offRequestResult, latestRealtimeResult, deliveryVolumeResult, pickupVolumeResult] = await Promise.all([
+  const [riderResult, attendanceResult, offRequestResult, latestRealtimeResult, deliveryVolumeResult, pickupVolumeResult, sheetOffResult] = await Promise.all([
     admin
       .from("riders")
       .select("id,rider_code,full_name,kv,cot,status,delivery_district,delivery_ward,pickup_district,pickup_ward")
@@ -112,6 +113,7 @@ export async function loadAiOperationsContext({
     includeVolume
       ? admin.from("pickup_volume").select("district,area,total_orders").gte("report_date", dateScope.start).lte("report_date", dateScope.end).limit(5000)
       : Promise.resolve({ data: [], error: null }),
+    fetchOffScheduleFromSheet(dateScope.start, dateScope.end),
   ]);
 
   const firstError =
@@ -126,6 +128,8 @@ export async function loadAiOperationsContext({
   const riders = (riderResult.data ?? []) as RiderRow[];
   const attendance = (attendanceResult.data ?? []) as AttendanceRow[];
   const approvedOffRequests = (offRequestResult.data ?? []) as OffRequestRow[];
+  const { offEntries: sheetOffEntries, coveredKeys: sheetCoveredKeys } = sheetOffResult;
+  const useSheetData = sheetOffEntries.length > 0;
   const latestSnapshot = latestRealtimeResult.data ?? null;
   let realtime: RealtimeRow[] = [];
 
@@ -156,16 +160,29 @@ export async function loadAiOperationsContext({
 
   const requestedOffScope = resolveOffScope(questionNormalized, riders);
   const offRows = [
+    // 1. Google Sheet entries (source of truth — highest priority)
+    ...sheetOffEntries.map((entry) => ({
+      rider_id: null as string | null,
+      rider_code: entry.rider_code,
+      status: entry.off_status,
+      work_date: entry.work_date,
+      source: "google_sheet" as const,
+    })),
+    // 2. Supabase attendance OFF entries (skip rider+dates already in sheet)
     ...attendance
       .filter((row) => offStatuses.has(row.status))
+      .filter((row) => !useSheetData || !sheetCoveredKeys.has(`${row.rider_code}|${row.work_date}`))
       .map((row) => ({ ...row, source: "attendance_logs" as const })),
-    ...approvedOffRequests.map((row) => ({
-      rider_id: row.rider_id,
-      rider_code: row.rider_code,
-      status: offRequestStatus[row.request_type],
-      work_date: row.off_date,
-      source: "rider_off_requests" as const,
-    })),
+    // 3. Approved off requests (skip rider+dates already in sheet)
+    ...approvedOffRequests
+      .filter((row) => !useSheetData || !sheetCoveredKeys.has(`${row.rider_code}|${row.off_date}`))
+      .map((row) => ({
+        rider_id: row.rider_id,
+        rider_code: row.rider_code,
+        status: offRequestStatus[row.request_type],
+        work_date: row.off_date,
+        source: "rider_off_requests" as const,
+      })),
   ];
   const offByRiderDate = new Map<string, {
     rider_code: string;
@@ -267,7 +284,11 @@ export async function loadAiOperationsContext({
       off_riders_returned: offRiders.length,
       off_riders_truncated: scopedOffRiders.length > offRiders.length,
       included_off_statuses: Array.from(offStatuses),
-      included_sources: ["attendance_logs", "approved rider_off_requests"],
+      included_sources: [
+        ...(useSheetData ? ["google_sheet (Lịch Rider — nguồn chính xác nhất)"] : []),
+        "attendance_logs",
+        "approved rider_off_requests",
+      ],
       definition: "Chỉ tính rider active và khử trùng theo rider_code + work_date. Câu hỏi theo tuần dùng đủ thứ Hai–Chủ nhật và giữ từng ngày OFF. Nếu câu hỏi nói giao/delivery thì lọc delivery district; nói pickup/lấy hàng thì lọc pickup district; nếu không nói rõ mới dùng khu vực vận hành mặc định.",
     },
     realtime_delivery: {
@@ -283,7 +304,13 @@ export async function loadAiOperationsContext({
     matched_riders: matchedRiders,
   };
 
-  const sources = ["riders", "attendance_logs", "rider_off_requests", "realtime_delivery_riders"];
+  const sources = [
+    "riders",
+    ...(useSheetData ? ["google_sheet (Lịch Rider)"] : []),
+    "attendance_logs",
+    "rider_off_requests",
+    "realtime_delivery_riders",
+  ];
   if (includeVolume) {
     data.volume = {
       delivery: summarizeVolume((deliveryVolumeResult.data ?? []) as VolumeRow[]),
@@ -298,7 +325,7 @@ export async function loadAiOperationsContext({
     work_date: workDate,
     date_scope: dateScope,
     page_path: pagePath,
-    scope_note: `Dữ liệu lịch theo date_scope ${dateScope.label}; realtime chỉ dùng ngày tham chiếu ${workDate}. Danh sách OFF hợp nhất OFF tuần, OFF phép và OFF đột xuất từ attendance_logs với yêu cầu OFF đã duyệt, sau đó khử trùng theo rider + ngày. Câu hỏi nhắc tên rider phải dùng attendance.matched_rider_off_schedule. Chỉ gọi danh sách là đầy đủ khi off_riders_truncated=false.`,
+    scope_note: `Dữ liệu lịch theo date_scope ${dateScope.label}; realtime chỉ dùng ngày tham chiếu ${workDate}. Danh sách OFF hợp nhất từ Google Sheet "Lịch Rider" (nguồn chính xác nhất), attendance_logs và rider_off_requests. Khi Google Sheet có dữ liệu, nó ghi đè dữ liệu Supabase cho cùng rider+ngày. Câu hỏi nhắc tên rider phải dùng attendance.matched_rider_off_schedule. Chỉ gọi danh sách là đầy đủ khi off_riders_truncated=false.`,
     sources,
     data,
   };
