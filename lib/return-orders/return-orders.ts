@@ -536,12 +536,18 @@ export function returnViewFrom(value: string | null | undefined): ReturnView {
   return value === "rider" ? "rider" : value === "pivot" ? "pivot" : "ledger";
 }
 
-export type ReturnPivotCell = { cot1: number; cot2: number; unassigned: number; total: number };
+export type ReturnPivotCell = { cot1: number; cot2: number; unassigned: number; total: number; cot1Ids: string[]; cot2Ids: string[]; unassignedIds: string[] };
 export type ReturnPivotRider = {
   riderCode: string;
   riderName: string;
   kv: string;
   cot: string;
+  district: string;
+  ward: string;
+  pickupZones: string[];
+  orderDistricts: string[];
+  orderWards: string[];
+  oldestAt: string | null;
   orders: ReturnPivotCell;
 };
 export type ReturnPivotData = {
@@ -552,17 +558,19 @@ export type ReturnPivotData = {
 };
 
 function emptyPivotCell(): ReturnPivotCell {
-  return { cot1: 0, cot2: 0, unassigned: 0, total: 0 };
+  return { cot1: 0, cot2: 0, unassigned: 0, total: 0, cot1Ids: [], cot2Ids: [], unassignedIds: [] };
 }
 
-function addToPivotCell(cell: ReturnPivotCell, cot: string) {
+function addToPivotCell(cell: ReturnPivotCell, cot: string, shipmentId: string) {
   const key = cot === "COT1" ? "cot1" : cot === "COT2" ? "cot2" : "unassigned";
-  cell[key] += 1;
+  const idsKey = cot === "COT1" ? "cot1Ids" : cot === "COT2" ? "cot2Ids" : "unassignedIds";
+  (cell[key] as number) += 1;
   cell.total += 1;
+  (cell[idsKey] as string[]).push(shipmentId);
 }
 
 function normalizeCotLabel(value: string | null | undefined): "COT1" | "COT2" | "" {
-  const normalized = (value ?? "").trim().toLocaleUpperCase("vi").replace(/\s+/g, " ");
+  const normalized = (value ?? "").trim().toLocaleUpperCase("vi").replace(/\s+/g, "");
   if (!normalized || normalized === "ON") return "";
   if (/^(COT)?1$/.test(normalized)) return "COT1";
   if (/^(COT)?2$/.test(normalized)) return "COT2";
@@ -589,11 +597,15 @@ export async function getReturnPivotData(): Promise<ReturnPivotData> {
     return_driver_name: string;
     return_riders_cot1: string;
     return_riders_cot2: string;
+    create_time: string | null;
+    seller_district: string;
+    seller_ward: string;
+    seller_new_ward: string;
   }> = [];
   for (let from = 0; ; from += pageSize) {
     const result = await supabase
       .from("return_order_snapshots")
-      .select("shipment_id,return_driver_id,return_driver_name,return_riders_cot1,return_riders_cot2")
+      .select("shipment_id,return_driver_id,return_driver_name,return_riders_cot1,return_riders_cot2,create_time,seller_district,seller_ward,seller_new_ward")
       .eq("snapshot_id", latest.snapshot_id)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
       .in("order_status", [10, 67, 72])
@@ -611,11 +623,14 @@ export async function getReturnPivotData(): Promise<ReturnPivotData> {
 
   const { data: riderProfiles, error: riderError } = await supabase
     .from("riders")
-    .select("rider_code,full_name,kv,cot");
+    .select("rider_code,full_name,kv,cot,delivery_district,delivery_ward,point_name");
   if (riderError) throw riderError;
 
+  // Chỉ đếm assignment còn nằm trong snapshot hiện tại (tránh assignment mồ côi)
+  const snapshotOrderIds = new Set(orders.map((order) => order.shipment_id));
+  const activeAssignments = (assignments ?? []).filter((assignment) => snapshotOrderIds.has(assignment.shipment_id));
   const assignmentsByShipment = new Map(
-    (assignments ?? []).map((assignment) => [assignment.shipment_id, assignment]),
+    activeAssignments.map((assignment) => [assignment.shipment_id, assignment]),
   );
   const normalizeIdentity = (value: unknown) =>
     String(value ?? "").trim().toLocaleLowerCase("vi");
@@ -632,17 +647,20 @@ export async function getReturnPivotData(): Promise<ReturnPivotData> {
 
   const riderMap = new Map<
     string,
-    { riderCode: string; riderName: string; kv: string; cot: string; orders: ReturnPivotCell }
+    { riderCode: string; riderName: string; kv: string; cot: string; district: string; ward: string; pickupZones: string[]; orderDistricts: Set<string>; orderWards: Set<string>; oldestAt: string | null; orders: ReturnPivotCell }
   >();
   let unassigned = 0;
 
-  const ensureRider = (riderCode: string, riderName: string, profile: { full_name?: string | null; kv?: string | null; cot?: string | null } | undefined) => {
+  const ensureRider = (riderCode: string, riderName: string, profile: { full_name?: string | null; kv?: string | null; cot?: string | null; delivery_district?: string | null; delivery_ward?: string | null; point_name?: string | null } | undefined) => {
     const key = normalizeIdentity(riderCode) || normalizeIdentity(riderName);
     if (!key) return null;
     const existing = riderMap.get(key);
     if (existing) {
       if (!existing.kv && profile?.kv) existing.kv = String(profile.kv).trim();
       if (!existing.cot && profile?.cot) existing.cot = String(profile.cot).trim();
+      if (!existing.district && profile?.delivery_district) existing.district = String(profile.delivery_district).trim();
+      if (!existing.ward && profile?.delivery_ward) existing.ward = String(profile.delivery_ward).trim();
+      if (existing.pickupZones.length === 0 && profile?.point_name) existing.pickupZones = splitPickupZones(profile.point_name);
       return existing;
     }
     const entry = {
@@ -650,6 +668,12 @@ export async function getReturnPivotData(): Promise<ReturnPivotData> {
       riderName: String(profile?.full_name || riderName || riderCode).trim(),
       kv: String(profile?.kv || "").trim(),
       cot: String(profile?.cot || "").trim(),
+      district: String(profile?.delivery_district || "").trim(),
+      ward: String(profile?.delivery_ward || "").trim(),
+      pickupZones: splitPickupZones(profile?.point_name),
+      orderDistricts: new Set<string>(),
+      orderWards: new Set<string>(),
+      oldestAt: null as string | null,
       orders: emptyPivotCell(),
     };
     riderMap.set(key, entry);
@@ -658,26 +682,34 @@ export async function getReturnPivotData(): Promise<ReturnPivotData> {
 
   for (const row of orders) {
     const assignment = assignmentsByShipment.get(row.shipment_id);
-    const driverId = String(assignment?.rider_code || row.return_driver_id || "").trim();
-    const driverName = String(assignment?.rider_name || row.return_driver_name || "").trim();
-
-    if (!driverId && !driverName) {
+    if (!assignment?.rider_code) {
       unassigned += 1;
       continue;
     }
+    const driverId = String(assignment.rider_code).trim();
+    const driverName = String(assignment.rider_name || "").trim();
 
     const profile = riderProfileFor(driverId, driverName);
-    const assignedCot = normalizeCotLabel(assignment?.cot || profile?.cot);
+    const assignedCot = normalizeCotLabel(assignment.cot || profile?.cot);
     const entry = ensureRider(driverId, driverName, profile);
     if (!entry) {
       unassigned += 1;
       continue;
     }
-    addToPivotCell(entry.orders, assignedCot || normalizeCotLabel(entry.cot) || "");
+    if (row.create_time && (!entry.oldestAt || row.create_time < entry.oldestAt)) entry.oldestAt = row.create_time;
+    addToPivotCell(entry.orders, assignedCot || normalizeCotLabel(entry.cot) || "", row.shipment_id);
+    const orderDistrict = String((row as any).seller_district || "").trim();
+    const orderWard = String((row as any).seller_new_ward || (row as any).seller_ward || "").trim();
+    if (orderDistrict) entry.orderDistricts.add(orderDistrict);
+    if (orderWard) entry.orderWards.add(orderWard);
   }
 
-  const rows: ReturnPivotRider[] = Array.from(riderMap.values())
-    .map(({ orders, ...rider }) => ({ ...rider, orders }))
+  const rows: ReturnPivotRider[] = Array.from(riderMap.values()).map(({ orders, orderDistricts, orderWards, ...rider }) => ({
+    ...rider,
+    orderDistricts: Array.from(orderDistricts),
+    orderWards: Array.from(orderWards),
+    orders,
+  }))
     .sort(
       (a, b) =>
         (a.cot === b.cot ? 0 : a.cot === "COT1" ? -1 : b.cot === "COT1" ? 1 : a.cot === "COT2" ? -1 : 1) ||
@@ -696,6 +728,7 @@ export type ReturnAssignableRider = {
   kv: string;
   cot: string;
   zone: string;
+  pickupZones: string[];
 };
 
 export type ReturnAssignableOrder = {
@@ -706,7 +739,7 @@ export type ReturnAssignableOrder = {
   area: string;
   zone: string;
   createdTime: string | null;
-  assignedRider: { id: string; riderCode: string; riderName: string; kv: string } | null;
+  assignedRider: { id: string; riderCode: string; riderName: string; kv: string; cot: string } | null;
 };
 
 export type ReturnAssignData = {
@@ -718,6 +751,13 @@ export type ReturnAssignData = {
 function isKv56Value(value: string | null | undefined) {
   const normalized = (value ?? "").replace(/\s+/g, " ").trim().toUpperCase();
   return /^(?:(?:KV|KHU)[\s.]*)?[56]$/.test(normalized);
+}
+
+function splitPickupZones(value: string | null | undefined) {
+  return String(value ?? "")
+    .split(/[;,]/)
+    .map((zone) => zone.trim())
+    .filter(Boolean);
 }
 
 export async function getReturnAssignData(): Promise<ReturnAssignData> {
@@ -734,12 +774,12 @@ export async function getReturnAssignData(): Promise<ReturnAssignData> {
     await Promise.all([
       supabase
         .from("riders")
-        .select("id,rider_code,full_name,cot,kv,zone_id")
+        .select("id,rider_code,full_name,cot,kv,zone_id,point_name")
         .eq("status", "active")
         .order("full_name"),
       supabase
         .from("return_order_assignments")
-        .select("shipment_id,rider_id,rider_code,rider_name"),
+        .select("shipment_id,rider_id,rider_code,rider_name,cot"),
       supabase
         .from("zones")
         .select("id,name"),
@@ -759,6 +799,7 @@ export async function getReturnAssignData(): Promise<ReturnAssignData> {
       kv: String(rider.kv || "").trim(),
       cot: String(rider.cot || "").trim(),
       zone: rider.zone_id ? zoneNameById.get(String(rider.zone_id)) ?? "" : "",
+      pickupZones: splitPickupZones(rider.point_name),
     }))
     .sort((a, b) => a.riderName.localeCompare(b.riderName, "vi"));
 
@@ -798,16 +839,25 @@ export async function getReturnAssignData(): Promise<ReturnAssignData> {
     if (page.length < pageSize) break;
   }
 
+  // Chỉ giữ assignment còn nằm trong snapshot hiện tại
+  const backlogOrderIds = new Set(backlogOrders.map((order) => order.shipment_id));
+  const activeAssignmentByShipment = new Map(
+    [...assignmentByShipment].filter(([shipmentId]) => backlogOrderIds.has(shipmentId)),
+  );
+
   const orders: ReturnAssignableOrder[] = backlogOrders.map((row) => {
-    const assignment = assignmentByShipment.get(row.shipment_id);
-    const assignedMember = assignment
+    const assignment = activeAssignmentByShipment.get(row.shipment_id);
+    const assignedProfile = assignment
       ? riderById.get(String(assignment.rider_id ?? "")) ||
-        riderByCode.get(String(assignment.rider_code ?? "").trim()) ||
-        {
-          id: String(assignment.rider_id ?? ""),
-          riderCode: String(assignment.rider_code ?? "").trim(),
-          riderName: String(assignment.rider_name ?? "").trim(),
-          kv: "",
+        riderByCode.get(String(assignment.rider_code ?? "").trim())
+      : null;
+    const assignedMember = assignment
+      ? {
+          id: String(assignedProfile?.id ?? assignment.rider_id ?? ""),
+          riderCode: String(assignment.rider_code || assignedProfile?.riderCode || "").trim(),
+          riderName: String(assignment.rider_name || assignedProfile?.riderName || "").trim(),
+          kv: String(assignedProfile?.kv || "").trim(),
+          cot: String(assignment.cot || assignedProfile?.cot || "").trim(),
         }
       : null;
     return {

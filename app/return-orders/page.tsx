@@ -179,6 +179,18 @@ async function ReturnPivotContent() {
   return (
     <section className="return-orders-page">
       <ReturnOrdersSwitcher />
+      <header className="return-pivot-page-head">
+        <div>
+          <p className="return-pivot-page-kicker">RETURN OPERATIONS / ASSIGNMENT DESK</p>
+          <h1>Gán rider theo tuyến trả</h1>
+          <span>Ưu tiên rider có zone trùng chính xác với đơn. Nếu chưa có người khớp, vẫn có thể chọn thủ công và theo dõi lại ở bảng pivot.</span>
+        </div>
+        <div className="return-pivot-page-snapshot">
+          <span>Snapshot</span>
+          <strong>{fmt(assignData.snapshotAt ?? pivotData.snapshotAt)}</strong>
+          <small>Zone khớp chính xác · COT1/COT2 có thể điều phối lại</small>
+        </div>
+      </header>
       <ReturnAssignBoard data={assignData} />
       <ReturnPivotBoard data={pivotData} />
     </section>

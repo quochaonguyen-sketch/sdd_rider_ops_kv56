@@ -1,7 +1,8 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState } from "react";
-import { Check, CheckCircle2, ChevronDown, CircleAlert, LoaderCircle, Sparkles, UserRoundPlus, X } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ArrowDownUp, Check, ChevronDown, CircleAlert, LoaderCircle, MapPinned, Search, Sparkles, UserRoundPlus, X } from "lucide-react";
 import type { ReturnAssignData } from "@/lib/return-orders/return-orders";
 import { cn } from "@/utils/cn";
 
@@ -10,6 +11,7 @@ type ReturnAssignBoardProps = {
 };
 
 type PerOrderState = "idle" | "saving" | "success" | "error";
+type OrderSort = "district" | "oldest" | "zone";
 
 function kvLabel(value: string) {
   const number = value.match(/\d+/)?.[0];
@@ -17,31 +19,53 @@ function kvLabel(value: string) {
 }
 
 function cotLabel(value: string) {
-  const normalized = value.trim().toUpperCase();
-  if (/^COT?1$|^1$/.test(normalized)) return "COT1";
-  if (/^COT?2$|^2$/.test(normalized)) return "COT2";
+  const normalized = value.trim().toUpperCase().replace(/\s+/g, "");
+  if (/^(COT)?1$/.test(normalized)) return "COT1";
+  if (/^(COT)?2$/.test(normalized)) return "COT2";
   return "Chưa rõ COT";
 }
 
 function normalizeZone(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[-_]/g, " ").trim().toLowerCase();
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "d")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toUpperCase();
 }
 
-function riderMatchesZone(riderZone: string, orderZone: string) {
-  if (!riderZone || !orderZone) return false;
-  const a = normalizeZone(riderZone);
-  const b = normalizeZone(orderZone);
-  return a === b || b.includes(a) || a.includes(b);
+function riderMatchesZone(riderZones: string[], orderZone: string) {
+  const target = normalizeZone(orderZone);
+  if (!target) return false;
+  return riderZones.some((zone) => normalizeZone(zone) === target);
+}
+
+function normalizeText(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
 export const ReturnAssignBoard = memo(function ReturnAssignBoard({ data }: ReturnAssignBoardProps) {
+  const router = useRouter();
+  const [orders, setOrders] = useState(data.orders);
   const [selectedRiderId, setSelectedRiderId] = useState<string>("");
   const [selectedShipments, setSelectedShipments] = useState<Set<string>>(new Set());
   const [state, setState] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
+  const [query, setQuery] = useState("");
+  const [districtFilter, setDistrictFilter] = useState("all");
+  const [wardFilter, setWardFilter] = useState("all");
+  const [sortOrder, setSortOrder] = useState<OrderSort>("district");
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
 
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [perOrder, setPerOrder] = useState<Record<string, { state: PerOrderState; message: string }>>({});
+  const [dropdownQuery, setDropdownQuery] = useState<Record<string, string>>({});
+  const [recentlyAssigned, setRecentlyAssigned] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setOrders(data.orders);
+  }, [data.orders]);
 
   const selectedRider = useMemo(
     () => data.riders.find((rider) => rider.id === selectedRiderId) ?? null,
@@ -49,43 +73,69 @@ export const ReturnAssignBoard = memo(function ReturnAssignBoard({ data }: Retur
   );
 
   const unassignedShipments = useMemo(
-    () => new Set(data.orders.filter((order) => !order.assignedRider).map((order) => order.shipmentId)),
-    [data.orders],
+    () => new Set(orders.filter((order) => !order.assignedRider).map((order) => order.shipmentId)),
+    [orders],
   );
-  const filteredOrders = useMemo(() => data.orders, [data.orders]);
+  const districtOptions = useMemo(
+    () => Array.from(new Set(orders.map((order) => order.district).filter(Boolean))).sort((a, b) => a.localeCompare(b, "vi")),
+    [orders],
+  );
+  const wardOptions = useMemo(
+    () => Array.from(new Set(orders.filter((order) => districtFilter === "all" || order.district === districtFilter).map((order) => order.ward).filter(Boolean))).sort((a, b) => a.localeCompare(b, "vi")),
+    [orders, districtFilter],
+  );
+  const filteredOrders = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase("vi");
+    return orders
+      .filter((order) => {
+        const matchesQuery = !normalized || [order.shipmentId, order.district, order.ward, order.area, order.zone]
+          .some((value) => value.toLocaleLowerCase("vi").includes(normalized));
+        return matchesQuery
+          && (districtFilter === "all" || order.district === districtFilter)
+          && (wardFilter === "all" || order.ward === wardFilter);
+      })
+      .sort((a, b) => {
+        if (sortOrder === "oldest") return (a.createdTime ?? "").localeCompare(b.createdTime ?? "");
+        if (sortOrder === "zone") return a.zone.localeCompare(b.zone, "vi") || a.district.localeCompare(b.district, "vi") || a.ward.localeCompare(b.ward, "vi");
+        return a.district.localeCompare(b.district, "vi") || a.ward.localeCompare(b.ward, "vi") || a.zone.localeCompare(b.zone, "vi");
+      });
+  }, [orders, districtFilter, query, sortOrder, wardFilter]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
+  const paginatedOrders = useMemo(() => filteredOrders.slice((page - 1) * pageSize, page * pageSize), [filteredOrders, page]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, districtFilter, wardFilter, sortOrder]);
+
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
 
   const recommendedByOrder = useMemo(() => {
     const map = new Map<string, Set<string>>();
-    for (const order of data.orders) {
+    for (const order of orders) {
       const recommended = new Set<string>();
       for (const rider of data.riders) {
-        if (riderMatchesZone(rider.zone, order.zone)) recommended.add(rider.id);
+        if (riderMatchesZone(rider.pickupZones, order.zone)) recommended.add(rider.id);
       }
       map.set(order.shipmentId, recommended);
     }
     return map;
-  }, [data.orders, data.riders]);
+  }, [orders, data.riders]);
 
   const sortedRidersForOrder = useCallback(
-    (order: { shipmentId: string; zone: string }) => {
+    (order: { shipmentId: string }) => {
       const recommendedIds = recommendedByOrder.get(order.shipmentId) ?? new Set<string>();
       return [...data.riders].sort((a, b) => {
-        const aRec = recommendedIds.has(a.id) ? 0 : 1;
-        const bRec = recommendedIds.has(b.id) ? 0 : 1;
-        if (aRec !== bRec) return aRec - bRec;
+        const aTier = recommendedIds.has(a.id) ? 0 : 1;
+        const bTier = recommendedIds.has(b.id) ? 0 : 1;
+        if (aTier !== bTier) return aTier - bTier;
         return a.riderName.localeCompare(b.riderName, "vi");
       });
     },
     [data.riders, recommendedByOrder],
   );
-
-  const selectAllAssigned = useCallback(() => {
-    setSelectedShipments((current) => {
-      const next = new Set(current);
-      for (const id of unassignedShipments) next.add(id);
-      return next;
-    });
-  }, [unassignedShipments]);
 
   const toggleShipment = useCallback((shipmentId: string) => {
     setState("idle");
@@ -100,6 +150,7 @@ export const ReturnAssignBoard = memo(function ReturnAssignBoard({ data }: Retur
 
   const handleAssign = useCallback(async () => {
     if (!selectedRider || selectedShipments.size === 0) return;
+    const ids = new Set(selectedShipments);
     setState("saving");
     setMessage("");
     try {
@@ -107,7 +158,7 @@ export const ReturnAssignBoard = memo(function ReturnAssignBoard({ data }: Retur
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          shipment_ids: [...selectedShipments],
+          shipment_ids: [...ids],
           rider_code: selectedRider.riderCode,
         }),
       });
@@ -120,15 +171,25 @@ export const ReturnAssignBoard = memo(function ReturnAssignBoard({ data }: Retur
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || "Không thể gán rider");
       }
+      setOrders((prev) =>
+        prev.map((order) =>
+          ids.has(order.shipmentId)
+            ? { ...order, assignedRider: { id: selectedRider.id, riderCode: selectedRider.riderCode, riderName: selectedRider.riderName, kv: selectedRider.kv, cot: selectedRider.cot } }
+            : order,
+        ),
+      );
+      setRecentlyAssigned(new Set(ids));
+      window.setTimeout(() => setRecentlyAssigned(new Set()), 1400);
       setState("success");
-      setMessage(`Đã gán ${result.assigned_count ?? selectedShipments.size} đơn cho ${selectedRider.riderName}`);
+      setMessage(`Đã gán ${result.assigned_count ?? ids.size} đơn cho ${selectedRider.riderName}`);
       setSelectedShipments(new Set());
-      window.location.reload();
+      setSelectedRiderId("");
+      router.refresh();
     } catch (error) {
       setState("error");
       setMessage(error instanceof Error ? error.message : "Không thể gán rider");
     }
-  }, [selectedRider, selectedShipments]);
+  }, [selectedRider, selectedShipments, router]);
 
   const handleAssignOne = useCallback(async (shipmentId: string, riderId: string, riderName: string) => {
     const rider = data.riders.find((item) => item.id === riderId);
@@ -144,55 +205,102 @@ export const ReturnAssignBoard = memo(function ReturnAssignBoard({ data }: Retur
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || "Không thể gán rider");
       }
+      setOrders((prev) =>
+        prev.map((order) =>
+          order.shipmentId === shipmentId
+            ? { ...order, assignedRider: rider ? { id: rider.id, riderCode: rider.riderCode, riderName: rider.riderName, kv: rider.kv, cot: rider.cot } : { id: riderId, riderCode: "", riderName, kv: "", cot: "" } }
+            : order,
+        ),
+      );
+      setRecentlyAssigned((prev) => new Set(prev).add(shipmentId));
+      window.setTimeout(() => {
+        setRecentlyAssigned((prev) => {
+          const next = new Set(prev);
+          next.delete(shipmentId);
+          return next;
+        });
+      }, 1400);
       setPerOrder((current) => ({ ...current, [shipmentId]: { state: "success", message: `Đã gán ${riderName}` } }));
-      window.setTimeout(() => window.location.reload(), 900);
+      router.refresh();
+      window.setTimeout(() => {
+        setPerOrder((current) => {
+          const next = { ...current };
+          delete next[shipmentId];
+          return next;
+        });
+      }, 2500);
     } catch (error) {
       setPerOrder((current) => ({
         ...current,
         [shipmentId]: { state: "error", message: error instanceof Error ? error.message : "Không thể gán rider" },
       }));
     }
-  }, [data.riders]);
+  }, [data.riders, router]);
 
-  const selectedOrderRows = data.orders.filter((order) => selectedShipments.has(order.shipmentId));
+  const selectedOrderRows = orders.filter((order) => selectedShipments.has(order.shipmentId));
+
+  const visibleUnassignedShipments = useMemo(
+    () => new Set(filteredOrders.filter((order) => !order.assignedRider).map((order) => order.shipmentId)),
+    [filteredOrders],
+  );
+
+  const selectAllVisible = useCallback(() => {
+    setSelectedShipments((current) => {
+      const next = new Set(current);
+      for (const id of visibleUnassignedShipments) next.add(id);
+      return next;
+    });
+  }, [visibleUnassignedShipments]);
 
   return (
     <div className="return-assign-board" data-state={state}>
-      <div className="return-assign-controls">
-        <label className="return-assign-rider-select">
-          <span>Rider nhận trả (KV5 + KV6)</span>
-          <select value={selectedRiderId} onChange={(event) => { setSelectedRiderId(event.target.value); setState("idle"); setMessage(""); }}>
-            <option value="">Chọn rider...</option>
-            {data.riders.map((rider) => (
-              <option key={rider.id} value={rider.id}>
-                {rider.riderName} · {rider.riderCode} · {ktoolbarLabel(rider)}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="return-assign-actions">
-          <span className="return-assign-picked">{selectedShipments.size.toLocaleString("vi-VN")} đơn được chọn</span>
-          <button
-            type="button"
-            className="return-assign-select-all"
-            onClick={selectAllAssigned}
-            disabled={unassignedShipments.size === 0}
-          >
-            Chọn hết đơn chưa gán ({unassignedShipments.size.toLocaleString("vi-VN")})
-          </button>
-          <button
-            type="button"
-            className="return-assign-submit"
-            disabled={!selectedRider || selectedShipments.size === 0 || state === "saving"}
-            onClick={() => void handleAssign()}
-            data-state={state}
-          >
-            {state === "saving" ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : <UserRoundPlus size={15} aria-hidden="true" />}
-            <span>{state === "saving" ? "Đang gán..." : `Gán cho ${selectedRider?.riderName ?? "rider"}`}</span>
+      <section className="return-assign-filter-panel" aria-label="Lọc và sắp xếp đơn chờ gán">
+        <div className="return-assign-filter-heading">
+          <p>01 / FIND & SORT</p>
+          <h2>Thu hẹp danh sách đơn</h2>
+          <span>Zone trả khớp chính xác sẽ được đánh dấu trong cột Gán rider.</span>
+        </div>
+        <div className="return-assign-filter-grid">
+          <label className="return-assign-filter-search">
+            <span>Tìm đơn / zone / phường</span>
+            <span className="return-assign-search-control">
+              <Search size={15} aria-hidden="true" />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Mã đơn, GV_P5_SDD..." />
+            </span>
+          </label>
+          <label>
+            <span>Quận</span>
+            <select value={districtFilter} onChange={(event) => { setDistrictFilter(event.target.value); setWardFilter("all"); }}>
+              <option value="all">Tất cả quận</option>
+              {districtOptions.map((district) => <option key={district} value={district}>{district}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Phường</span>
+            <select value={wardFilter} onChange={(event) => setWardFilter(event.target.value)}>
+              <option value="all">Tất cả phường</option>
+              {wardOptions.map((ward) => <option key={ward} value={ward}>{ward}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Sắp xếp</span>
+            <span className="return-assign-sort-control">
+              <ArrowDownUp size={14} aria-hidden="true" />
+              <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value as OrderSort)}>
+                <option value="district">Quận · phường · zone</option>
+                <option value="oldest">Đơn cũ nhất trước</option>
+                <option value="zone">Zone trả A → Z</option>
+              </select>
+            </span>
+          </label>
+        </div>
+        <div className="return-assign-filter-footer">
+          <span>{filteredOrders.length.toLocaleString("vi-VN")} / {orders.length.toLocaleString("vi-VN")} đơn · {unassignedShipments.size.toLocaleString("vi-VN")} chưa gán</span>
+          <button type="button" className="return-assign-select-all" onClick={selectAllVisible} disabled={visibleUnassignedShipments.size === 0}>
+            Chọn đơn đang lọc ({visibleUnassignedShipments.size.toLocaleString("vi-VN")})
           </button>
         </div>
-      </div>
+      </section>
 
       {message ? (
         <p className={cn("return-assign-message", `is-${state}`)} role={state === "error" ? "alert" : "status"}>
@@ -211,6 +319,19 @@ export const ReturnAssignBoard = memo(function ReturnAssignBoard({ data }: Retur
               Bỏ chọn
             </button>
           </header>
+          <div className="return-assign-batch">
+            <label className="return-assign-rider-select">
+              <span>Gán các đơn đã chọn cho</span>
+              <select value={selectedRiderId} onChange={(event) => { setSelectedRiderId(event.target.value); setState("idle"); setMessage(""); }}>
+                <option value="">Chọn rider...</option>
+                {data.riders.map((rider) => <option key={rider.id} value={rider.id}>{rider.riderName} · {rider.riderCode} · {ktoolbarLabel(rider)}</option>)}
+              </select>
+            </label>
+            <button type="button" className="return-assign-submit" disabled={!selectedRider || selectedShipments.size === 0 || state === "saving"} onClick={() => void handleAssign()} data-state={state}>
+              {state === "saving" ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : <UserRoundPlus size={15} aria-hidden="true" />}
+              <span>{state === "saving" ? "Đang gán..." : `Gán cho ${selectedRider?.riderName ?? "rider"}`}</span>
+            </button>
+          </div>
           <ol>
             {selectedOrderRows.map((order) => (
               <li key={order.shipmentId}>
@@ -237,15 +358,16 @@ export const ReturnAssignBoard = memo(function ReturnAssignBoard({ data }: Retur
             </tr>
           </thead>
           <tbody>
-            {filteredOrders.map((order) => {
+            {paginatedOrders.map((order) => {
               const checked = selectedShipments.has(order.shipmentId);
               const isAssigned = Boolean(order.assignedRider);
               const recommendedIds = recommendedByOrder.get(order.shipmentId) ?? new Set<string>();
               const recommended = recommendedIds.size > 0;
               const sorted = sortedRidersForOrder(order);
               const orderState = perOrder[order.shipmentId];
+              const isJustAssigned = recentlyAssigned.has(order.shipmentId);
               return (
-                <tr key={order.shipmentId} className={cn(checked && "is-selected", isAssigned && "is-assigned")}>
+                <tr key={order.shipmentId} className={cn(checked && "is-selected", isAssigned && "is-assigned", isJustAssigned && "is-just-assigned")}>
                   <td className="is-check">
                     <input
                       type="checkbox"
@@ -261,68 +383,131 @@ export const ReturnAssignBoard = memo(function ReturnAssignBoard({ data }: Retur
                   </td>
                   <td data-label="Khu vực"><span className="return-dispatch-area">{order.area || "Chưa rõ"}</span></td>
                   <td data-label="Zone trả">
-                    <span className="return-dispatch-area">{order.zone || "Chưa có zone"}</span>
-                    {recommended ? <small className="return-assign-recommended-badge"><Sparkles size={10} aria-hidden="true" />Có {recommendedIds.size} rider gợi ý</small> : null}
+                    <div className="return-zone-cell">
+                      {order.zone?.trim() ? (
+                        <span className="return-zone-code">{order.zone}</span>
+                      ) : (
+                        <span className="return-zone-code is-empty"><MapPinned size={12} aria-hidden="true" />Chưa định tuyến</span>
+                      )}
+                      {recommended ? (
+                        <span className="return-zone-badge is-ok"><Sparkles size={10} aria-hidden="true" />{recommendedIds.size} khớp tuyến</span>
+                      ) : order.zone?.trim() ? (
+                        <span className="return-zone-badge is-warn"><CircleAlert size={10} aria-hidden="true" />Không khớp</span>
+                      ) : (
+                        <span className="return-zone-badge is-empty"><CircleAlert size={10} aria-hidden="true" />Chưa có zone</span>
+                      )}
+                    </div>
                   </td>
                   <td data-label="Rider hiện tại">
                     {order.assignedRider ? (
-                      <span className="return-assign-assigned-rider">
-                        <span>{order.assignedRider.riderName}</span>
-                        <strong>{kvLabel(order.assignedRider.kv)}</strong>
-                      </span>
+                      <div className="return-rider-cell is-assigned">
+                        <span className="return-rider-name">{order.assignedRider.riderName}</span>
+                        <span className="return-rider-meta">
+                          <span className="return-rider-kv">{kvLabel(order.assignedRider.kv)}</span>
+                          <span className={`return-rider-cot ${cotLabel(order.assignedRider.cot) === "COT1" ? "is-cot1" : cotLabel(order.assignedRider.cot) === "COT2" ? "is-cot2" : "is-none"}`}>{cotLabel(order.assignedRider.cot)}</span>
+                        </span>
+                      </div>
                     ) : (
-                      <span className="return-dispatch-unassigned">Chưa phân</span>
+                      <span className="return-rider-cell is-empty"><UserRoundPlus size={12} aria-hidden="true" />Chưa phân</span>
                     )}
                   </td>
                   <td data-label="Gán rider">
-                    {isAssigned ? (
-                      <span className="return-assign-done"><CheckCircle2 size={15} aria-hidden="true" />Đã gán</span>
-                    ) : (
-                      <div className="return-assign-one">
-                        <button
-                          type="button"
-                          className="return-assign-one-toggle"
-                          aria-haspopup="listbox"
-                          aria-expanded={openDropdown === order.shipmentId}
-                          onClick={() => setOpenDropdown((current) => current === order.shipmentId ? null : order.shipmentId)}
-                        >
-                          {orderState?.state === "saving" ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <UserRoundPlus size={14} aria-hidden="true" />}
-                          <span>{orderState?.state === "saving" ? "Đang gán..." : "Gán"}</span>
-                          <ChevronDown size={13} aria-hidden="true" />
-                        </button>
-                        {openDropdown === order.shipmentId ? (
-                          <div className="return-assign-one-list" role="listbox" aria-label={`Chọn rider cho đơn ${order.shipmentId}`}>
-                            <p className="return-assign-one-zone">Zone: {order.zone || "Chưa có zone"}</p>
-                            {sorted.map((rider) => {
-                              const isRecommended = recommendedIds.has(rider.id);
-                              return (
-                                <button
-                                  key={rider.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={false}
-                                  className={cn(isRecommended && "is-recommended")}
-                                  disabled={orderState?.state === "saving"}
-                                  onClick={() => void handleAssignOne(order.shipmentId, rider.id, rider.riderName)}
-                                >
-                                  <span className="return-assign-one-name">
-                                    {rider.riderName}
-                                    {isRecommended ? <em><Sparkles size={10} aria-hidden="true" />Gợi ý</em> : null}
-                                  </span>
-                                  <small>{rider.riderCode} · {ktoolbarLabel(rider)}{rider.zone ? ` · ${rider.zone}` : ""}</small>
-                                </button>
-                              );
-                            })}
-                            {orderState?.state === "error" ? (
-                              <span className="return-assign-one-error"><CircleAlert size={12} aria-hidden="true" />{orderState.message}</span>
-                            ) : null}
-                          </div>
-                        ) : null}
+                    <div className="return-assign-one">
+                        {(() => {
+                          return (
+                            <>
+                              <button
+                                type="button"
+                                className={cn("return-assign-one-toggle", isAssigned && "is-change", !recommended && !isAssigned && "is-empty")}
+                                aria-haspopup="listbox"
+                                aria-expanded={openDropdown === order.shipmentId}
+                                onClick={() => setOpenDropdown((current) => current === order.shipmentId ? null : order.shipmentId)}
+                              >
+                                {orderState?.state === "saving" ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : recommended ? <Sparkles size={14} aria-hidden="true" /> : <UserRoundPlus size={14} aria-hidden="true" />}
+                                <span>{orderState?.state === "saving" ? "Đang gán..." : isAssigned ? "Đổi rider" : recommended ? `Gán · ${recommendedIds.size} đúng zone` : "Chọn rider"}</span>
+                                <ChevronDown size={13} aria-hidden="true" />
+                              </button>
+                              {openDropdown === order.shipmentId ? (() => {
+                                const q = dropdownQuery[order.shipmentId] ?? "";
+                                const nq = normalizeText(q);
+                                const filtered = nq
+                                  ? sorted.filter((r) => normalizeText(`${r.riderName} ${r.riderCode} ${r.kv} ${r.cot} ${r.pickupZones.join(" ")}`).includes(nq))
+                                  : sorted;
+                                const visible = filtered.slice(0, 20);
+                                const recVisible = visible.filter((r) => recommendedIds.has(r.id));
+                                const restVisible = visible.filter((r) => !recommendedIds.has(r.id));
+                                return (
+                                  <div className="return-assign-one-list" role="listbox" aria-label={`Chọn rider cho đơn ${order.shipmentId}`}>
+                                    <p className="return-assign-one-zone">
+                                      {!order.zone?.trim() ? (
+                                        <><CircleAlert size={12} aria-hidden="true" />Chưa có zone — chọn rider thủ công</>
+                                      ) : recommended ? (
+                                        <>Zone trả: {order.zone} · {recommendedIds.size} rider đúng zone</>
+                                      ) : (
+                                        <>Zone trả: {order.zone} · chưa có rider cùng zone</>
+                                      )}
+                                    </p>
+                                    <label className="return-assign-one-search">
+                                      <Search size={14} aria-hidden="true" />
+                                      <input
+                                        value={q}
+                                        onChange={(event) => setDropdownQuery((prev) => ({ ...prev, [order.shipmentId]: event.target.value }))}
+                                        placeholder="Tìm rider (tên, mã, COT, KV, zone)…"
+                                        aria-label={`Tìm rider cho đơn ${order.shipmentId}`}
+                                      />
+                                      {q ? (
+                                        <button type="button" aria-label="Xóa tìm kiếm" onClick={() => setDropdownQuery((prev) => ({ ...prev, [order.shipmentId]: "" }))}>
+                                          <X size={12} aria-hidden="true" />
+                                        </button>
+                                      ) : null}
+                                    </label>
+                                    {nq ? null : recommended ? <p className="return-assign-one-group-label"><Sparkles size={11} aria-hidden="true" /> Gợi ý theo tuyến</p> : null}
+                                    {recVisible.map((rider) => (
+                                      <button
+                                        key={`rec-${rider.id}`}
+                                        type="button"
+                                        role="option"
+                                        aria-selected={false}
+                                        className="is-recommended"
+                                        disabled={orderState?.state === "saving"}
+                                        onClick={() => void handleAssignOne(order.shipmentId, rider.id, rider.riderName)}
+                                      >
+                                        <span className="return-assign-one-name">
+                                          {rider.riderName}
+                                          <em><Sparkles size={10} aria-hidden="true" />Khớp tuyến</em>
+                                        </span>
+                                        <small>{rider.riderCode} · {ktoolbarLabel(rider)}{rider.pickupZones.length ? ` · Pick: ${rider.pickupZones.join(", ")}` : ""}</small>
+                                      </button>
+                                    ))}
+                                    {nq ? null : !recommended ? <p className="return-assign-one-group-label">Tất cả rider · chọn thủ công</p> : restVisible.length ? <p className="return-assign-one-group-label">Tất cả rider</p> : null}
+                                    {restVisible.map((rider) => (
+                                      <button
+                                        key={rider.id}
+                                        type="button"
+                                        role="option"
+                                        aria-selected={false}
+                                        disabled={orderState?.state === "saving"}
+                                        onClick={() => void handleAssignOne(order.shipmentId, rider.id, rider.riderName)}
+                                      >
+                                        <span className="return-assign-one-name">{rider.riderName}</span>
+                                        <small>{rider.riderCode} · {ktoolbarLabel(rider)}{rider.pickupZones.length ? ` · Pick: ${rider.pickupZones.join(", ")}` : ""}</small>
+                                      </button>
+                                    ))}
+                                    {filtered.length === 0 ? <span className="return-assign-one-empty">Không tìm thấy rider phù hợp</span> : null}
+                                    {filtered.length > 20 ? <small className="return-assign-one-more">Hiển thị 20 / {filtered.length} — gõ để lọc tiếp</small> : null}
+                                    {orderState?.state === "error" ? (
+                                      <span className="return-assign-one-error"><CircleAlert size={12} aria-hidden="true" />{orderState.message}</span>
+                                    ) : null}
+                                  </div>
+                                );
+                              })() : null}
+                            </>
+                          );
+                        })()}
                         {orderState?.state === "success" ? (
                           <span className="return-assign-one-success"><Check size={13} aria-hidden="true" />{orderState.message}</span>
                         ) : null}
-                      </div>
-                    )}
+                    </div>
                   </td>
                   <td data-label="Trạng thái">
                     <span className={cn("return-dispatch-status", order.status === 72 ? "is-returning" : "is-backlog")}>
@@ -341,6 +526,14 @@ export const ReturnAssignBoard = memo(function ReturnAssignBoard({ data }: Retur
             ) : null}
           </tbody>
         </table>
+      </div>
+      <div className="return-assign-pagination">
+        <span>{filteredOrders.length.toLocaleString("vi-VN")} đơn · Trang {page}/{pageCount}</span>
+        <div>
+          <button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Trước</button>
+          <span>Trang {page}/{pageCount}</span>
+          <button type="button" disabled={page >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}>Sau</button>
+        </div>
       </div>
     </div>
   );
