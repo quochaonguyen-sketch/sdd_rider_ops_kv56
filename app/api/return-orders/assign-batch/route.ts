@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 
 const bodySchema = z.object({
   shipment_ids: z.array(z.string().trim().min(1).max(100)).min(1).max(1000),
-  rider_code: z.string().trim().min(1).max(100),
+  rider_code: z.string().trim().min(1).max(100).nullable().optional(),
 });
 
 async function getSession() {
@@ -54,7 +54,35 @@ export async function POST(request: Request) {
     );
   }
 
-  const { shipment_ids: shipmentIds, rider_code: riderCode } = parsed.data;
+  const { shipment_ids: shipmentIds, rider_code: riderCodeRaw } = parsed.data;
+  const riderCode = riderCodeRaw?.trim() || null;
+
+  // Unassign flow: rider_code is null/empty -> delete assignments
+  if (!riderCode) {
+    const { error } = await session.admin
+      .from("return_order_assignments")
+      .delete()
+      .in("shipment_id", shipmentIds);
+    if (error) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+    }
+
+    await session.admin.from("activity_logs").insert({
+      entity_type: "return_order_assignment",
+      entity_id: null,
+      action: "unassigned_batch",
+      message: `Removed assignment from ${shipmentIds.length} return orders`,
+      raw_data: {
+        shipment_ids: shipmentIds,
+        assigned_by: session.user.id,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      unassigned_count: shipmentIds.length,
+    });
+  }
 
   const { data: latest, error: latestError } = await session.admin
     .from("return_order_snapshots")

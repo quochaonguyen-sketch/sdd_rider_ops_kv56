@@ -4,8 +4,9 @@
  */
 "use client";
 
-import React, { memo, useCallback, useMemo, useState } from "react";
-import { ChevronDown, CircleAlert, FileSpreadsheet, LayoutDashboard, LoaderCircle, MapPin, Search, UsersRound, X } from "lucide-react";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ChevronDown, CircleAlert, FileSpreadsheet, LayoutDashboard, LoaderCircle, MapPin, Search, Trash2, UsersRound, X } from "lucide-react";
 import type { ReturnPivotData } from "@/lib/return-orders/return-orders";
 import { cn } from "@/utils/cn";
 
@@ -72,14 +73,24 @@ async function exportPivot(data: ReturnPivotData, rows: ReturnPivotData["rows"])
 }
 
 export const ReturnPivotBoard = memo(function ReturnPivotBoard({ data }: ReturnPivotBoardProps) {
+  const router = useRouter();
+  const [pivot, setPivot] = useState<ReturnPivotData>(data);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [unassigning, setUnassigning] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkUnassigning, setBulkUnassigning] = useState(false);
+
+  useEffect(() => {
+    setPivot(data);
+    setSelected(new Set());
+    setExpanded(new Set());
+  }, [data]);
 
   const baseRows = useMemo(
-    () => data.rows.filter((rider) => rider.orders.cot1 + rider.orders.cot2 > 0),
-    [data.rows],
+    () => pivot.rows.filter((rider) => rider.orders.cot1 + rider.orders.cot2 > 0),
+    [pivot.rows],
   );
 
   const [kvFilter, setKvFilter] = useState("all");
@@ -129,27 +140,109 @@ export const ReturnPivotBoard = memo(function ReturnPivotBoard({ data }: ReturnP
   }, [data, filteredRows]);
 
   const handleUnassign = useCallback(async (rider: ReturnPivotData["rows"][number]) => {
-    const ids = [...rider.orders.cot1Ids, ...rider.orders.cot2Ids];
+    const ids = [...rider.orders.cot1Ids, ...rider.orders.cot2Ids, ...rider.orders.unassignedIds];
     if (!ids.length) return;
     if (!window.confirm(`Gỡ gán ${ids.length} đơn của ${rider.riderName} (${rider.riderCode})? Đơn sẽ về lại "Chưa phân".`)) return;
     setUnassigning(rider.riderCode);
     try {
-      for (const shipmentId of ids) {
-        const res = await fetch("/api/return-orders/assign", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ shipment_id: shipmentId, rider_code: null }),
-        });
-        const j = (await res.json().catch(() => null)) as { success?: boolean; error?: string } | null;
-        if (!res.ok || !j?.success) throw new Error(j?.error || "Không thể gỡ gán");
-      }
-      window.location.reload();
+      const res = await fetch("/api/return-orders/assign-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shipment_ids: ids, rider_code: null }),
+      });
+      const j = (await res.json().catch(() => null)) as { success?: boolean; error?: string } | null;
+      if (!res.ok || !j?.success) throw new Error(j?.error || "Không thể gỡ gán");
+      setPivot((prev) => {
+        const removed = prev.rows.find((r) => r.riderCode === rider.riderCode);
+        const removedCount = removed ? removed.orders.total : ids.length;
+        return {
+          ...prev,
+          rows: prev.rows.filter((r) => r.riderCode !== rider.riderCode),
+          unassigned: prev.unassigned + removedCount,
+          totalOrders: prev.totalOrders - removedCount,
+        };
+      });
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(rider.riderCode);
+        return next;
+      });
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        next.delete(rider.riderCode);
+        return next;
+      });
+      router.refresh();
     } catch (e) {
       alert(e instanceof Error ? e.message : "Không thể gỡ gán");
     } finally {
       setUnassigning(null);
     }
-  }, []);
+  }, [router]);
+
+  const handleUnassignSelected = useCallback(async () => {
+    if (selected.size === 0) return;
+    const ridersToRemove = baseRows.filter((r) => selected.has(r.riderCode));
+    const ids = ridersToRemove.flatMap((r) => [...r.orders.cot1Ids, ...r.orders.cot2Ids, ...r.orders.unassignedIds]);
+    if (!ids.length) return;
+    if (!window.confirm(`Gỡ gán ${ids.length} đơn của ${selected.size} rider đã chọn?`)) return;
+    setBulkUnassigning(true);
+    try {
+      const res = await fetch("/api/return-orders/assign-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shipment_ids: ids, rider_code: null }),
+      });
+      const j = (await res.json().catch(() => null)) as { success?: boolean; error?: string } | null;
+      if (!res.ok || !j?.success) throw new Error(j?.error || "Không thể gỡ gán");
+      const removedCodes = new Set(ridersToRemove.map((r) => r.riderCode));
+      const removedCount = ridersToRemove.reduce((sum, r) => sum + r.orders.total, 0);
+      setPivot((prev) => ({
+        ...prev,
+        rows: prev.rows.filter((r) => !removedCodes.has(r.riderCode)),
+        unassigned: prev.unassigned + removedCount,
+        totalOrders: prev.totalOrders - removedCount,
+      }));
+      setSelected(new Set());
+      setExpanded(new Set());
+      router.refresh();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Không thể gỡ gán");
+    } finally {
+      setBulkUnassigning(false);
+    }
+  }, [selected, baseRows, router]);
+
+  const handleUnassignAll = useCallback(async () => {
+    const ids = filteredRows.flatMap((r) => [...r.orders.cot1Ids, ...r.orders.cot2Ids, ...r.orders.unassignedIds]);
+    if (!ids.length) return;
+    if (!window.confirm(`Gỡ gán tất cả ${ids.length} đơn của ${filteredRows.length} rider đang hiển thị?`)) return;
+    setBulkUnassigning(true);
+    try {
+      const res = await fetch("/api/return-orders/assign-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shipment_ids: ids, rider_code: null }),
+      });
+      const j = (await res.json().catch(() => null)) as { success?: boolean; error?: string } | null;
+      if (!res.ok || !j?.success) throw new Error(j?.error || "Không thể gỡ gán");
+      const filteredCodes = new Set(filteredRows.map((r) => r.riderCode));
+      const removedCount = filteredRows.reduce((sum, r) => sum + r.orders.total, 0);
+      setPivot((prev) => ({
+        ...prev,
+        rows: prev.rows.filter((r) => !filteredCodes.has(r.riderCode)),
+        unassigned: prev.unassigned + removedCount,
+        totalOrders: prev.totalOrders - removedCount,
+      }));
+      setSelected(new Set());
+      setExpanded(new Set());
+      router.refresh();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Không thể gỡ gán");
+    } finally {
+      setBulkUnassigning(false);
+    }
+  }, [filteredRows, router]);
 
   const assigned = filteredRows.reduce((sum, rider) => sum + rider.orders.total, 0);
   const cot1 = filteredRows.reduce((sum, rider) => sum + rider.orders.cot1, 0);
@@ -250,10 +343,64 @@ export const ReturnPivotBoard = memo(function ReturnPivotBoard({ data }: ReturnP
         <p className="return-pivot-error" role="alert"><CircleAlert size={14} aria-hidden="true" />{exportError}</p>
       ) : null}
 
+      <div className="return-pivot-bulk" role="toolbar" aria-label="Thao tác hàng loạt">
+        <label className="return-pivot-bulk-select">
+          <input
+            type="checkbox"
+            checked={filteredRows.length > 0 && selected.size === filteredRows.length}
+            onChange={(event) => {
+              if (event.target.checked) {
+                setSelected(new Set(filteredRows.map((r) => r.riderCode)));
+              } else {
+                setSelected(new Set());
+              }
+            }}
+            aria-label="Chọn tất cả rider đang hiển thị"
+          />
+          <span>Chọn tất cả</span>
+        </label>
+        <span className="return-pivot-bulk-count">
+          {selected.size > 0
+            ? `Đã chọn ${selected.size} rider · ${filteredRows.filter((r) => selected.has(r.riderCode)).reduce((sum, r) => sum + r.orders.total, 0)} đơn`
+            : `${filteredRows.length} rider · ${assigned} đơn`}
+        </span>
+        <div className="return-pivot-bulk-actions">
+          <button
+            type="button"
+            className="return-pivot-bulk-btn is-danger"
+            disabled={selected.size === 0 || bulkUnassigning}
+            onClick={() => void handleUnassignSelected()}
+          >
+            {bulkUnassigning ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <Trash2 size={14} aria-hidden="true" />}
+            <span>Gỡ gán đã chọn{selected.size ? ` (${selected.size})` : ""}</span>
+          </button>
+          <button
+            type="button"
+            className="return-pivot-bulk-btn is-danger is-outline"
+            disabled={filteredRows.length === 0 || bulkUnassigning}
+            onClick={() => void handleUnassignAll()}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+            <span>Gỡ gán tất cả ({filteredRows.length})</span>
+          </button>
+        </div>
+      </div>
+
       <div className="return-table-wrap">
         <table className="return-table return-pivot-table is-filtered">
           <thead>
             <tr>
+              <th scope="col" style={{ width: "2.4rem" }} aria-label="Chọn">
+                <input
+                  type="checkbox"
+                  checked={filteredRows.length > 0 && selected.size === filteredRows.length}
+                  onChange={(event) => {
+                    if (event.target.checked) setSelected(new Set(filteredRows.map((r) => r.riderCode)));
+                    else setSelected(new Set());
+                  }}
+                  aria-label="Chọn tất cả"
+                />
+              </th>
               <th scope="col" style={{ width: "2.2rem" }} aria-label="Mở mã đơn"></th>
               <th scope="col">Rider & Khu vực</th>
               <th scope="col" style={{ width: "5.5rem" }}>KV</th>
@@ -271,7 +418,22 @@ export const ReturnPivotBoard = memo(function ReturnPivotBoard({ data }: ReturnP
               const pct = (rider.orders.total / maxTotal) * 100;
               return (
                 <React.Fragment key={rider.riderCode}>
-                  <tr className={cn(isOpen && "is-expanded")}>
+                  <tr className={cn(isOpen && "is-expanded", selected.has(rider.riderCode) && "is-selected")}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(rider.riderCode)}
+                        onChange={() =>
+                          setSelected((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(rider.riderCode)) next.delete(rider.riderCode);
+                            else next.add(rider.riderCode);
+                            return next;
+                          })
+                        }
+                        aria-label={`Chọn ${rider.riderName}`}
+                      />
+                    </td>
                     <td>
                       <button
                         type="button"
@@ -359,7 +521,7 @@ export const ReturnPivotBoard = memo(function ReturnPivotBoard({ data }: ReturnP
                   </tr>
                   {isOpen ? (
                     <tr className="return-pivot-details">
-                      <td colSpan={7}>
+                      <td colSpan={8}>
                         <div className="return-pivot-orders">
                           <span className="return-pivot-orders-label">Mã đơn ({allIds.length}):</span>
                           <div className="return-pivot-orders-list">
@@ -380,7 +542,7 @@ export const ReturnPivotBoard = memo(function ReturnPivotBoard({ data }: ReturnP
             })}
             {!filteredRows.length ? (
               <tr>
-                <td colSpan={7} className="return-empty">
+                <td colSpan={8} className="return-empty">
                   <strong>Không có rider đã gán đang chờ trả.</strong>
                   <span>Thử đổi bộ lọc quận/phường/khu vực hoặc tìm tên khác.</span>
                 </td>
