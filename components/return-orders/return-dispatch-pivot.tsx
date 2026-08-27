@@ -25,12 +25,32 @@ function cotBadgeClass(cot: string) {
   return "is-none";
 }
 
-function aging(value: string | null) {
-  if (!value) return { label: "—", tone: "unknown" as const };
-  const days = Math.max(0, (Date.now() - new Date(value).getTime()) / 86_400_000);
-  const label = days < 1 ? "<1 ngày" : `${days.toFixed(1)} ngày`;
-  const tone = days <= 1 ? "fresh" : days <= 5 ? "warning" : "danger";
-  return { label, tone };
+function useAging(value: string | null) {
+  const [aging, setAging] = useState<{ label: string; tone: "unknown" | "fresh" | "warning" | "danger" }>(() => {
+    if (!value) return { label: "—", tone: "unknown" as const };
+    // SSR: trả về placeholder để tránh lệch hydration, client sẽ tính lại sau mount
+    return { label: "—", tone: "unknown" as const };
+  });
+  useEffect(() => {
+    if (!value) {
+      setAging({ label: "—", tone: "unknown" as const });
+      return;
+    }
+    const days = Math.max(0, (Date.now() - new Date(value).getTime()) / 86_400_000);
+    const label = days < 1 ? "<1 ngày" : `${days.toFixed(1)} ngày`;
+    const tone = (days <= 1 ? "fresh" : days <= 5 ? "warning" : "danger") as "fresh" | "warning" | "danger";
+    setAging({ label, tone });
+  }, [value]);
+  return aging;
+}
+
+function AgingBadge({ value }: { value: string | null }) {
+  const a = useAging(value);
+  return (
+    <span suppressHydrationWarning className={cn("return-pivot-aging", `is-${a.tone}`)}>
+      {a.label}
+    </span>
+  );
 }
 
 async function exportPivot(data: ReturnPivotData, rows: ReturnPivotData["rows"]) {
@@ -387,7 +407,7 @@ export const ReturnPivotBoard = memo(function ReturnPivotBoard({ data }: ReturnP
       </div>
 
       <div className="return-table-wrap">
-        <table className="return-table return-pivot-table is-filtered">
+        <table suppressHydrationWarning className="return-table return-pivot-table is-filtered">
           <thead>
             <tr>
               <th scope="col" style={{ width: "2.4rem" }} aria-label="Chọn">
@@ -480,10 +500,7 @@ export const ReturnPivotBoard = memo(function ReturnPivotBoard({ data }: ReturnP
                       </div>
                     </td>
                     <td data-label="Aging">
-                      {(() => {
-                        const a = aging(rider.oldestAt);
-                        return <span className={cn("return-pivot-aging", `is-${a.tone}`)}>{a.label}</span>;
-                      })()}
+                      <AgingBadge value={rider.oldestAt} />
                     </td>
                     <td data-label="Tổng" className="is-num">
                       <div className="return-pivot-total">

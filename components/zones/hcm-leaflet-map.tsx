@@ -48,7 +48,7 @@ export function HcmLeafletMap({ zones, visibleZoneIds, selectedZoneId, addressPi
   return (
     <div className="zone-operations-map relative h-[560px] overflow-hidden rounded-2xl border border-slate-300 bg-slate-100 shadow-inner lg:h-[680px]" style={{ "--zone-fill-opacity": zoneOpacity / 100 } as CSSProperties}>
       <MapContainer center={MAP_DEFAULT_CENTER} zoom={MAP_DEFAULT_ZOOM} minZoom={MAP_MIN_ZOOM} maxZoom={MAP_MAX_ZOOM} zoomControl={false} scrollWheelZoom className="h-full w-full">
-        <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>' url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
+        <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         <ViewportController selectedFeature={selectedFeature} addressPin={addressPin} />
         {visibleFeatures.map(({ feature, zone }) => <ZonePolygon key={zone.id} feature={feature} zone={zone} selected={zone.id === selectedZoneId} onSelect={onSelectZone} />)}
         {addressPin ? <>

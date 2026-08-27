@@ -530,10 +530,13 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
   };
 }
 
-export type ReturnView = "ledger" | "rider" | "pivot";
+export type ReturnView = "ledger" | "rider" | "pivot" | "dashboard";
 
 export function returnViewFrom(value: string | null | undefined): ReturnView {
-  return value === "rider" ? "rider" : value === "pivot" ? "pivot" : "ledger";
+  if (value === "rider") return "rider";
+  if (value === "pivot") return "pivot";
+  if (value === "dashboard") return "dashboard";
+  return "ledger";
 }
 
 export type ReturnPivotCell = { cot1: number; cot2: number; unassigned: number; total: number; cot1Ids: string[]; cot2Ids: string[]; unassignedIds: string[] };
@@ -873,4 +876,173 @@ export async function getReturnAssignData(): Promise<ReturnAssignData> {
   });
 
   return { snapshotAt: latest.snapshot_at, riders: kv56Riders, orders };
+}
+
+export type ReturnDashboardData = {
+  snapshotAt: string | null;
+  total: number;
+  backlog: number;
+  returning: number;
+  assigned: number;
+  unassigned: number;
+  districts: Array<{ name: string; total: number }>;
+  zones: Array<{ name: string; total: number }>;
+  wards: Array<{ district: string; ward: string; total: number }>;
+  cot: { cot1: number; cot2: number; unassigned: number };
+  kv: { kv5: number; kv6: number; unknown: number };
+  aging: { fresh: number; warning: number; danger: number; unknown: number };
+  topRiders: Array<{ riderCode: string; riderName: string; kv: string; cot: string; total: number }>;
+};
+
+export async function getReturnDashboardData(): Promise<ReturnDashboardData> {
+  const supabase = createAdminClient();
+  const { data: latest, error: latestError } = await supabase
+    .from("return_order_snapshots")
+    .select("snapshot_id,snapshot_at")
+    .order("snapshot_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestError) throw latestError;
+  if (!latest) {
+    return {
+      snapshotAt: null,
+      total: 0,
+      backlog: 0,
+      returning: 0,
+      assigned: 0,
+      unassigned: 0,
+      districts: [],
+      zones: [],
+      wards: [],
+      cot: { cot1: 0, cot2: 0, unassigned: 0 },
+      kv: { kv5: 0, kv6: 0, unknown: 0 },
+      aging: { fresh: 0, warning: 0, danger: 0, unknown: 0 },
+      topRiders: [],
+    };
+  }
+
+  const pageSize = 1000;
+  const orders: Array<{
+    shipment_id: string;
+    order_status: number;
+    seller_district: string;
+    seller_ward: string;
+    seller_new_ward: string;
+    return_zone: string;
+    create_time: string | null;
+  }> = [];
+  for (let from = 0; ; from += pageSize) {
+    const result = await supabase
+      .from("return_order_snapshots")
+      .select("shipment_id,order_status,seller_district,seller_ward,seller_new_ward,return_zone,create_time")
+      .eq("snapshot_id", latest.snapshot_id)
+      .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("order_status", [10, 67, 72])
+      .range(from, from + pageSize - 1);
+    if (result.error) throw result.error;
+    const page = (result.data ?? []) as typeof orders;
+    orders.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  const [{ data: assignments, error: assignmentError }, { data: riders, error: riderError }] = await Promise.all([
+    supabase.from("return_order_assignments").select("shipment_id,rider_code,cot"),
+    supabase.from("riders").select("rider_code,kv,cot,full_name"),
+  ]);
+  if (assignmentError) throw assignmentError;
+  if (riderError) throw riderError;
+
+  const assignmentByShipment = new Map((assignments ?? []).map((a) => [a.shipment_id, a]));
+  const riderByCode = new Map((riders ?? []).map((r) => [String(r.rider_code).trim().toLowerCase(), r]));
+
+  let backlog = 0;
+  let returning = 0;
+  const districtMap = new Map<string, number>();
+  const zoneMap = new Map<string, number>();
+  const wardMap = new Map<string, { district: string; ward: string; total: number }>();
+  const aging = { fresh: 0, warning: 0, danger: 0, unknown: 0 };
+  const cot = { cot1: 0, cot2: 0, unassigned: 0 };
+  const kv = { kv5: 0, kv6: 0, unknown: 0 };
+  const riderCounts = new Map<string, { riderCode: string; riderName: string; kv: string; cot: string; total: number }>();
+  let assigned = 0;
+
+  const now = Date.now();
+  for (const order of orders) {
+    if (order.order_status === 72) returning += 1;
+    else backlog += 1;
+
+    const d = String(order.seller_district || "Chưa xác định").trim() || "Chưa xác định";
+    districtMap.set(d, (districtMap.get(d) ?? 0) + 1);
+
+    const w = String(order.seller_new_ward || order.seller_ward || "Chưa xác định").trim() || "Chưa xác định";
+    const wk = `${d}||${w}`;
+    const existing = wardMap.get(wk);
+    if (existing) existing.total += 1;
+    else wardMap.set(wk, { district: d, ward: w, total: 1 });
+
+    const z = String(order.return_zone || "Chưa có zone").trim() || "Chưa có zone";
+    zoneMap.set(z, (zoneMap.get(z) ?? 0) + 1);
+
+    if (!order.create_time) aging.unknown += 1;
+    else {
+      const days = (now - new Date(order.create_time).getTime()) / 86_400_000;
+      if (days <= 1) aging.fresh += 1;
+      else if (days <= 5) aging.warning += 1;
+      else aging.danger += 1;
+    }
+
+    const assignment = assignmentByShipment.get(order.shipment_id);
+    if (assignment?.rider_code) {
+      assigned += 1;
+      const rider = riderByCode.get(String(assignment.rider_code).trim().toLowerCase());
+      const c = normalizeCotLabel(assignment.cot || rider?.cot);
+      if (c === "COT1") cot.cot1 += 1;
+      else if (c === "COT2") cot.cot2 += 1;
+      else cot.unassigned += 1;
+
+      const k = String(rider?.kv || "").trim().toUpperCase();
+      if (k === "KV5" || k.endsWith("5")) kv.kv5 += 1;
+      else if (k === "KV6" || k.endsWith("6")) kv.kv6 += 1;
+      else kv.unknown += 1;
+
+      const key = String(assignment.rider_code).trim();
+      const entry = riderCounts.get(key);
+      if (entry) entry.total += 1;
+      else {
+        riderCounts.set(key, {
+          riderCode: key,
+          riderName: String(rider?.full_name || assignment.rider_code).trim(),
+          kv: String(rider?.kv || "").trim(),
+          cot: String(rider?.cot || assignment.cot || "").trim(),
+          total: 1,
+        });
+      }
+    } else {
+      cot.unassigned += 1;
+      kv.unknown += 1;
+    }
+  }
+
+  const districts = Array.from(districtMap, ([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total);
+  const zones = Array.from(zoneMap, ([name, total]) => ({ name, total }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 8);
+  const wards = Array.from(wardMap.values()).sort((a, b) => b.total - a.total).slice(0, 8);
+  const topRiders = Array.from(riderCounts.values()).sort((a, b) => b.total - a.total).slice(0, 6);
+
+  return {
+    snapshotAt: latest.snapshot_at,
+    total: orders.length,
+    backlog,
+    returning,
+    assigned,
+    unassigned: orders.length - assigned,
+    districts,
+    zones,
+    wards,
+    cot,
+    kv,
+    aging,
+    topRiders,
+  };
 }

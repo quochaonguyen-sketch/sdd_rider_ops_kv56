@@ -344,7 +344,7 @@ export const ReturnAssignBoard = memo(function ReturnAssignBoard({ data }: Retur
       ) : null}
 
       <div className="return-table-wrap">
-        <table className="return-table return-assign-table">
+        <table suppressHydrationWarning className="return-table return-assign-table">
           <thead>
             <tr>
               <th scope="col" className="is-check"><span className="sr-only">Chọn</span></th>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { ProtectedPage } from "@/components/layout/protected-page";
 import { ReturnOrderFilters } from "@/components/return-orders/return-order-filters";
 import { ReturnOrderLookupScanner } from "@/components/return-orders/return-order-lookup-scanner";
@@ -8,7 +9,8 @@ import { ReturnOrdersSwitcher } from "@/components/return-orders/return-orders-t
 import { ReturningRiderBoard } from "@/components/return-orders/returning-rider-board";
 import { ReturnPivotBoard } from "@/components/return-orders/return-dispatch-pivot";
 import { ReturnAssignBoard } from "@/components/return-orders/return-assign-board";
-import { getReturnAssignData, getReturnDriverCots, getReturnOrders, getReturnPivotData, parseReturnOrderFilters, returnViewFrom, RETURN_ORDER_DISTRICTS } from "@/lib/return-orders/return-orders";
+import { ReturnDashboardBoard } from "@/components/return-orders/return-dashboard-board";
+import { getReturnAssignData, getReturnDashboardData, getReturnDriverCots, getReturnOrders, getReturnPivotData, parseReturnOrderFilters, returnViewFrom, RETURN_ORDER_DISTRICTS } from "@/lib/return-orders/return-orders";
 
 function fmt(value: string | null) {
   if (!value) return "—";
@@ -99,13 +101,73 @@ export default async function ReturnOrdersPage({
   if (view === "rider") {
     return <ProtectedPage><ReturnRiderContent /></ProtectedPage>;
   }
+  if (view === "dashboard") {
+    return (
+      <ProtectedPage>
+        <section className="return-orders-page">
+          <ReturnOrdersSwitcher />
+          <Suspense fallback={<ReturnPivotSkeleton />}>
+            <ReturnDashboardLoader />
+          </Suspense>
+        </section>
+      </ProtectedPage>
+    );
+  }
   if (view === "pivot") {
-    return <ProtectedPage><ReturnPivotContent /></ProtectedPage>;
+    return (
+      <ProtectedPage>
+        <section className="return-orders-page">
+          <ReturnOrdersSwitcher />
+          <Suspense fallback={<ReturnPivotSkeleton />}>
+            <ReturnPivotLoader />
+          </Suspense>
+        </section>
+      </ProtectedPage>
+    );
   }
   return (
     <ProtectedPage>
       <ReturnOrdersContent searchParams={searchParams} />
     </ProtectedPage>
+  );
+}
+
+function ReturnPivotSkeleton() {
+  return (
+    <div className="return-pivot-skeleton" aria-busy="true" aria-label="Đang tải dữ liệu phân công">
+      <div className="return-pivot-skeleton-head">
+        <div className="return-skeleton-line is-title" />
+        <div className="return-skeleton-line is-subtitle" />
+        <div className="return-skeleton-line is-meta" />
+      </div>
+      <div className="return-pivot-skeleton-card">
+        <div className="return-skeleton-line is-heading" />
+        <div className="return-skeleton-grid">
+          <div className="return-skeleton-block" />
+          <div className="return-skeleton-block" />
+          <div className="return-skeleton-block" />
+        </div>
+        <div className="return-skeleton-table">
+          <div className="return-skeleton-row" />
+          <div className="return-skeleton-row" />
+          <div className="return-skeleton-row" />
+          <div className="return-skeleton-row" />
+          <div className="return-skeleton-row" />
+        </div>
+      </div>
+      <div className="return-pivot-skeleton-card">
+        <div className="return-skeleton-line is-heading" />
+        <div className="return-skeleton-grid is-two">
+          <div className="return-skeleton-block is-tall" />
+          <div className="return-skeleton-block is-tall" />
+        </div>
+        <div className="return-skeleton-table">
+          <div className="return-skeleton-row" />
+          <div className="return-skeleton-row" />
+          <div className="return-skeleton-row" />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -159,26 +221,43 @@ async function ReturnRiderContent() {
   );
 }
 
-async function ReturnPivotContent() {
+async function ReturnDashboardLoader() {
+  const delay = new Promise<void>((resolve) => setTimeout(resolve, 450));
+  let dashboardData;
+  try {
+    const [d] = await Promise.all([getReturnDashboardData(), delay]);
+    dashboardData = d;
+  } catch (error) {
+    return (
+      <div className="return-error" role="alert">
+        <strong>Không tải được dashboard hàng trả.</strong>
+        <span>{errorMessage(error)}</span>
+      </div>
+    );
+  }
+  return <ReturnDashboardBoard data={dashboardData} />;
+}
+
+async function ReturnPivotLoader() {
+  // Delay nhẹ để skeleton hiện mượt, tránh flash khi data về quá nhanh
+  const delay = new Promise<void>((resolve) => setTimeout(resolve, 550));
   let assignData;
   let pivotData;
   try {
-    [assignData, pivotData] = await Promise.all([getReturnAssignData(), getReturnPivotData()]);
+    const [a, p] = await Promise.all([getReturnAssignData(), getReturnPivotData(), delay]);
+    assignData = a;
+    pivotData = p;
   } catch (error) {
     return (
-      <section className="return-orders-page">
-        <ReturnOrdersSwitcher />
-        <div className="return-error" role="alert">
-          <strong>Không tải được dữ liệu phân công.</strong>
-          <span>{errorMessage(error)}</span>
-        </div>
-      </section>
+      <div className="return-error" role="alert">
+        <strong>Không tải được dữ liệu phân công.</strong>
+        <span>{errorMessage(error)}</span>
+      </div>
     );
   }
 
   return (
-    <section className="return-orders-page">
-      <ReturnOrdersSwitcher />
+    <>
       <header className="return-pivot-page-head">
         <div>
           <p className="return-pivot-page-kicker">RETURN OPERATIONS / ASSIGNMENT DESK</p>
@@ -193,7 +272,7 @@ async function ReturnPivotContent() {
       </header>
       <ReturnAssignBoard data={assignData} />
       <ReturnPivotBoard data={pivotData} />
-    </section>
+    </>
   );
 }
 
@@ -311,7 +390,7 @@ async function ReturnOrdersContent({
           <span>{filters.sort === "aging_desc" ? "Aging cao → thấp" : "Quận → Phường"} · Trang {result.page}/{pages}</span>
         </header>
         <div className="return-table-wrap">
-          <table className="return-table">
+          <table suppressHydrationWarning className="return-table">
             <thead>
               <tr>
                 <th scope="col">Đơn hàng</th>
@@ -333,7 +412,7 @@ async function ReturnOrdersContent({
                       </span>
                     </td>
                     <td data-label="Aging">
-                      <span className={`return-aging is-${orderAging.tone}`}>{orderAging.label}</span>
+                      <span suppressHydrationWarning className={`return-aging is-${orderAging.tone}`}>{orderAging.label}</span>
                       <small>{fmt(row.create_time)}</small>
                     </td>
                     <td data-label="Quận / phường">

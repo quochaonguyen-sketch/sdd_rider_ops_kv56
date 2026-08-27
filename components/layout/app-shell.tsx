@@ -41,6 +41,7 @@ const pickupItems = [
   { href: "/pickup-management?view=replacement", view: "replacement", label: "Thế pick", icon: Repeat2 },
 ];
 const returnItems = [
+  { href: "/return-orders?view=dashboard", view: "dashboard", label: "Tổng quan", icon: BarChart3 },
   { href: "/return-orders", view: null, label: "Tra cứu", icon: PackageSearch },
   { href: "/return-orders?view=rider", view: "rider", label: "Rider trả", icon: Truck },
   { href: "/return-orders?view=pivot", view: "pivot", label: "Phân công COT", icon: ListChecks },
@@ -255,8 +256,7 @@ function isNavigationItemActive(item: { href: string; view?: string | null }, pa
   const itemPath = item.href.split("?")[0];
   if (itemPath !== pathname && !pathname.startsWith(`${itemPath}/`)) return false;
   if (itemPath !== "/pickup-management" && itemPath !== "/return-orders") return true;
-  const effectiveView = currentView === "replacement" ? "replacement" : currentView === "rider" ? "rider" : currentView === "pivot" ? "pivot" : null;
-  return (item.view ?? null) === effectiveView;
+  return (item.view ?? null) === currentView;
 }
 
 function SidebarDisclosure({ label, icon: Icon, open, active, onToggle, children }: { label: string; icon: typeof PackageOpen; open: boolean; active: boolean; onToggle: () => void; children: React.ReactNode }) {
