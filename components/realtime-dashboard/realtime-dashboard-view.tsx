@@ -35,10 +35,10 @@ import { cn } from "@/utils/cn";
 import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 
 type RealtimeRider = { id: string; driver_id: string; driver_name: string | null; total_assigned: number; delivered: number; delivering: number; failed: number; zone_id: string | null; first_delivery_at: string | null; idle_delivery_seconds: number; snapshot_id: string; snapshot_at: string };
-type RiderProfile = { rider_code: string; full_name: string | null; kv: string | null; delivery_district: string | null; delivery_ward: string | null };
+type RiderProfile = { rider_code: string; full_name: string | null; kv: string | null; delivery_district: string | null; delivery_ward: string | null; cot: string | null };
 type RiderStatus = "delivering" | "completed" | "warning";
-type DisplayRider = RealtimeRider & { name: string; kv: string; district: string; ward: string; status: RiderStatus; progress: number };
-type SortKey = "name" | "status" | "eta" | "delivered";
+type DisplayRider = RealtimeRider & { name: string; kv: string; district: string; ward: string; cot: string; status: RiderStatus; progress: number };
+type SortKey = "name" | "status" | "eta" | "delivered" | "cot";
 type TimeRange = "15m" | "1h" | "today";
 type DistrictDetail = {
   name: string;
@@ -67,6 +67,7 @@ export function RealtimeDashboardView() {
   const [query, setQuery] = useState("");
   const [zone, setZone] = useState("all");
   const [status, setStatus] = useState<RiderStatus | "all">("all");
+  const [cot, setCot] = useState<string>("all");
   const [timeRange, setTimeRange] = useState<TimeRange>("15m");
   const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>({ key: "status", direction: "asc" });
   const [page, setPage] = useState(1);
@@ -78,7 +79,7 @@ export function RealtimeDashboardView() {
 
   const loadProfiles = useCallback(async () => {
     const supabase = createClient();
-    const result = await supabase.from("riders").select("rider_code,full_name,kv,delivery_district,delivery_ward").eq("status", "active");
+    const result = await supabase.from("riders").select("rider_code,full_name,kv,delivery_district,delivery_ward,cot").eq("status", "active");
     if (result.error) {
       setError(result.error.message);
       return;
@@ -133,6 +134,7 @@ export function RealtimeDashboardView() {
         kv: profile.kv?.trim() || "—",
         district: profile.delivery_district?.trim() || "Chưa xác định quận",
         ward: profile.delivery_ward?.trim() || "Chưa xác định phường",
+        cot: profile.cot?.trim() || "—",
         status: getRiderStatus(row),
         progress,
       }];
@@ -140,6 +142,7 @@ export function RealtimeDashboardView() {
   }, [profiles, rows]);
 
   const zones = useMemo(() => [...new Set(riders.map((rider) => rider.district))].sort((a, b) => a.localeCompare(b, "vi", { numeric: true })), [riders]);
+  const cotOptions = useMemo(() => [...new Set(riders.map((r) => r.cot).filter((v) => v && v !== "—"))].sort((a, b) => a.localeCompare(b, "vi", { numeric: true })), [riders]);
   const districtDetails = useMemo(() => buildDistrictDetails(riders), [riders]);
   const kvAggregates = useMemo(() => buildKvAggregates(districtDetails), [districtDetails]);
 
@@ -149,10 +152,11 @@ export function RealtimeDashboardView() {
     const result = districtFiltered.filter((rider) =>
       (zone === "all" || rider.district === zone) &&
       (status === "all" || rider.status === status) &&
-      (!q || normalize(`${rider.driver_id} ${rider.name} ${rider.district} ${rider.ward}`).includes(q)),
+      (cot === "all" || rider.cot === cot || normalize(rider.cot) === normalize(cot)) &&
+      (!q || normalize(`${rider.driver_id} ${rider.name} ${rider.district} ${rider.ward} ${rider.cot}`).includes(q)),
     );
     return result.sort((a, b) => compareRiders(a, b, sort.key) * (sort.direction === "asc" ? 1 : -1));
-  }, [query, riders, sort, status, zone, activeDistrict]);
+  }, [query, riders, sort, status, zone, cot, activeDistrict]);
 
   const totals = useMemo(() => riders.reduce((sum, rider) => ({
     assigned: sum.assigned + rider.total_assigned,
@@ -252,11 +256,12 @@ export function RealtimeDashboardView() {
       </section>
 
       <FilterBar
-        date={date} timeRange={timeRange} zone={zone} status={status} zones={zones}
+        date={date} timeRange={timeRange} zone={zone} status={status} cot={cot} zones={zones} cotOptions={cotOptions}
         onDateChange={(value) => { setDate(value); setPage(1); }}
         onTimeRangeChange={(value) => { setTimeRange(value); setPage(1); }}
         onZoneChange={(value) => { setZone(value); setPage(1); }}
         onStatusChange={(value) => { setStatus(value); setPage(1); }}
+        onCotChange={(value) => { setCot(value); setPage(1); }}
       />
 
       <section aria-labelledby="rider-status-heading">
@@ -370,8 +375,8 @@ function DistrictBentoCard({ district, large, active, onSelect }: { district: Di
   );
 }
 
-export function FilterBar({ date, timeRange, zone, status, zones, onDateChange, onTimeRangeChange, onZoneChange, onStatusChange }: { date: string; timeRange: TimeRange; zone: string; status: RiderStatus | "all"; zones: string[]; onDateChange: (value: string) => void; onTimeRangeChange: (value: TimeRange) => void; onZoneChange: (value: string) => void; onStatusChange: (value: RiderStatus | "all") => void }) {
-  return <section aria-label="Bộ lọc toàn cục" className="rounded-xl border border-slate-200 bg-white p-4"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"><FilterField label="Ngày"><Input type="date" value={date} onChange={(event) => onDateChange(event.target.value)} /></FilterField><FilterField label="Khoảng thời gian"><Select value={timeRange} onChange={(event) => onTimeRangeChange(event.target.value as TimeRange)}><option value="15m">15 phút gần nhất</option><option value="1h">1 giờ gần nhất</option><option value="today">Hôm nay</option></Select></FilterField><FilterField label="Khu vực"><Select value={zone} onChange={(event) => onZoneChange(event.target.value)}><option value="all">Tất cả khu vực</option>{zones.map((item) => <option key={item} value={item}>{item}</option>)}</Select></FilterField><FilterField label="Trạng thái rider"><Select value={status} onChange={(event) => onStatusChange(event.target.value as RiderStatus | "all")}><option value="all">Tất cả trạng thái</option><option value="delivering">Đang giao</option><option value="completed">Đã giao xong</option><option value="warning">Cảnh báo</option></Select></FilterField></div><div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3"><span className="text-xs font-semibold text-slate-500">Đang lọc:</span><FilterChip>{timeRange === "15m" ? "15 phút" : timeRange === "1h" ? "1 giờ" : "Hôm nay"}</FilterChip><FilterChip>{zone === "all" ? "Mọi khu vực" : zone}</FilterChip><FilterChip>{status === "all" ? "Mọi trạng thái" : statusLabel(status)}</FilterChip></div></section>;
+export function FilterBar({ date, timeRange, zone, status, cot, zones, cotOptions, onDateChange, onTimeRangeChange, onZoneChange, onStatusChange, onCotChange }: { date: string; timeRange: TimeRange; zone: string; status: RiderStatus | "all"; cot: string; zones: string[]; cotOptions: string[]; onDateChange: (value: string) => void; onTimeRangeChange: (value: TimeRange) => void; onZoneChange: (value: string) => void; onStatusChange: (value: RiderStatus | "all") => void; onCotChange: (value: string) => void }) {
+  return <section aria-label="Bộ lọc toàn cục" className="rounded-xl border border-slate-200 bg-white p-4"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5"><FilterField label="Ngày"><Input type="date" value={date} onChange={(event) => onDateChange(event.target.value)} /></FilterField><FilterField label="Khoảng thời gian"><Select value={timeRange} onChange={(event) => onTimeRangeChange(event.target.value as TimeRange)}><option value="15m">15 phút gần nhất</option><option value="1h">1 giờ gần nhất</option><option value="today">Hôm nay</option></Select></FilterField><FilterField label="Khu vực"><Select value={zone} onChange={(event) => onZoneChange(event.target.value)}><option value="all">Tất cả khu vực</option>{zones.map((item) => <option key={item} value={item}>{item}</option>)}</Select></FilterField><FilterField label="COT"><Select value={cot} onChange={(event) => onCotChange(event.target.value)}><option value="all">Tất cả COT</option>{cotOptions.map((item) => <option key={item} value={item}>{item}</option>)}</Select></FilterField><FilterField label="Trạng thái rider"><Select value={status} onChange={(event) => onStatusChange(event.target.value as RiderStatus | "all")}><option value="all">Tất cả trạng thái</option><option value="delivering">Đang giao</option><option value="completed">Đã giao xong</option><option value="warning">Cảnh báo</option></Select></FilterField></div><div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3"><span className="text-xs font-semibold text-slate-500">Đang lọc:</span><FilterChip>{timeRange === "15m" ? "15 phút" : timeRange === "1h" ? "1 giờ" : "Hôm nay"}</FilterChip><FilterChip>{zone === "all" ? "Mọi khu vực" : zone}</FilterChip><FilterChip>{cot === "all" ? "Mọi COT" : cot}</FilterChip><FilterChip>{status === "all" ? "Mọi trạng thái" : statusLabel(status)}</FilterChip></div></section>;
 }
 
 export function StatusBadge({ status }: { status: RiderStatus }) {
@@ -387,8 +392,15 @@ export function RealtimeIndicator({ snapshotAt, loading }: { snapshotAt: string 
   return <span className="inline-flex min-w-40 items-center gap-2 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800"><span className={cn("relative flex size-2", loading && "opacity-60")}><span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500 opacity-50" /><span className="relative inline-flex size-2 rounded-full bg-emerald-600" /></span>{snapshotAt ? `Live · Cập nhật ${formatAge(age ?? 0)}` : "Live · Chưa có dữ liệu"}</span>;
 }
 
+function CotBadge({ cot }: { cot: string }) {
+  if (!cot || cot === "—") return <span className="inline-flex rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">—</span>;
+  const isCot1 = /cot\s*1|1/i.test(cot);
+  const style = isCot1 ? "bg-amber-50 text-amber-700 ring-amber-200" : "bg-violet-50 text-violet-700 ring-violet-200";
+  return <span className={cn("inline-flex rounded-full px-2 py-1 text-xs font-semibold ring-1", style)}>{cot}</span>;
+}
+
 export const RiderTable = memo(function RiderTable({ rows, total, allTotal, query, loading, sort, page, pageCount, onQueryChange, onSort, onSelect, onPrevious, onNext }: { rows: DisplayRider[]; total: number; allTotal: number; query: string; loading: boolean; sort: { key: SortKey; direction: "asc" | "desc" }; page: number; pageCount: number; onQueryChange: (value: string) => void; onSort: (key: SortKey) => void; onSelect: (rider: DisplayRider) => void; onPrevious: () => void; onNext: () => void }) {
-  return <div className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="flex flex-col gap-4 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between"><div><h2 id="rider-status-heading" className="text-base font-bold text-slate-950">Trạng thái rider</h2><p className="mt-0.5 text-sm text-slate-500">Hiển thị {total}/{allTotal} rider · Chọn một dòng để xem chi tiết</p></div><label className="relative block w-full lg:w-80"><span className="sr-only">Tìm rider</span><Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><Input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Tìm tên, mã hoặc khu vực" className="pl-9" /></label></div><div className="max-h-[560px] min-h-[360px] overflow-auto"><table className="w-full min-w-[760px] table-fixed text-left text-sm"><thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-600 shadow-[0_1px_0_#e2e8f0]"><tr><SortableHeader label="Rider" sortKey="name" current={sort} onSort={onSort} className="w-[30%]" /><SortableHeader label="Trạng thái" sortKey="status" current={sort} onSort={onSort} className="w-[17%]" /><th className="px-4 py-3 font-semibold">Khu vực</th><SortableHeader label="Đã giao" sortKey="delivered" current={sort} onSort={onSort} align="right" /><SortableHeader label="Thời gian chờ" sortKey="eta" current={sort} onSort={onSort} align="right" /></tr></thead><tbody className="divide-y divide-slate-100">{loading ? Array.from({ length: 8 }, (_, index) => <tr key={index} className="h-15 animate-pulse"><td colSpan={5} className="px-4"><div className="h-4 rounded bg-slate-100" /></td></tr>) : rows.map((rider) => <tr key={rider.id} tabIndex={0} onClick={() => onSelect(rider)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(rider); }} className="h-16 cursor-pointer bg-white transition-colors hover:bg-blue-50/50 focus:bg-blue-50 focus:outline-none"><td className="px-4"><div className="font-semibold text-slate-900">{rider.name}</div><div className="font-mono text-xs text-slate-500">{rider.driver_id}</div></td><td className="px-4"><StatusBadge status={rider.status} /></td><td className="px-4"><div className="font-medium text-slate-700">{rider.district}</div><div className="text-xs text-slate-500">{rider.ward}</div></td><td className="px-4 text-right tabular-nums"><span className="font-semibold text-slate-900">{rider.delivered}</span><span className="text-slate-500">/{rider.total_assigned}</span><div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${rider.progress}%` }} /></div></td><td className="px-4 text-right tabular-nums text-slate-600">{rider.delivering > 0 ? formatDuration(rider.idle_delivery_seconds) : "—"}</td></tr>)}</tbody></table></div><div className="flex items-center justify-between border-t border-slate-200 px-4 py-3 text-sm"><span className="text-slate-500">Trang {page}/{pageCount} · {total} rider</span><div className="flex gap-2"><Button type="button" variant="secondary" disabled={page <= 1} onClick={onPrevious}><ChevronLeft size={16} /> Trước</Button><Button type="button" variant="secondary" disabled={page >= pageCount} onClick={onNext}>Sau <ChevronRight size={16} /></Button></div></div></div>;
+  return <div className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="flex flex-col gap-4 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between"><div><h2 id="rider-status-heading" className="text-base font-bold text-slate-950">Trạng thái rider</h2><p className="mt-0.5 text-sm text-slate-500">Hiển thị {total}/{allTotal} rider · Chọn một dòng để xem chi tiết</p></div><label className="relative block w-full lg:w-80"><span className="sr-only">Tìm rider</span><Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><Input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Tìm tên, mã, COT hoặc khu vực" className="pl-9" /></label></div><div className="max-h-[560px] min-h-[360px] overflow-auto"><table className="w-full min-w-[900px] table-fixed text-left text-sm"><thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-600 shadow-[0_1px_0_#e2e8f0]"><tr><SortableHeader label="Rider" sortKey="name" current={sort} onSort={onSort} className="w-[24%]" /><SortableHeader label="Trạng thái" sortKey="status" current={sort} onSort={onSort} className="w-[14%]" /><th className="px-4 py-3 font-semibold">Khu vực</th><SortableHeader label="COT" sortKey="cot" current={sort} onSort={onSort} className="w-[12%]" /><SortableHeader label="Đã giao" sortKey="delivered" current={sort} onSort={onSort} align="right" /><SortableHeader label="Thời gian chờ" sortKey="eta" current={sort} onSort={onSort} align="right" /></tr></thead><tbody className="divide-y divide-slate-100">{loading ? Array.from({ length: 8 }, (_, index) => <tr key={index} className="h-15 animate-pulse"><td colSpan={6} className="px-4"><div className="h-4 rounded bg-slate-100" /></td></tr>) : rows.map((rider) => <tr key={rider.id} tabIndex={0} onClick={() => onSelect(rider)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(rider); }} className="h-16 cursor-pointer bg-white transition-colors hover:bg-blue-50/50 focus:bg-blue-50 focus:outline-none"><td className="px-4"><div className="font-semibold text-slate-900">{rider.name}</div><div className="font-mono text-xs text-slate-500">{rider.driver_id}</div></td><td className="px-4"><StatusBadge status={rider.status} /></td><td className="px-4"><div className="font-medium text-slate-700">{rider.district}</div><div className="text-xs text-slate-500">{rider.ward}</div></td><td className="px-4"><CotBadge cot={rider.cot} /></td><td className="px-4 text-right tabular-nums"><span className="font-semibold text-slate-900">{rider.delivered}</span><span className="text-slate-500">/{rider.total_assigned}</span><div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${rider.progress}%` }} /></div></td><td className="px-4 text-right tabular-nums text-slate-600">{rider.delivering > 0 ? formatDuration(rider.idle_delivery_seconds) : "—"}</td></tr>)}</tbody></table></div><div className="flex items-center justify-between border-t border-slate-200 px-4 py-3 text-sm"><span className="text-slate-500">Trang {page}/{pageCount} · {total} rider</span><div className="flex gap-2"><Button type="button" variant="secondary" disabled={page <= 1} onClick={onPrevious}><ChevronLeft size={16} /> Trước</Button><Button type="button" variant="secondary" disabled={page >= pageCount} onClick={onNext}>Sau <ChevronRight size={16} /></Button></div></div></div>;
 });
 
 function PerformanceChart({ totals, className }: { totals: { assigned: number; delivered: number; delivering: number; failed: number }; className?: string }) {
@@ -410,12 +422,12 @@ function RiderDetails({ rider, onClose }: { rider: DisplayRider; onClose: () => 
       <button type="button" aria-label="Đóng chi tiết rider" className="fixed inset-0 z-40 bg-slate-950/20" onClick={onClose} />
       <aside role="dialog" aria-modal="true" aria-labelledby="rider-details-title" className="fixed inset-y-0 right-0 z-50 flex h-dvh w-full max-w-md flex-col overflow-hidden border-l border-slate-200 bg-white shadow-xl">
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 p-6">
-          <div><p className="text-xs font-bold uppercase tracking-wider text-blue-700">Chi tiết rider</p><h2 id="rider-details-title" className="mt-1 text-xl font-bold text-slate-950">{rider.name}</h2><p className="text-sm text-slate-500">{rider.driver_id} · {rider.kv}</p></div>
+          <div><p className="text-xs font-bold uppercase tracking-wider text-blue-700">Chi tiết rider</p><h2 id="rider-details-title" className="mt-1 text-xl font-bold text-slate-950">{rider.name}</h2><p className="text-sm text-slate-500">{rider.driver_id} · {rider.kv} · {rider.cot}</p></div>
           <Button type="button" variant="secondary" aria-label="Đóng" className="size-9 shrink-0 px-0" onClick={onClose}><X size={17} /></Button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-scroll p-6 [scrollbar-gutter:stable]">
-          <StatusBadge status={rider.status} />
-          <dl className="mt-6 divide-y divide-slate-100 border-y border-slate-100">{[["Khu vực", `${rider.ward}, ${rider.district}`], ["Đơn được phân", rider.total_assigned], ["Đã giao", rider.delivered], ["Đang giao", rider.delivering], ["Giao lỗi", rider.failed], ["Tỷ lệ giao lỗi", formatFailureRate(rider)], ["Tiến độ", `${rider.progress}%`], ["Thời gian chờ", formatDuration(rider.idle_delivery_seconds)], ["Giao đầu tiên", formatDateTime(rider.first_delivery_at)]].map(([label, value]) => <div key={label} className="flex items-center justify-between gap-4 py-3"><dt className="text-sm text-slate-500">{label}</dt><dd className="text-right text-sm font-semibold text-slate-900">{value}</dd></div>)}</dl>
+          <div className="flex flex-wrap gap-2"><StatusBadge status={rider.status} /><CotBadge cot={rider.cot} /></div>
+          <dl className="mt-6 divide-y divide-slate-100 border-y border-slate-100">{[["Khu vực", `${rider.ward}, ${rider.district}`], ["COT", rider.cot], ["Đơn được phân", rider.total_assigned], ["Đã giao", rider.delivered], ["Đang giao", rider.delivering], ["Giao lỗi", rider.failed], ["Tỷ lệ giao lỗi", formatFailureRate(rider)], ["Tiến độ", `${rider.progress}%`], ["Thời gian chờ", formatDuration(rider.idle_delivery_seconds)], ["Giao đầu tiên", formatDateTime(rider.first_delivery_at)]].map(([label, value]) => <div key={label} className="flex items-center justify-between gap-4 py-3"><dt className="text-sm text-slate-500">{label}</dt><dd className="text-right text-sm font-semibold text-slate-900">{value}</dd></div>)}</dl>
         </div>
       </aside>
     </>,
@@ -427,7 +439,7 @@ function SortableHeader({ label, sortKey, current, onSort, align, className }: {
 function FilterField({ label, children }: { label: string; children: React.ReactNode }) { return <label className="space-y-1.5"><span className="block text-xs font-semibold text-slate-600">{label}</span>{children}</label>; }
 function FilterChip({ children }: { children: React.ReactNode }) { return <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">{children}</span>; }
 function getRiderStatus(row: RealtimeRider): RiderStatus { const failureRate = row.total_assigned > 0 ? row.failed / row.total_assigned : 0; if ((row.total_assigned > 0 && row.delivered === 0) || (row.delivering > 0 && row.idle_delivery_seconds > 3600) || failureRate >= HIGH_FAILURE_RATE) return "warning"; return row.delivering > 0 ? "delivering" : "completed"; }
-function compareRiders(a: DisplayRider, b: DisplayRider, key: SortKey) { if (key === "name") return a.name.localeCompare(b.name, "vi", { numeric: true }); if (key === "status") return STATUS_ORDER[a.status] - STATUS_ORDER[b.status]; if (key === "eta") return a.idle_delivery_seconds - b.idle_delivery_seconds; return a.delivered - b.delivered; }
+function compareRiders(a: DisplayRider, b: DisplayRider, key: SortKey) { if (key === "name") return a.name.localeCompare(b.name, "vi", { numeric: true }); if (key === "status") return STATUS_ORDER[a.status] - STATUS_ORDER[b.status]; if (key === "cot") return a.cot.localeCompare(b.cot, "vi", { numeric: true }); if (key === "eta") return a.idle_delivery_seconds - b.idle_delivery_seconds; return a.delivered - b.delivered; }
 function buildDistrictDetails(riders: DisplayRider[]): DistrictDetail[] {
   const groups = new Map<string, DisplayRider[]>();
   for (const rider of riders) groups.set(rider.district, [...(groups.get(rider.district) ?? []), rider]);
