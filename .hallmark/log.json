@@ -1,79 +1,93 @@
-[
-  {
-    "date": "2026-08-16",
-    "macrostructure": "Calendar Pocket",
-    "theme": "Cobalt adapted",
-    "enrichment": "read-only monthly OFF calendar",
-    "brief": "Public no-login rider OFF schedule calendar lookup by rider ID"
-  },
-  {
-    "date": "2026-08-12",
-    "macrostructure": "Ecosystem Index",
-    "theme": "Cobalt adapted",
-    "enrichment": "none",
-    "brief": "Dense route index and editable PUP assignment ledger"
-  },
-  {
-    "date": "2026-08-11",
-    "macrostructure": "Map / Diagram",
-    "theme": "Cobalt adapted",
-    "enrichment": "none",
-    "brief": "Weekly pickup replacement matrix and searchable rider combobox"
-  },
-  {
-    "date": "2026-07-27",
-    "macrostructure": "Split Studio",
-    "theme": "Cobalt",
-    "enrichment": "none",
-    "brief": "Return order lookup operational ledger redesign"
-  },
-  {
-    "date": "2026-07-25",
-    "macrostructure": "Catalogue",
-    "theme": "Coral",
-    "enrichment": "none",
-    "brief": "Private personal note dashboard for authenticated staff"
-  },
-  {
-    "date": "2026-07-20",
-    "macrostructure": "Separated Decision Lanes",
-    "theme": "Cobalt adapted",
-    "enrichment": "multi-date calendar and evidence preview",
-    "brief": "Split pending and approved OFF queues with multi-date leave evidence"
-  },
-  {
-    "date": "2026-07-20",
-    "macrostructure": "Verification Desk",
-    "theme": "Cobalt adapted",
-    "enrichment": "three-step operational brief",
-    "brief": "Public no-login rider OFF registration with identity verification"
-  },
-  {
-    "date": "2026-07-20",
-    "macrostructure": "Weekly Dispatch Board",
-    "theme": "Cobalt adapted",
-    "enrichment": "data-native daily load strip",
-    "brief": "Internal rider OFF request approval and attendance scheduling"
-  },
-  {
-    "date": "2026-07-19",
-    "macrostructure": "Daily Dossier",
-    "theme": "Cobalt adapted",
-    "enrichment": "data-native paired bars",
-    "brief": "Per-rider daily Delivery and Pickup performance page"
-  },
-  {
-    "date": "2026-07-19",
-    "macrostructure": "Workbench",
-    "theme": "Cobalt adapted",
-    "enrichment": "none",
-    "brief": "Technical redesign of the Riders operations registry"
-  },
-  {
-    "date": "2026-07-19",
-    "macrostructure": "Control Ledger",
-    "theme": "Cobalt adapted",
-    "enrichment": "data-native SVG donuts",
-    "brief": "KV5 KV6 volume dashboard with monthly daily averages and Failed rider rankings"
-  }
+﻿[
+    {
+        "date":  "2026-08-28",
+        "macrostructure":  "Control Ledger",
+        "theme":  "custom (laser cyan · đêm ops căng)",
+        "enrichment":  "laser grid scanline",
+        "brief":  "Volume \u0026 Delivery Control header breakthrough — đêm ops căng, tín hiệu laser, chính xác"
+    },
+    {
+        "date":  "2026-08-28",
+        "macrostructure":  "Bento Grid",
+        "theme":  "Cobalt adapted",
+        "enrichment":  "none",
+        "brief":  "Rider violations management — Bento stats, ledger and add drawer (ops dispatch · monitor \u0026 intervene · technical)"
+    },
+    {
+        "date":  "2026-08-16",
+        "macrostructure":  "Calendar Pocket",
+        "theme":  "Cobalt adapted",
+        "enrichment":  "read-only monthly OFF calendar",
+        "brief":  "Public no-login rider OFF schedule calendar lookup by rider ID"
+    },
+    {
+        "date":  "2026-08-12",
+        "macrostructure":  "Ecosystem Index",
+        "theme":  "Cobalt adapted",
+        "enrichment":  "none",
+        "brief":  "Dense route index and editable PUP assignment ledger"
+    },
+    {
+        "date":  "2026-08-11",
+        "macrostructure":  "Map / Diagram",
+        "theme":  "Cobalt adapted",
+        "enrichment":  "none",
+        "brief":  "Weekly pickup replacement matrix and searchable rider combobox"
+    },
+    {
+        "date":  "2026-07-27",
+        "macrostructure":  "Split Studio",
+        "theme":  "Cobalt",
+        "enrichment":  "none",
+        "brief":  "Return order lookup operational ledger redesign"
+    },
+    {
+        "date":  "2026-07-25",
+        "macrostructure":  "Catalogue",
+        "theme":  "Coral",
+        "enrichment":  "none",
+        "brief":  "Private personal note dashboard for authenticated staff"
+    },
+    {
+        "date":  "2026-07-20",
+        "macrostructure":  "Separated Decision Lanes",
+        "theme":  "Cobalt adapted",
+        "enrichment":  "multi-date calendar and evidence preview",
+        "brief":  "Split pending and approved OFF queues with multi-date leave evidence"
+    },
+    {
+        "date":  "2026-07-20",
+        "macrostructure":  "Verification Desk",
+        "theme":  "Cobalt adapted",
+        "enrichment":  "three-step operational brief",
+        "brief":  "Public no-login rider OFF registration with identity verification"
+    },
+    {
+        "date":  "2026-07-20",
+        "macrostructure":  "Weekly Dispatch Board",
+        "theme":  "Cobalt adapted",
+        "enrichment":  "data-native daily load strip",
+        "brief":  "Internal rider OFF request approval and attendance scheduling"
+    },
+    {
+        "date":  "2026-07-19",
+        "macrostructure":  "Daily Dossier",
+        "theme":  "Cobalt adapted",
+        "enrichment":  "data-native paired bars",
+        "brief":  "Per-rider daily Delivery and Pickup performance page"
+    },
+    {
+        "date":  "2026-07-19",
+        "macrostructure":  "Workbench",
+        "theme":  "Cobalt adapted",
+        "enrichment":  "none",
+        "brief":  "Technical redesign of the Riders operations registry"
+    },
+    {
+        "date":  "2026-07-19",
+        "macrostructure":  "Control Ledger",
+        "theme":  "Cobalt adapted",
+        "enrichment":  "data-native SVG donuts",
+        "brief":  "KV5 KV6 volume dashboard with monthly daily averages and Failed rider rankings"
+    }
 ]

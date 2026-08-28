@@ -1,6 +1,13 @@
+/* Hallmark · macrostructure: Control Ledger · theme: custom (vibe: "đêm ops căng, tín hiệu laser, chính xác" · paper oklch(0.13 0.015 260) dark · accent oklch(0.78 0.15 195) laser cyan · Space Grotesk + JetBrains Mono) · genre: modern-minimal · enrichment: laser grid scanline
+ * pre-emit critique: P5 H5 E5 S5 R5 V5 · contrast: pass (40–41) · tokens: pass (48) · mobile: pass (34, 49–57)
+ */
 "use client";
 
 import Link from "next/link";
+import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
+
+const spaceGrotesk = Space_Grotesk({ subsets: ["latin"], variable: "--font-display-custom", weight: ["600", "700"], display: "swap" });
+const jetMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono-custom", display: "swap" });
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, ChevronRight, CircleAlert, Clock3, Hourglass, MapPin, PackageCheck, PackageOpen, PackageX, RefreshCcw, TimerOff, Truck, UserRoundX } from "lucide-react";
 import { format, subDays } from "date-fns";
@@ -97,12 +104,21 @@ export function DashboardView() {
   const areaBreakdown = useMemo(() => buildAreaBreakdown(state, dateRange), [dateRange, state]);
   const alerts = useMemo(() => buildAlerts(state, summary), [state, summary]);
 
-  return <div className="dashboard-control mx-auto max-w-[1600px] space-y-6">
-    <header className="dashboard-command-header">
-      <div className="min-w-0">
-        <div className="dashboard-kicker"><span className="dashboard-live-dot" />Operations control · KV5 + KV6</div>
+  return <div className={cn("dashboard-control mx-auto max-w-[1600px] space-y-6", spaceGrotesk.variable, jetMono.variable)}>
+    <header className="dashboard-command-header is-custom">
+      <span className="dashboard-laser-grid" aria-hidden="true" />
+      <span className="dashboard-laser-sweep" aria-hidden="true" />
+      <span className="dashboard-laser-glow" aria-hidden="true" />
+      <div className="min-w-0 relative">
+        <div className="dashboard-kicker">
+          <span className="dashboard-live-dot is-laser" />
+          <span>Operations control · KV5 + KV6 — đêm ops</span>
+          <span className="dashboard-kicker-laser">laser</span>
+        </div>
         <h1>Volume & Delivery Control</h1>
-        <p>Volume, delivery status và Failed rider trong đúng phạm vi Khu vực 5–6.</p>
+        <p>
+          Volume, delivery status và Failed rider trong đúng phạm vi Khu vực 5–6.<span className="dashboard-kicker-precise"> — chính xác từng tín hiệu</span>
+        </p>
       </div>
       <div className="dashboard-command-actions">
         <Select value={range} onChange={(event) => setRange(event.target.value as RangeKey)} aria-label="Khoảng thời gian"><option value="today">Hôm nay</option><option value="yesterday">Hôm qua</option><option value="7d">7 ngày gần nhất</option></Select>
@@ -260,7 +276,27 @@ async function fetchTopViolations(endDate: string): Promise<{ data: TopViolation
   }
 }
 
-export const KpiCard = memo(function KpiCard({ href, icon: Icon, label, value, context, tone, loading, className }: { href: string; icon: typeof Activity; label: string; value: number | string; context: string; tone: "blue" | "green" | "red" | "slate"; loading: boolean; className?: string }) { return <Link href={href} className={cn("dashboard-kpi-card", `is-${tone}`, className)}><div className="dashboard-kpi-heading"><p>{label}</p><Icon size={17} /></div><p className="dashboard-kpi-value">{loading ? "—" : typeof value === "number" ? value.toLocaleString("vi-VN") : value}</p><p className="dashboard-kpi-context">{context}</p></Link>; });
+export const KpiCard = memo(function KpiCard({ href, icon: Icon, label, value, context, tone, loading, className }: { href: string; icon: typeof Activity; label: string; value: number | string; context: string; tone: "blue" | "green" | "red" | "slate"; loading: boolean; className?: string }) {
+  return (
+    <Link
+      href={href}
+      aria-busy={loading}
+      data-state={loading ? "loading" : "idle"}
+      className={cn("dashboard-kpi-card", `is-${tone}`, loading && "is-loading", className)}
+    >
+      <div className="dashboard-kpi-heading">
+        <p>{label}</p>
+        <span className={cn("dashboard-kpi-icon", `is-${tone}`)}>
+          <Icon size={17} aria-hidden="true" />
+        </span>
+      </div>
+      <p className="dashboard-kpi-value" aria-live="polite">
+        {loading ? <span className="dashboard-kpi-skeleton" aria-hidden="true" /> : typeof value === "number" ? value.toLocaleString("vi-VN") : value}
+      </p>
+      <p className="dashboard-kpi-context">{context}</p>
+    </Link>
+  );
+});
 
 function AreaBreakdown({ breakdown, loading }: { breakdown: AreaBreakdown; loading: boolean }) {
   return (
@@ -273,25 +309,29 @@ function AreaBreakdown({ breakdown, loading }: { breakdown: AreaBreakdown; loadi
 
 function AreaBreakdownColumn({ label, data, loading }: { label: string; data: AreaTotals; loading: boolean }) {
   const rows = [
-    { label: "Delivery volume", value: data.deliveryVolume },
-    { label: "Pickup volume", value: data.pickupVolume },
-    { label: "Assigned", value: data.assigned },
-    { label: "Delivered", value: data.delivered },
-    { label: "Delivering", value: data.delivering },
-    { label: "Failed", value: data.failed },
+    { label: "Delivery volume", value: data.deliveryVolume, tone: "blue" as const },
+    { label: "Pickup volume", value: data.pickupVolume, tone: "slate" as const },
+    { label: "Assigned", value: data.assigned, tone: "slate" as const },
+    { label: "Delivered", value: data.delivered, tone: "green" as const },
+    { label: "Delivering", value: data.delivering, tone: "blue" as const },
+    { label: "Failed", value: data.failed, tone: "red" as const },
   ];
   const totalVolume = data.deliveryVolume + data.pickupVolume;
   return (
-    <article className="rounded-xl border border-slate-200 bg-white p-4">
+    <article className={cn("rounded-xl border bg-white p-4 transition-colors", loading ? "border-slate-200" : "border-slate-200 hover:border-slate-300")} data-state={loading ? "loading" : "idle"}>
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-black text-slate-950">{label}</h3>
-        <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">{loading ? "—" : `${totalVolume.toLocaleString("vi-VN")} volume`}</span>
+        <h3 className="text-sm font-black tracking-tight text-slate-950">{label}</h3>
+        <span className={cn("rounded-full px-2.5 py-1 font-mono text-xs font-bold", loading ? "bg-slate-100 text-slate-400" : "bg-slate-900 text-white")}>
+          {loading ? "…" : `${totalVolume.toLocaleString("vi-VN")} volume`}
+        </span>
       </div>
       <dl className="mt-4 grid grid-cols-3 gap-3">
         {rows.map((row) => (
-          <div key={row.label}>
-            <dt className="text-xs text-slate-500">{row.label}</dt>
-            <dd className="mt-0.5 font-black tabular-nums text-slate-950">{loading ? "—" : row.value.toLocaleString("vi-VN")}</dd>
+          <div key={row.label} className={cn("rounded-lg p-2", row.tone === "red" && row.value > 0 ? "bg-red-50" : row.tone === "green" ? "bg-emerald-50/50" : "bg-slate-50")}>
+            <dt className="font-mono text-[10px] font-bold uppercase tracking-wide text-slate-500">{row.label}</dt>
+            <dd className={cn("mt-1 font-mono text-sm font-black tabular-nums", row.tone === "red" && row.value > 0 ? "text-red-700" : row.tone === "green" ? "text-emerald-700" : "text-slate-900")}>
+              {loading ? <span className="inline-block h-4 w-12 animate-pulse rounded bg-slate-200" aria-hidden="true" /> : row.value.toLocaleString("vi-VN")}
+            </dd>
           </div>
         ))}
       </dl>
@@ -340,22 +380,59 @@ function FailedLeaderboard({ title, subtitle, rows, loading }: { title: string; 
 
 function TopViolationsCard({ data, loading, endDate }: { data: TopViolations; loading: boolean; endDate: string }) {
   const totalStatuses = data.statuses.reduce((sum, item) => sum + item.count, 0);
-  return <article className="dashboard-hold-card">
-    <div className="dashboard-card-title"><span><CircleAlert size={17} /></span><div><h3>Vi phạm chấm công theo rider</h3><p>7 ngày kết thúc {formatDate(endDate)} · KV5 + KV6</p></div></div>
-    <div className="dashboard-violation-strip">
-      {data.statuses.map((status) => (
-        <div key={status.key} className={cn("dashboard-violation-chip", status.severity === "critical" ? "is-critical" : "is-warning")}>
-          <strong>{loading ? "—" : status.count.toLocaleString("vi-VN")}</strong>
-          <span>{status.label}</span>
+  return (
+    <article className="dashboard-hold-card is-violations">
+      <div className="dashboard-card-title">
+        <span className="is-violation">
+          <CircleAlert size={17} aria-hidden="true" />
+        </span>
+        <div>
+          <h3>Vi phạm chấm công theo rider</h3>
+          <p>7 ngày kết thúc {formatDate(endDate)} · KV5 + KV6 · bấm để sang hồ sơ vi phạm</p>
         </div>
-      ))}
-      {!loading && totalStatuses === 0 ? <p className="dashboard-violation-empty">Không có vi phạm chấm công trong 7 ngày này.</p> : null}
-    </div>
-    <div className="dashboard-hold-list">
-      {loading ? Array.from({ length: 5 }, (_, index) => <div key={index} className="dashboard-hold-row is-loading" />) : data.week.map((row, index) => <Link href={`/attendance?month=${endDate.slice(0, 7)}`} key={row.riderCode} className="dashboard-hold-row"><span className="dashboard-hold-rank">{String(index + 1).padStart(2, "0")}</span><div className="min-w-0"><strong>{row.riderName}</strong><p><MapPin size={11} />{row.riderCode} · {row.district}</p></div><div className="dashboard-hold-value"><strong>{row.total.toLocaleString("vi-VN")} vi phạm</strong><span>{row.breakdown.map((item) => `${item.label} ${item.count}`).join(" · ")}</span></div></Link>)}
-      {!loading && data.week.length === 0 ? <Empty text="Không có vi phạm chấm công trong 7 ngày này." /> : null}
-    </div>
-  </article>;
+        <Link href="/violations" className="dashboard-card-action">
+          Xem tất cả <ChevronRight size={14} aria-hidden="true" />
+        </Link>
+      </div>
+      <div className="dashboard-violation-strip">
+        {data.statuses.map((status) => (
+          <div key={status.key} className={cn("dashboard-violation-chip", status.severity === "critical" ? "is-critical" : "is-warning")}>
+            <strong>{loading ? "—" : status.count.toLocaleString("vi-VN")}</strong>
+            <span>{status.label}</span>
+          </div>
+        ))}
+        {!loading && totalStatuses === 0 ? <p className="dashboard-violation-empty">Không có vi phạm chấm công trong 7 ngày này.</p> : null}
+      </div>
+      <div className="dashboard-hold-list">
+        {loading
+          ? Array.from({ length: 5 }, (_, index) => <div key={index} className="dashboard-hold-row is-loading" />)
+          : data.week.map((row, index) => (
+              <Link href={`/violations?q=${encodeURIComponent(row.riderCode)}`} key={row.riderCode} className="dashboard-hold-row is-violation">
+                <span className="dashboard-hold-rank">{String(index + 1).padStart(2, "0")}</span>
+                <div className="min-w-0">
+                  <strong>{row.riderName}</strong>
+                  <p>
+                    <MapPin size={11} aria-hidden="true" />
+                    {row.riderCode} · {row.district}
+                  </p>
+                </div>
+                <div className="dashboard-hold-value">
+                  <strong>{row.total.toLocaleString("vi-VN")} vi phạm</strong>
+                  <span>{row.breakdown.map((item) => `${item.label} ${item.count}`).join(" · ")}</span>
+                </div>
+              </Link>
+            ))}
+        {!loading && data.week.length === 0 ? <Empty text="Không có vi phạm chấm công trong 7 ngày này." /> : null}
+      </div>
+      {!loading && data.week.length > 0 ? (
+        <div className="dashboard-card-footer">
+          <Link href="/violations" className="dashboard-card-footer-link">
+            Mở hồ sơ vi phạm <ChevronRight size={14} aria-hidden="true" />
+          </Link>
+        </div>
+      ) : null}
+    </article>
+  );
 }
 
 function DistrictOnHoldCard({ initialEndDate }: { initialEndDate: string }) {
@@ -573,8 +650,8 @@ export function WeeklyVolumeTrendWithDailyBars({ data, defaultWeeksRange = 4, lo
   const weeklyLine = chart.weeks.map((week, index) => `${plotLeft + (index * 7 + 3.5) * dayStep},${plotBottom - week.total / weeklyMax * plotHeight}`).join(" ");
 
   return <article className={cn("min-h-[430px] rounded-xl border border-slate-200 bg-white p-4", className)}>
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h3 className="font-semibold text-slate-950">Weekly Volume Trend (with Daily Breakdown)</h3><p className="mt-1 text-sm text-slate-500">Mỗi cột là một ngày; đường biểu diễn tổng volume của tuần.</p></div><div className="inline-flex self-start rounded-lg bg-slate-100 p-1"><button type="button" aria-pressed={weeksRange === 4} onClick={() => setWeeksRange(4)} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold text-slate-600", weeksRange === 4 && "bg-white text-blue-700 shadow-sm")}>4 tuần</button><button type="button" aria-pressed={weeksRange === 8} onClick={() => setWeeksRange(8)} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold text-slate-600", weeksRange === 8 && "bg-white text-blue-700 shadow-sm")}>8 tuần</button></div></div>
-    <div className="mt-4 flex flex-wrap items-center gap-2"><button type="button" aria-pressed={showBars} onClick={() => setShowBars((value) => !value)} className={cn("flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", showBars ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-400")}><span className="size-2 rounded-sm bg-blue-500" />Daily volume</button><button type="button" aria-pressed={showLine} onClick={() => setShowLine((value) => !value)} className={cn("flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", showLine ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-400")}><span className="h-0.5 w-3 bg-current" />Weekly total</button><span className="ml-auto text-[11px] text-slate-400">Cột: trục trái · Đường: trục phải</span></div>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h3 className="font-semibold tracking-tight text-slate-950">Weekly Volume Trend — <span className="text-[var(--color-accent)]">Daily × Weekly</span></h3><p className="mt-1 text-xs text-slate-500">Mỗi cột là một ngày · đường là tổng tuần</p></div><div className="inline-flex self-start rounded-lg bg-slate-100 p-1"><button type="button" aria-pressed={weeksRange === 4} onClick={() => setWeeksRange(4)} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold transition", weeksRange === 4 ? "bg-white text-[var(--color-accent)] shadow-sm" : "text-slate-600 hover:text-slate-900")}>4 tuần</button><button type="button" aria-pressed={weeksRange === 8} onClick={() => setWeeksRange(8)} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold transition", weeksRange === 8 ? "bg-white text-[var(--color-accent)] shadow-sm" : "text-slate-600 hover:text-slate-900")}>8 tuần</button></div></div>
+    <div className="mt-4 flex flex-wrap items-center gap-2"><button type="button" aria-pressed={showBars} onClick={() => setShowBars((value) => !value)} className={cn("flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", showBars ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]" : "bg-slate-100 text-slate-500")}><span className="size-2 rounded-sm bg-[var(--color-accent)]" />Daily volume</button><button type="button" aria-pressed={showLine} onClick={() => setShowLine((value) => !value)} className={cn("flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", showLine ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}><span className="h-0.5 w-3 bg-current" />Weekly total</button><span className="ml-auto text-xs text-slate-400">Cột: trục trái · Đường: trục phải</span></div>
     <div className={cn("relative mt-4 overflow-hidden", loading && "animate-pulse rounded bg-slate-50")} onMouseLeave={() => setHovered(null)}>
       <svg viewBox={`0 0 ${width} 300`} className="h-[300px] w-full" role="img" aria-label="Biểu đồ volume ngày và tổng tuần">
         {[0, 0.5, 1].map((ratio) => <g key={ratio}><line x1={plotLeft} y1={plotBottom - ratio * plotHeight} x2={plotRight} y2={plotBottom - ratio * plotHeight} stroke="var(--color-rule)" strokeDasharray={ratio === 0 ? undefined : "3 4"} /><text x={plotLeft - 6} y={plotBottom - ratio * plotHeight + 4} textAnchor="end" fontSize="10" fill="var(--color-muted)">{compactVolume(Math.round(dailyMax * ratio))}</text><text x={plotRight + 6} y={plotBottom - ratio * plotHeight + 4} fontSize="10" fill="var(--color-muted)">{compactVolume(Math.round(weeklyMax * ratio))}</text></g>)}
@@ -590,9 +667,58 @@ export function WeeklyVolumeTrendWithDailyBars({ data, defaultWeeksRange = 4, lo
 
 function VolumeAnalyticsChart({ analytics, grouping, loading, className }: { analytics: ReturnType<typeof buildVolumeAnalytics>; grouping: VolumeGrouping; loading: boolean; className?: string }) { const points = analytics.points; const max = Math.max(1, ...points.flatMap((point) => [point.delivery, point.pickup])); const delivery = points.map((point, index) => `${points.length > 1 ? index / (points.length - 1) * 100 : 0},${92 - point.delivery / max * 78}`).join(" "); const pickup = points.map((point, index) => `${points.length > 1 ? index / (points.length - 1) * 100 : 0},${92 - point.pickup / max * 78}`).join(" "); return <article className={cn("min-h-80 rounded-xl border border-slate-200 bg-white p-4", className)}><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-950">Xu hướng theo {grouping === "week" ? "tuần" : "tháng"}</h3><p className="mt-1 text-sm text-slate-500">Tổng volume và cơ cấu theo nguồn đơn.</p></div><div className="flex gap-3 text-xs text-slate-600"><span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-blue-600" />Delivery</span><span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-violet-500" />Pickup</span></div></div><div className={cn("mt-6 h-52", loading && "animate-pulse rounded bg-slate-50")}><svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" role="img" aria-label="Xu hướng volume theo thời gian"><line x1="0" y1="92" x2="100" y2="92" stroke="var(--color-rule)" /><line x1="0" y1="52" x2="100" y2="52" stroke="var(--color-rule)" strokeDasharray="2 2" /><polyline points={delivery} fill="none" stroke="var(--color-chart-1)" strokeWidth="2" vectorEffect="non-scaling-stroke" /><polyline points={pickup} fill="none" stroke="var(--color-chart-7)" strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg></div><div className="mt-2 flex justify-between text-xs text-slate-400"><span>{points[0]?.label ?? ""}</span><span>{points[points.length - 1]?.label ?? ""}</span></div></article>; }
 
-function VolumeComparisonCard({ analytics }: { analytics: ReturnType<typeof buildVolumeAnalytics> }) { const positive = analytics.change >= 0; return <article className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-sm font-medium text-slate-600">So với kỳ trước</p><div className="mt-3 flex items-end justify-between gap-3"><p className={cn("text-2xl font-bold tabular-nums", positive ? "text-emerald-700" : "text-red-700")}>{positive ? "+" : ""}{analytics.change.toFixed(1)}%</p><span className={cn("rounded-full px-2 py-1 text-xs font-semibold", positive ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}>{positive ? "Tăng" : "Giảm"}</span></div><div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3"><div><p className="text-xs text-slate-500">Kỳ hiện tại</p><p className="mt-1 font-bold tabular-nums text-slate-900">{analytics.current.toLocaleString("vi-VN")}</p></div><div><p className="text-xs text-slate-500">Kỳ trước</p><p className="mt-1 font-bold tabular-nums text-slate-900">{analytics.previous.toLocaleString("vi-VN")}</p></div></div></article>; }
+function VolumeComparisonCard({ analytics }: { analytics: ReturnType<typeof buildVolumeAnalytics> }) {
+  const positive = analytics.change >= 0;
+  return (
+    <article className="rounded-xl border border-slate-200 bg-white p-4">
+      <p className="text-xs font-bold tracking-wide text-slate-500">So với kỳ trước</p>
+      <div className="mt-3 flex items-end justify-between gap-3">
+        <p className={cn("text-3xl font-black tabular-nums tracking-tight", positive ? "text-emerald-600" : "text-red-600")}>
+          {positive ? "+" : ""}{analytics.change.toFixed(1)}%
+        </p>
+        <span className={cn("rounded-full px-2.5 py-1 text-xs font-bold", positive ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}>{positive ? "Tăng" : "Giảm"}</span>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3">
+        <div>
+          <p className="text-xs text-slate-500">Kỳ hiện tại</p>
+          <p className="mt-1 text-sm font-bold tabular-nums text-slate-900">{analytics.current.toLocaleString("vi-VN")}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">Kỳ trước</p>
+          <p className="mt-1 text-sm font-bold tabular-nums text-slate-900">{analytics.previous.toLocaleString("vi-VN")}</p>
+        </div>
+      </div>
+    </article>
+  );
+}
 
-function ProgressChart({ delivered, delivering, failed, className }: { delivered: number; delivering: number; failed: number; className?: string }) { const values = [{ label: "Delivered", value: delivered, color: "bg-emerald-500" }, { label: "Delivering", value: delivering, color: "bg-blue-600" }, { label: "Failed", value: failed, color: "bg-red-500" }]; const max = Math.max(1, ...values.map((item) => item.value)); return <article className={cn("min-h-72 rounded-xl border border-slate-200 bg-white p-4", className)}><h3 className="font-semibold text-slate-950">Delivery status</h3><p className="mt-1 text-sm text-slate-500">Latest daily snapshot · KV5 + KV6.</p><div className="mt-7 space-y-5">{values.map((item) => <div key={item.label}><div className="mb-1.5 flex justify-between text-sm"><span className="text-slate-600">{item.label}</span><strong className="tabular-nums text-slate-900">{item.value.toLocaleString("vi-VN")}</strong></div><div className="h-2.5 rounded-full bg-slate-100"><div className={cn("h-full rounded-full", item.color)} style={{ width: `${item.value / max * 100}%` }} /></div></div>)}</div></article>; }
+function ProgressChart({ delivered, delivering, failed, className }: { delivered: number; delivering: number; failed: number; className?: string }) {
+  const values = [
+    { label: "Delivered", value: delivered, color: "bg-emerald-500" },
+    { label: "Delivering", value: delivering, color: "bg-blue-600" },
+    { label: "Failed", value: failed, color: "bg-red-500" },
+  ];
+  const max = Math.max(1, ...values.map((item) => item.value));
+  return (
+    <article className={cn("min-h-72 rounded-xl border border-slate-200 bg-white p-4", className)}>
+      <h3 className="font-semibold text-slate-900">Delivery status</h3>
+      <p className="mt-1 text-sm text-slate-500">Latest daily snapshot · KV5 + KV6</p>
+      <div className="mt-7 space-y-5">
+        {values.map((item) => (
+          <div key={item.label}>
+            <div className="mb-1.5 flex justify-between text-sm">
+              <span className="text-slate-600">{item.label}</span>
+              <strong className="tabular-nums text-slate-900">{item.value.toLocaleString("vi-VN")}</strong>
+            </div>
+            <div className="h-2 rounded-full bg-slate-100">
+              <div className={cn("h-full rounded-full", item.color)} style={{ width: `${(item.value / max) * 100}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
 
 export function SectionCard({ title, description, href, linkLabel, children, className }: { title: string; description: string; href: string; linkLabel: string; children: React.ReactNode; className?: string }) { return <article className={cn("rounded-xl border border-slate-200 bg-white p-4", className)}><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-950">{title}</h3><p className="mt-1 text-sm text-slate-500">{description}</p></div><Link href={href} className="flex shrink-0 items-center gap-1 text-xs font-semibold text-blue-700 hover:text-blue-800">{linkLabel}<ChevronRight size={14} /></Link></div><div className="mt-5">{children}</div></article>; }
 
