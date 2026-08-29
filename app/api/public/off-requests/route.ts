@@ -96,7 +96,7 @@ export async function POST(request: Request) {
     reason: formData?.get("reason") || undefined,
   });
   if (!parsed.success) {
-    return NextResponse.json({ success: false, error: "Thông tin đăng ký chưa hợp lệ." }, { status: 400 });
+    return NextResponse.json({ success: false, error: "Thông tin đăng ký chưa hợp lệ.", issues: parsed.error.flatten() }, { status: 400 });
   }
 
   const evidence = evidenceValue instanceof File && evidenceValue.size > 0 ? evidenceValue : null;

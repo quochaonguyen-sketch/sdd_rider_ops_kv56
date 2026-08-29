@@ -123,7 +123,7 @@ export function PublicOffRegistration() {
     setSubmitting(true);
     setError(null);
     if (honeypot.trim()) {
-      setError("Yêu cầu không hợp lệ.");
+      setError("Yêu cầu nghi ngờ tự động, vui lòng không điền trường ẩn.");
       setSubmitting(false);
       return;
     }
@@ -156,9 +156,12 @@ export function PublicOffRegistration() {
       method: "POST",
       body,
     });
-    const result = await response.json().catch(() => null);
+    const result = await response.json().catch(() => null) as { success?: boolean; error?: string; issues?: { fieldErrors: Record<string, string[]>; formErrors: string[] } } | null;
     if (!response.ok || !result?.success) {
-      setError(result?.error ?? "Không thể gửi yêu cầu. Vui lòng thử lại.");
+      const detail = result?.issues
+        ? [...Object.values(result.issues.fieldErrors).flat(), ...result.issues.formErrors].filter(Boolean).join(" ")
+        : "";
+      setError(detail ? `${result?.error ?? "Thông tin đăng ký chưa hợp lệ."} ${detail}` : (result?.error ?? "Không thể gửi yêu cầu. Vui lòng thử lại."));
       setSubmitting(false);
       return;
     }
