@@ -156,7 +156,7 @@ export function PublicOffRegistration() {
       method: "POST",
       body,
     });
-    const result = await response.json().catch(() => null) as { success?: boolean; error?: string; issues?: { fieldErrors: Record<string, string[]>; formErrors: string[] } } | null;
+    const result = await response.json().catch(() => null) as { success?: boolean; error?: string; issues?: { fieldErrors: Record<string, string[]>; formErrors: string[] }; batch_id?: string; rider_name?: string | null; off_dates?: string[] } | null;
     if (!response.ok || !result?.success) {
       const detail = result?.issues
         ? [...Object.values(result.issues.fieldErrors).flat(), ...result.issues.formErrors].filter(Boolean).join(" ")
@@ -167,9 +167,9 @@ export function PublicOffRegistration() {
     }
     sessionStorage.setItem(spamKey, String(Date.now()));
     setReceipt({
-      batchId: result.batch_id,
-      name: result.rider_name,
-      dates: result.off_dates,
+      batchId: result.batch_id!,
+      name: result.rider_name ?? null,
+      dates: result.off_dates ?? [],
       email: form.requester_email,
     });
     setSubmitting(false);
