@@ -143,7 +143,7 @@ export async function googleSheetsAccessToken() {
   return result.access_token;
 }
 
-function dateValue(value: unknown) {
+function dateValue(value: unknown, fallbackYear?: number) {
   if (typeof value === "number") {
     const parsed = XLSX.SSF.parse_date_code(value);
     if (parsed) {
@@ -155,6 +155,11 @@ function dateValue(value: unknown) {
   if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
   const vi = text.match(/^([0-3]?\d)[-/]([01]?\d)[-/](\d{4})$/);
   if (vi) return `${vi[3]}-${vi[2].padStart(2, "0")}-${vi[1].padStart(2, "0")}`;
+  const viShort = text.match(/^([0-3]?\d)[-/]([01]?\d)$/);
+  if (viShort) {
+    const year = fallbackYear ?? new Date().getFullYear();
+    return `${year}-${viShort[2].padStart(2, "0")}-${viShort[1].padStart(2, "0")}`;
+  }
   return null;
 }
 
@@ -192,13 +197,15 @@ export async function syncScheduleUpdatesToGoogleSheet(
   const rowNumbersByKey = new Map<string, number[]>();
   const blankRowNumbers: number[] = [];
 
+  // Fallback year for short dates like "1/9" without year
+  const fallbackYear = updates[0] ? Number(String(updates[0].work_date).slice(0, 4)) : new Date().getFullYear();
   rows.forEach((row, index) => {
     if (index > 0 && !row.slice(0, 4).some((cell) => String(cell ?? "").trim())) {
       blankRowNumbers.push(index + 1);
       return;
     }
     const riderCode = String(row[0] ?? "").trim();
-    const workDate = dateValue(row[2]);
+    const workDate = dateValue(row[2], fallbackYear);
     if (!riderCode || !workDate) return;
     const key = `${riderCode}|${workDate}`;
     const rowNumbers = rowNumbersByKey.get(key) ?? [];

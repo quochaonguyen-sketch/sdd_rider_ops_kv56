@@ -53,12 +53,13 @@ function statusValue(value: unknown): Status | null {
   if (text === "khong di giao") return "NO_DELIVERY";
   return null;
 }
-function dateValue(value: unknown) {
+function dateValue(value: unknown, fallbackYear?: number) {
   if (typeof value === "number") { const parsed = XLSX.SSF.parse_date_code(value); if (parsed) return `${parsed.y}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`; }
   if (value instanceof Date && !Number.isNaN(value.getTime())) return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
   const text = String(value ?? "").trim();
   const iso = text.match(/^(\d{4})[-/]([01]?\d)[-/]([0-3]?\d)$/); if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
   const vi = text.match(/^([0-3]?\d)[-/]([01]?\d)[-/](\d{4})$/); if (vi) return `${vi[3]}-${vi[2].padStart(2, "0")}-${vi[1].padStart(2, "0")}`;
+  const viShort = text.match(/^([0-3]?\d)[-/]([01]?\d)$/); if (viShort) { const year = fallbackYear ?? new Date().getFullYear(); return `${year}-${viShort[2].padStart(2, "0")}-${viShort[1].padStart(2, "0")}`; }
   return null;
 }
 
@@ -116,12 +117,13 @@ export async function POST(request: Request) {
     rows = result?.values ?? [];
   } catch (error) { return NextResponse.json({ success: false, error: error instanceof Error ? error.message : "Không đọc được sheet OFF" }, { status: 400 }); }
 
+  const fallbackYear = Number(range.start.slice(0, 4));
   const issues: Array<{ row: number; error: string }> = [];
   const records = new Map<string, { rider_code: string; work_date: string; status: Status; source_row: number }>();
   rows.forEach((row, index) => {
     const code = String(row[0] ?? "").trim();
     if (!code || ["id", "rider id"].includes(normalize(code))) return;
-    const workDate = dateValue(row[2]); const status = statusValue(row[3]);
+    const workDate = dateValue(row[2], fallbackYear); const status = statusValue(row[3]);
     if (!workDate || !status) { if (row.slice(0, 4).some((cell) => String(cell ?? "").trim())) issues.push({ row: index + 1, error: !workDate ? "Ngày không hợp lệ" : "Trạng thái không hợp lệ" }); return; }
     if (workDate >= range.start && workDate <= range.end) records.set(`${code}|${workDate}`, { rider_code: code, work_date: workDate, status, source_row: index + 1 });
   });

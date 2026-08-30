@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { canManageOperations } from "@/lib/auth/permissions";
 import { sendOffRequestDecisionEmail, type OffRequestEmailResult } from "@/lib/email/off-request-notification";
 import { processAttendanceSheetSync, type AttendanceSheetSyncResult } from "@/lib/google/attendance-sheet-sync";
+import { invalidateAttendanceCache } from "@/lib/cache/operations-cache";
 import { normalizeCot, normalizeWard, offArea } from "@/lib/off-schedule/ward";
 import type { WardConflict } from "@/types";
 
@@ -58,6 +59,8 @@ export async function PATCH(request: Request, context: RouteContext<"/api/off-re
     }, { onConflict: "rider_code,work_date" });
     if (attendanceError) return NextResponse.json({ success: false, error: attendanceError.message }, { status: 500 });
 
+    invalidateAttendanceCache(String(offRequest.off_date).slice(0, 7));
+
     sheetSync = await processAttendanceSheetSync(300, parsed.data.sheet_url ?? null);
   } else if (parsed.data.action === "REJECT" && offRequest.status === "APPROVED") {
     const { data: attendance } = await admin
@@ -69,6 +72,7 @@ export async function PATCH(request: Request, context: RouteContext<"/api/off-re
     if (attendance?.raw_data && (attendance.raw_data as Record<string, unknown>).request_id === offRequest.id) {
       const { error: removeError } = await admin.from("attendance_logs").delete().eq("id", attendance.id);
       if (removeError) return NextResponse.json({ success: false, error: removeError.message }, { status: 500 });
+      invalidateAttendanceCache(String(offRequest.off_date).slice(0, 7));
     }
 
     sheetSync = await processAttendanceSheetSync(300, parsed.data.sheet_url ?? null);
