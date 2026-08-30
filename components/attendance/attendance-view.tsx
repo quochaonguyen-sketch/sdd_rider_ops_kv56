@@ -1457,13 +1457,13 @@ function statusChipClasses(status: ScheduleStatus) {
 }
 
 function statusClasses(status: ScheduleStatus) {
-  if (status === "ON") return "border-emerald-200 bg-emerald-100 text-emerald-800";
-  if (status === "OFF_WEEKLY") return "border-amber-200 bg-amber-100 text-amber-800";
-  if (status === "OFF_APPROVED") return "border-blue-200 bg-blue-100 text-blue-800";
+  if (status === "ON") return "border-slate-200 bg-white text-slate-600";
+  if (status === "OFF_WEEKLY") return "border-[var(--color-ink)] bg-[var(--color-ink)] text-[var(--color-paper)] shadow-sm";
+  if (status === "OFF_APPROVED") return "border-emerald-200 bg-emerald-50 text-emerald-800";
   if (status === "OFF_UNEXPECTED") return "border-red-200 bg-red-100 text-red-800";
-  if (status === "WORKING_REST_DAY") return "border-cyan-200 bg-cyan-100 text-cyan-800";
-  if (status === "NO_PICKUP") return "border-slate-300 bg-slate-200 text-slate-800";
-  if (status === "NO_DELIVERY") return "border-violet-200 bg-violet-100 text-violet-800";
+  if (status === "WORKING_REST_DAY") return "border-violet-200 bg-violet-50 text-violet-800";
+  if (status === "NO_PICKUP") return "border-amber-200 bg-amber-50 text-amber-800";
+  if (status === "NO_DELIVERY") return "border-orange-200 bg-orange-50 text-orange-800";
   return "border-slate-200 bg-slate-100 text-slate-500";
 }
 

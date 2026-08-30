@@ -64,6 +64,12 @@ export function OffScheduleView() {
         return;
       }
     }
+    // Optimistic: biến mất khỏi queue ngay, đồng bộ nền
+    const previousRequests = requests;
+    if (action === "APPROVE" || action === "REJECT") {
+      const optimisticStatus = action === "APPROVE" ? "APPROVED" : "REJECTED";
+      setRequests((current) => current.map((request) => request.id === item.id ? { ...request, status: optimisticStatus, reviewed_at: new Date().toISOString() } : request));
+    }
     const response = await fetch(`/api/off-requests/${item.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -74,6 +80,7 @@ export function OffScheduleView() {
     });
     const result = await response.json().catch(() => null) as ReviewResponse | null;
     if (!response.ok || !result?.success) {
+      setRequests(previousRequests);
       setError((result as { error?: string } | null)?.error ?? "Không thể cập nhật lịch OFF.");
       setBusyId(null);
       return;
@@ -84,7 +91,7 @@ export function OffScheduleView() {
       setRequests((current) => current.map((request) => request.id === item.id ? {
         ...request,
         status: nextStatus,
-        reviewed_at: new Date().toISOString(),
+        reviewed_at: result?.request?.reviewed_at ?? new Date().toISOString(),
         email_notification_status: result?.request?.email_notification_status ?? request.email_notification_status,
         ward_conflict: result?.ward_warning ?? request.ward_conflict,
       } : request));

@@ -58,6 +58,8 @@ type DistrictDetail = {
 const PAGE_SIZE = 15;
 const STATUS_ORDER: Record<RiderStatus, number> = { warning: 0, delivering: 1, completed: 2 };
 const HIGH_FAILURE_RATE = 0.2;
+const COMMON_DISTRICT = "Khu vực chung";
+const COMMON_KV = "CHUNG";
 
 export function RealtimeDashboardView() {
   const [date, setDate] = useState(todayInVietnam());
@@ -126,14 +128,25 @@ export function RealtimeDashboardView() {
     const profileMap = new Map(profiles.map((profile) => [normalize(profile.rider_code), profile]));
     return rows.flatMap((row): DisplayRider[] => {
       const profile = profileMap.get(normalize(row.driver_id));
-      if (!profile || !isKv56(profile.kv)) return [];
+      if (!profile) return [];
+      const isKv = isKv56(profile.kv);
+      const isCommon = !isKv && (isBackupDistrict(profile.delivery_district) || (!profile.delivery_district?.trim() && !profile.kv?.trim()));
+      if (!isKv && !isCommon) return [];
       const progress = row.total_assigned ? Math.round((row.delivered / row.total_assigned) * 100) : 0;
+      let kv = profile.kv?.trim() || "—";
+      let district = profile.delivery_district?.trim() || "Chưa xác định quận";
+      let ward = profile.delivery_ward?.trim() || "Chưa xác định phường";
+      if (isCommon) {
+        kv = COMMON_KV;
+        district = COMMON_DISTRICT;
+        ward = COMMON_DISTRICT;
+      }
       return [{
         ...row,
         name: profile.full_name?.trim() || row.driver_name?.trim() || "Chưa có tên",
-        kv: profile.kv?.trim() || "—",
-        district: profile.delivery_district?.trim() || "Chưa xác định quận",
-        ward: profile.delivery_ward?.trim() || "Chưa xác định phường",
+        kv,
+        district,
+        ward,
         cot: profile.cot?.trim() || "—",
         status: getRiderStatus(row),
         progress,
@@ -239,6 +252,7 @@ export function RealtimeDashboardView() {
             {/* KV aggregates — large bento tiles */}
             <KvBentoTile kv="KV5" detail={kvAggregates.kv5} onSelectDistrict={setActiveDistrict} activeDistrict={activeDistrict} />
             <KvBentoTile kv="KV6" detail={kvAggregates.kv6} onSelectDistrict={setActiveDistrict} activeDistrict={activeDistrict} />
+            <KvBentoTile kv="CHUNG" detail={kvAggregates.chung} onSelectDistrict={setActiveDistrict} activeDistrict={activeDistrict} />
             {/* District tiles — bento irregular: top 2 districts span 6, rest span 3 */}
             {districtDetails.map((d, idx) => {
               const isLarge = idx < 2;
@@ -285,18 +299,19 @@ export const KpiCard = memo(function KpiCard({ icon: Icon, label, value, helper,
   return <article className={cn("min-h-36 rounded-xl border border-slate-200 bg-white p-4", className)}><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium text-slate-600">{label}</p><p className="mt-2 text-2xl font-bold tabular-nums tracking-tight text-slate-950">{loading ? "—" : typeof value === "number" ? value.toLocaleString("vi-VN") : value}</p></div><span className={cn("grid size-9 shrink-0 place-items-center rounded-lg", colors[tone])}><Icon size={18} /></span></div><p className="mt-4 text-xs text-slate-500">{helper}</p></article>;
 });
 
-function KvBentoTile({ kv, detail, onSelectDistrict, activeDistrict }: { kv: "KV5" | "KV6"; detail: DistrictDetail | null; onSelectDistrict: (name: string) => void; activeDistrict: string | null }) {
-  if (!detail) return <article className="col-span-12 flex min-h-[168px] flex-col justify-center rounded-xl border border-dashed border-[var(--color-rule)] bg-[var(--color-paper)] p-5 md:col-span-6"><p className="font-mono text-xs font-bold tracking-[0.12em] text-[var(--color-muted)]">{kv}</p><p className="mt-2 text-sm font-semibold text-[var(--color-muted)]">Chưa có rider</p></article>;
+function KvBentoTile({ kv, detail, onSelectDistrict, activeDistrict }: { kv: "KV5" | "KV6" | "CHUNG"; detail: DistrictDetail | null; onSelectDistrict: (name: string) => void; activeDistrict: string | null }) {
+  if (!detail) return <article className="col-span-12 flex min-h-[168px] flex-col justify-center rounded-xl border border-dashed border-[var(--color-rule)] bg-[var(--color-paper)] p-5 md:col-span-4"><p className="font-mono text-xs font-bold tracking-[0.12em] text-[var(--color-muted)]">{kv}</p><p className="mt-2 text-sm font-semibold text-[var(--color-muted)]">Chưa có rider</p></article>;
   const pct = detail.totalAssigned ? Math.round((detail.delivered / detail.totalAssigned) * 100) : 0;
+  const isChung = kv === "CHUNG";
   return (
-    <article className="col-span-12 flex min-h-[168px] flex-col rounded-xl border border-[var(--color-graphite-2)] bg-[var(--color-graphite)] p-5 text-[var(--color-graphite-ink)] md:col-span-6">
+    <article className={cn("col-span-12 flex min-h-[168px] flex-col rounded-xl border p-5 md:col-span-4", isChung ? "border-amber-200 bg-amber-50 text-amber-950" : "border-[var(--color-graphite-2)] bg-[var(--color-graphite)] text-[var(--color-graphite-ink)]")}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-mono text-xs font-bold tracking-[0.16em] opacity-70">{kv} · {detail.area}</p>
-          <h3 className="mt-1 text-lg font-bold tracking-tight">{detail.name === "KV5" || detail.name === "KV6" ? `Khu vực ${kv.slice(-1)}` : detail.name}</h3>
+          <h3 className="mt-1 text-lg font-bold tracking-tight">{detail.name === "KV5" || detail.name === "KV6" ? `Khu vực ${kv.slice(-1)}` : detail.name === "CHUNG" ? COMMON_DISTRICT : detail.name}</h3>
           <p className="mt-1 text-xs opacity-70">{detail.riders.length} rider · {detail.totalAssigned} đơn · {detail.warning} cảnh báo</p>
         </div>
-        <span className="grid size-9 place-items-center rounded-lg bg-[var(--color-graphite-ink)]/10 text-[var(--color-graphite-ink)]"><UsersRound size={16} /></span>
+        <span className={cn("grid size-9 place-items-center rounded-lg", isChung ? "bg-amber-100 text-amber-700" : "bg-[var(--color-graphite-ink)]/10 text-[var(--color-graphite-ink)]")}><UsersRound size={16} /></span>
       </div>
       <div className="mt-auto grid grid-cols-3 gap-3 pt-4">
         <div><p className="font-mono text-xs opacity-60">Đã gán</p><p className="text-sm font-bold tabular-nums">{detail.totalAssigned}</p></div>
@@ -451,20 +466,24 @@ function buildDistrictDetails(riders: DisplayRider[]): DistrictDetail[] {
     const warning = entries.filter((r) => r.status === "warning").length;
     const completed = entries.filter((r) => r.status === "completed").length;
     const avgProgress = totalAssigned ? Math.round((delivered / totalAssigned) * 100) : 0;
+    if (name === COMMON_DISTRICT) {
+      return { name, kv: COMMON_KV, area: COMMON_DISTRICT, riders: entries, totalAssigned, delivered, delivering, failed, warning, completed, rate: totalAssigned ? Math.round((delivered / totalAssigned) * 100) : 0, avgProgress };
+    }
     const kvCounts = entries.reduce((acc, r) => { const k = (r.kv || "").toUpperCase(); if (k.includes("5")) acc.kv5 += 1; else if (k.includes("6")) acc.kv6 += 1; return acc; }, { kv5: 0, kv6: 0 });
     const kv = kvCounts.kv5 >= kvCounts.kv6 ? "KV5" : "KV6";
     const area = kv === "KV5" ? "Khu vực 5" : "Khu vực 6";
     return { name, kv, area, riders: entries, totalAssigned, delivered, delivering, failed, warning, completed, rate: totalAssigned ? Math.round((delivered / totalAssigned) * 100) : 0, avgProgress };
   }).sort((a, b) => b.totalAssigned - a.totalAssigned || a.name.localeCompare(b.name, "vi"));
 }
-function buildKvAggregates(details: DistrictDetail[]): Record<"kv5" | "kv6", DistrictDetail | null> {
+function buildKvAggregates(details: DistrictDetail[]): Record<"kv5" | "kv6" | "chung", DistrictDetail | null> {
   const kv5Details = details.filter((d) => d.kv === "KV5");
   const kv6Details = details.filter((d) => d.kv === "KV6");
-  const agg = (list: DistrictDetail[], kv: string): DistrictDetail | null => {
+  const chungDetails = details.filter((d) => d.kv === COMMON_KV);
+  const agg = (list: DistrictDetail[], kv: string, area: string): DistrictDetail | null => {
     if (!list.length) return null;
     const riders = list.flatMap((d) => d.riders);
     return {
-      name: kv, kv, area: kv === "KV5" ? "Khu vực 5" : "Khu vực 6",
+      name: kv, kv, area,
       riders, totalAssigned: riders.reduce((s, r) => s + r.total_assigned, 0),
       delivered: riders.reduce((s, r) => s + r.delivered, 0),
       delivering: riders.reduce((s, r) => s + r.delivering, 0),
@@ -474,10 +493,15 @@ function buildKvAggregates(details: DistrictDetail[]): Record<"kv5" | "kv6", Dis
       rate: 0, avgProgress: 0,
     };
   };
-  return { kv5: agg(kv5Details, "KV5"), kv6: agg(kv6Details, "KV6") };
+  return { kv5: agg(kv5Details, "KV5", "Khu vực 5"), kv6: agg(kv6Details, "KV6", "Khu vực 6"), chung: agg(chungDetails, COMMON_KV, COMMON_DISTRICT) };
 }
 function statusLabel(status: RiderStatus) { return ({ delivering: "Đang giao", completed: "Đã giao xong", warning: "Cảnh báo" } as const)[status]; }
 function isKv56(value: string | null) { return /^(?:kv|khu vuc)?\s*[56]$/i.test(normalize(value ?? "")); }
+function isBackupDistrict(value: string | null) {
+  if (!value) return false;
+  const n = normalize(value).replace(/\s+/g, "");
+  return n === "backup";
+}
 function normalize(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toLowerCase().trim(); }
 function formatDateTime(value: string | null | undefined) { if (!value) return "—"; const date = new Date(value); if (!Number.isFinite(date.getTime())) return "—"; return new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Ho_Chi_Minh" }).format(date); }
 function formatAge(seconds: number) { if (seconds < 60) return `${seconds} giây trước`; if (seconds < 3600) return `${Math.floor(seconds / 60)} phút trước`; return formatDateTime(new Date(Date.now() - seconds * 1000).toISOString()); }

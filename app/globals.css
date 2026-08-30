@@ -55,6 +55,30 @@ body {
 .dark .app-shell-technical :where(.bg-amber-50) { background-color: var(--color-warning-soft); }
 .dark .app-shell-technical :where(.bg-red-50) { background-color: var(--color-error-soft); }
 .dark .app-shell-technical :where(.border-blue-100, .border-blue-200, .border-emerald-100, .border-amber-100, .border-red-100, .border-red-200) { border-color: var(--color-rule-strong); }
+.dark .app-shell-technical :where(.bg-slate-50) { background-color: var(--color-paper-2); }
+.dark .app-shell-technical :where(.bg-slate-100) { background-color: var(--color-paper-3); }
+.dark .app-shell-technical :where(.bg-slate-200) { background-color: var(--color-paper-3); }
+.dark .app-shell-technical :where(.bg-slate-950) { background-color: var(--color-ink); }
+.dark .app-shell-technical :where(.bg-blue-600, .bg-blue-500) { background-color: var(--color-accent); }
+.dark .app-shell-technical :where(.bg-amber-500) { background-color: var(--color-warning); }
+.dark .app-shell-technical :where(.bg-emerald-500) { background-color: var(--color-success); }
+.dark .app-shell-technical :where(.bg-red-500) { background-color: var(--color-error); }
+.dark .app-shell-technical :where(.text-white) { color: var(--color-paper); }
+.dark .app-shell-technical :where(.text-blue-600, .text-blue-700, .text-blue-800) { color: var(--color-accent); }
+.dark .app-shell-technical :where(.text-emerald-700) { color: var(--color-success); }
+.dark .app-shell-technical :where(.text-amber-700, .text-amber-800, .text-amber-500) { color: var(--color-warning); }
+.dark .app-shell-technical :where(.text-red-700, .text-red-800) { color: var(--color-error); }
+.dark .app-shell-technical :where(.text-violet-800) { color: var(--color-chart-7); }
+.dark .app-shell-technical :where(.border-slate-200) { border-color: var(--color-rule); }
+.dark .app-shell-technical :where(.border-slate-300) { border-color: var(--color-rule-strong); }
+.dark .app-shell-technical :where(.border-blue-500) { border-color: var(--color-accent); }
+.dark .app-shell-technical :where(.border-slate-950) { border-color: var(--color-ink); }
+.dark .app-shell-technical :where(.ring-blue-100) { --tw-ring-color: var(--color-accent-soft); }
+.dark .app-shell-technical :where(.bg-amber-200) { background-color: color-mix(in oklch, var(--color-warning) 45%, var(--color-paper-3)); }
+.dark .app-shell-technical :where(.border-amber-200) { border-color: color-mix(in oklch, var(--color-warning) 35%, var(--color-rule)); }
+/* attendance specific: ensure inputs/selects and cards stay on paper tokens in dark */
+.dark .app-shell-technical :where(.bg-white) { background-color: var(--color-paper); }
+.dark .app-shell-technical :where(.shadow-sm) { --tw-shadow-color: color-mix(in oklch, var(--color-ink) 10%, transparent); }
 
 .aurora-background {
   background: #f8fafc;

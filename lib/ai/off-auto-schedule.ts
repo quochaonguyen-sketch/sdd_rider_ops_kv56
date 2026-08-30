@@ -68,9 +68,9 @@ export type OffAutoScheduleInput = {
  *
  * - COT1 and COT2 of the same ward are independent: they may share a day.
  * - Riders that already have an OFF in the week keep their schedule.
- * - Days with heavy volume are avoided: the 1st and 2nd of the month, the 15th
- *   and 25th of the month, and the yearly sale days 06/06 and 07/07 are never
- *   used for a NEW OFF (trừ ngày sale đặc biệt).
+ * - Days with heavy volume are avoided: the 15th and 25th of the month and all
+ *   double sale days 01/01–12/12 are never used for a NEW OFF
+ *   (trừ ngày sale đặc biệt).
  * - Tue–Sat (thứ 3–7) are treated as EQUAL priority and distributed evenly via
  *   least-loaded selection. Sunday and Monday are deprioritized and only used
  *   when Tue–Sat are full.
@@ -102,6 +102,20 @@ export function buildOffAutoScheduleProposal(input: OffAutoScheduleInput): OffAu
     byGroup.set(key, list);
   }
 
+  // Theo dõi tải theo (district|COT) để chia đều T3–T7 ở cấp quận, mỗi COT riêng.
+  const districtCotDayCounts = new Map<string, Map<string, number>>();
+  for (const [wardCotKey, dates] of input.wardTakenDates) {
+    const [, cotPart] = wardCotKey.split("|");
+    const ward = wardCotKey.split("|")[0];
+    // Tìm district của ward này từ riders (ward -> district)
+    const sampleRider = input.riders.find((r) => r.ward === ward && (r.cot ?? "") === (cotPart ?? ""));
+    const district = sampleRider?.district ?? ward;
+    const dKey = `${district}|${cotPart ?? ""}`;
+    const map = districtCotDayCounts.get(dKey) ?? new Map<string, number>();
+    for (const d of dates) map.set(d, (map.get(d) ?? 0) + 1);
+    districtCotDayCounts.set(dKey, map);
+  }
+
   const plans: AutoScheduleWardPlan[] = [];
   let totalAssignments = 0;
   let totalSkipped = 0;
@@ -110,10 +124,14 @@ export function buildOffAutoScheduleProposal(input: OffAutoScheduleInput): OffAu
   for (const [key, groupRiders] of [...byGroup.entries()].sort((a, b) => a[0].localeCompare(b[0], "vi"))) {
     const [ward, cotRaw] = key.split("|");
     const cot = cotRaw || null;
+    const district = groupRiders[0]?.district ?? ward;
+    const dKey = `${district}|${cot ?? ""}`;
     const sorted = [...groupRiders].sort((a, b) => a.rider_code.localeCompare(b.rider_code, "vi"));
     const assignments: AutoScheduleAssignment[] = [];
     const skipped: AutoScheduleSkipped[] = [];
     const wardTaken = new Set(input.wardTakenDates.get(key) ?? []);
+    const districtDayCounts = districtCotDayCounts.get(dKey) ?? new Map<string, number>();
+    if (!districtCotDayCounts.has(dKey)) districtCotDayCounts.set(dKey, districtDayCounts);
 
     const maxOffPerDay = sorted.length >= 4 ? 2 : 1;
     const sundayMaxOff = sorted.length >= 4 ? 3 : 1;
@@ -135,22 +153,30 @@ export function buildOffAutoScheduleProposal(input: OffAutoScheduleInput): OffAu
 
       const pickLeastLoaded = (candidates: string[]) => {
         let best: string | null = null;
-        let bestCount = Infinity;
+        let bestWardScore = Infinity;
+        let bestDistrictScore = Infinity;
         for (const date of candidates) {
           if (wardTaken.has(date)) continue;
           if (riderTaken?.has(date)) continue;
           const countOnDay = assignments.filter((assignment) => assignment.off_date === date).length;
           const capacity = isSunday(date) ? sundayMaxOff : maxOffPerDay;
           if (countOnDay >= capacity) continue;
-          if (countOnDay < bestCount) {
-            bestCount = countOnDay;
+          const dCount = districtDayCounts.get(date) ?? 0;
+          // Chủ Nhật cho phép tải cao hơn (3 vs 2) nên dùng tỉ lệ tải để cân: CN được ưu tiên hơn khi tính theo tỉ lệ
+          const wardScore = isSunday(date) ? countOnDay / 1.5 : countOnDay;
+          const districtScore = isSunday(date) ? dCount / 1.5 : dCount;
+          if (wardScore < bestWardScore || (wardScore === bestWardScore && districtScore < bestDistrictScore)) {
+            bestWardScore = wardScore;
+            bestDistrictScore = districtScore;
             best = date;
           }
         }
         return best;
       };
 
-      const freeDay = pickLeastLoaded(eligibleTueSat) ?? pickLeastLoaded(eligibleSun) ?? pickLeastLoaded(eligibleMon);
+      // Gộp T3–T7 + CN để CN được cân cùng và có nhiều hơn (nhờ tỉ lệ tải), T2 chỉ khi hết chỗ
+      const eligibleCore = [...eligibleTueSat, ...eligibleSun];
+      const freeDay = pickLeastLoaded(eligibleCore) ?? pickLeastLoaded(eligibleMon);
 
       if (!freeDay) {
         totalSkipped += 1;
@@ -165,6 +191,8 @@ export function buildOffAutoScheduleProposal(input: OffAutoScheduleInput): OffAu
       }
 
       totalAssignments += 1;
+      wardTaken.add(freeDay);
+      districtDayCounts.set(freeDay, (districtDayCounts.get(freeDay) ?? 0) + 1);
       assignments.push({
         rider_id: rider.id,
         rider_code: rider.rider_code,
@@ -189,12 +217,12 @@ export function buildOffAutoScheduleProposal(input: OffAutoScheduleInput): OffAu
   };
 }
 
-/** Days that should never host a NEW OFF: 1st/2nd/15th/25th of month and yearly sale days 06/06, 07/07. */
+/** Days that should never host a NEW OFF: 15th/25th and all double sale days 01/01–12/12. Ngày 1,2 không cấm riêng nhưng 1/1 và 2/2 vẫn cấm do là ngày đôi. */
 function isForbiddenOffDay(date: string) {
   const day = Number(date.slice(8, 10));
   const month = Number(date.slice(5, 7));
-  if (day === 1 || day === 2 || day === 15 || day === 25) return true;
-  if ((month === 6 && day === 6) || (month === 7 && day === 7)) return true;
+  if (day === 15 || day === 25) return true;
+  if (day === month) return true;
   return false;
 }
 

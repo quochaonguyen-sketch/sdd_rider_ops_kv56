@@ -253,8 +253,8 @@ function scheduleValue(log: AttendanceLog | undefined): WeeklyScheduleValue {
 
 function scheduleToneClass(status: WeeklyScheduleValue) {
   const tones: Record<WeeklyScheduleValue, string> = {
-    ON: "border-blue-200 bg-blue-50 text-blue-800",
-    OFF_WEEKLY: "border-slate-300 bg-slate-100 text-slate-700",
+    ON: "border-slate-200 bg-white text-slate-700",
+    OFF_WEEKLY: "border-[var(--color-ink)] bg-[var(--color-ink)] text-[var(--color-paper)] shadow-sm ring-1 ring-[var(--color-ink)]",
     OFF_APPROVED: "border-emerald-200 bg-emerald-50 text-emerald-800",
     OFF_UNEXPECTED: "border-red-200 bg-red-50 text-red-800",
     WORKING_REST_DAY: "border-violet-200 bg-violet-50 text-violet-800",
