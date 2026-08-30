@@ -3,12 +3,14 @@
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  addDays,
   addMonths,
   eachDayOfInterval,
   endOfMonth,
   format,
   parseISO,
   startOfMonth,
+  startOfWeek,
   subMonths,
 } from "date-fns";
 import { vi } from "date-fns/locale";
@@ -144,23 +146,90 @@ export function AttendanceView({ initialMonth = format(new Date(), "yyyy-MM") }:
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const response = await fetch(`/api/attendance/schedule?month=${month}`, { cache: "no-store" });
-    const result = (await response.json().catch(() => null)) as ScheduleResponse | null;
-
-    if (!response.ok || !result?.success) {
-      setError(result?.error ?? "Không thể tải lịch rider");
+    // Tuần đang xem có thể tràn sang tháng sau (ví dụ 31/08-06/09) nên phải tải cả 2 tháng để đủ dữ liệu cho WeekStrip/DistrictBreakdown
+    const weekStart = startOfWeek(parseISO(selectedDate), { weekStartsOn: 1 });
+    const weekEnd = addDays(weekStart, 6);
+    const months = Array.from(new Set([month, format(weekEnd, "yyyy-MM")].filter(Boolean)));
+    const responses = await Promise.all(months.map((m) => fetch(`/api/attendance/schedule?month=${m}`, { cache: "no-store" })));
+    const results = await Promise.all(responses.map((r) => r.json().catch(() => null) as Promise<ScheduleResponse | null>));
+    const firstError = responses.find((r, i) => !r.ok || !results[i]?.success);
+    if (firstError) {
+      const idx = responses.findIndex((r, i) => !r.ok || !results[i]?.success);
+      setError(results[idx]?.error ?? "Không thể tải lịch rider");
     } else {
-      setRiders(result.riders ?? []);
-      setLogs(result.logs ?? []);
-      setCanEdit(Boolean(result.can_edit));
+      // Gộp riders (theo id) và logs (theo rider_id+work_date) từ các tháng
+      const riderMap = new Map<string, Rider>();
+      for (const res of results) for (const rider of res?.riders ?? []) riderMap.set(rider.id, rider);
+      const logMapDedup = new Map<string, AttendanceLog>();
+      for (const res of results) for (const log of res?.logs ?? []) {
+        const key = `${log.rider_id ?? log.rider_code}:${String(log.work_date).slice(0, 10)}`;
+        if (!logMapDedup.has(key)) logMapDedup.set(key, log);
+      }
+      setRiders(Array.from(riderMap.values()));
+      setLogs(Array.from(logMapDedup.values()));
+      setCanEdit(Boolean(results[0]?.can_edit));
     }
     setLoading(false);
-  }, [month]);
+  }, [month, selectedDate]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+
+  const autoSyncedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (loading || !canEdit) return;
+    const sheetUrl = typeof window !== "undefined" ? window.localStorage.getItem("rider-ops-off-sheet-url") : null;
+    if (!sheetUrl) return;
+    const key = `auto-sheet-sync:${selectedDate}`;
+    if (autoSyncedRef.current.has(key)) return;
+    const last = Number(sessionStorage.getItem(key) ?? "0");
+    if (Date.now() - last < 60_000) {
+      autoSyncedRef.current.add(key);
+      return;
+    }
+    autoSyncedRef.current.add(key);
+    let cancelled = false;
+    (async () => {
+      setSyncingSheet(true);
+      setError(null);
+      try {
+        const response = await fetch("/api/attendance/schedule/google-sheet", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sheet_url: sheetUrl, range_mode: "week", anchor_date: selectedDate }),
+        });
+        const result = (await response.json().catch(() => null)) as {
+          success?: boolean;
+          error?: string;
+          imported?: number;
+          removed?: number;
+          skipped?: number;
+          errors?: ImportIssue[];
+          missing_rider_codes?: string[];
+        } | null;
+        if (cancelled) return;
+        if (!response.ok || !result?.success) {
+          // Không báo lỗi chặn, chỉ log nhẹ để không làm phiền khi auto
+          console.warn("Auto sheet sync failed:", result?.error);
+          return;
+        }
+        sessionStorage.setItem(key, String(Date.now()));
+        if ((result.imported ?? 0) > 0 || (result.removed ?? 0) > 0) {
+          setSuccess(`Đã tự động đồng bộ ${result.imported ?? 0} dòng từ sheet OFF cho tuần ${formatSelectedDate(selectedDate)}.`);
+          await load();
+        }
+      } catch {
+        // im lặng khi auto, người dùng vẫn có nút thủ công
+      } finally {
+        if (!cancelled) setSyncingSheet(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, canEdit, selectedDate, load]);
 
   useEffect(() => {
     busyRef.current = importing || savingCells.size > 0;

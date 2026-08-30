@@ -5,6 +5,7 @@ import { createPrivateKey, createSign } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { canManageOperations } from "@/lib/auth/permissions";
+import { invalidateAttendanceCache } from "@/lib/cache/operations-cache";
 
 const bodySchema = z.object({
   sheet_url: z.url().max(1000),
@@ -148,6 +149,14 @@ export async function POST(request: Request) {
   const { data: previous } = await session.admin.from("attendance_logs").select("id,rider_code,work_date").contains("raw_data", { source: "google_sheet_off", spreadsheet_id: id }).gte("work_date", range.start).lte("work_date", range.end);
   const staleIds = (previous ?? []).filter((item) => !sheetKeys.has(`${item.rider_code}|${String(item.work_date).slice(0, 10)}`)).map((item) => item.id);
   for (let index = 0; index < staleIds.length; index += 500) { const { error } = await session.admin.from("attendance_logs").delete().in("id", staleIds.slice(index, index + 500)); if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 }); }
+
+  // Xóa cache lịch để trang Attendance thấy ngay dữ liệu mới thay vì chờ 30s TTL
+  {
+    const startMonth = range.start.slice(0, 7);
+    const endMonth = range.end.slice(0, 7);
+    invalidateAttendanceCache(startMonth);
+    if (endMonth !== startMonth) invalidateAttendanceCache(endMonth);
+  }
 
   await session.admin.from("activity_logs").insert({ entity_type: "attendance_schedule", action: "synced", message: `Synced OFF sheet: ${payload.length} rows`, raw_data: { spreadsheet_id: id, imported: payload.length, removed: staleIds.length, skipped: issues.length } });
   return NextResponse.json({ success: true, imported: payload.length, removed: staleIds.length, skipped: issues.length, errors: issues, range });

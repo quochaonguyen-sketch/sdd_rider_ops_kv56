@@ -70,26 +70,28 @@ export type OffAutoScheduleInput = {
  * - Riders that already have an OFF in the week keep their schedule.
  * - Days with heavy volume are avoided: the 1st and 2nd of the month, the 15th
  *   and 25th of the month, and the yearly sale days 06/06 and 07/07 are never
- *   used for a NEW OFF. Monday is heavily restricted (only used when every
- *   other day is full), while Wednesday onwards is allowed.
- * - Sunday has the least volume: it is preferred first and allows one more
- *   rider off than normal days.
+ *   used for a NEW OFF (trừ ngày sale đặc biệt).
+ * - Tue–Sat (thứ 3–7) are treated as EQUAL priority and distributed evenly via
+ *   least-loaded selection. Sunday and Monday are deprioritized and only used
+ *   when Tue–Sat are full.
  * - Capacity per (ward, COT) group per day: groups with >= 4 riders may have
  *   up to 2 riders off on a normal day (3 on Sunday); smaller groups only 1.
- * - Days are spread across the whole week (Sunday first, then Saturday down to
- *   Wednesday) so early-week days are not spammed.
  */
 export function buildOffAutoScheduleProposal(input: OffAutoScheduleInput): OffAutoScheduleProposal {
   const today = input.today ?? "2000-01-01";
   const weekDates: string[] = [];
   for (let index = 0; index < 7; index += 1) weekDates.push(shiftDate(input.weekStart, index));
 
-  // Preferred order: Sunday, Saturday, Friday, Thursday, Wednesday, Tuesday, Monday.
-  // Tuesday/Wednesday are allowed but come after the weekend; Monday is last.
   const eligibleDays = weekDates
     .filter((date) => date >= today)
-    .filter((date) => !isForbiddenOffDay(date))
-    .sort((a, b) => weekdayPriority(a) - weekdayPriority(b));
+    .filter((date) => !isForbiddenOffDay(date));
+
+  const eligibleTueSat = eligibleDays.filter((date) => {
+    const w = new Date(`${date}T00:00:00Z`).getUTCDay();
+    return w >= 2 && w <= 6;
+  });
+  const eligibleSun = eligibleDays.filter((date) => new Date(`${date}T00:00:00Z`).getUTCDay() === 0);
+  const eligibleMon = eligibleDays.filter((date) => new Date(`${date}T00:00:00Z`).getUTCDay() === 1);
 
   const byGroup = new Map<string, AutoScheduleRider[]>();
   for (const rider of input.riders) {
@@ -131,14 +133,24 @@ export function buildOffAutoScheduleProposal(input: OffAutoScheduleInput): OffAu
         continue;
       }
 
-      const freeDay = eligibleDays.find((date) => {
-        if (wardTaken.has(date)) return false;
-        if (riderTaken?.has(date)) return false;
-        const countOnDay = assignments.filter((assignment) => assignment.off_date === date).length;
-        const capacity = isSunday(date) ? sundayMaxOff : maxOffPerDay;
-        if (countOnDay >= capacity) return false;
-        return true;
-      });
+      const pickLeastLoaded = (candidates: string[]) => {
+        let best: string | null = null;
+        let bestCount = Infinity;
+        for (const date of candidates) {
+          if (wardTaken.has(date)) continue;
+          if (riderTaken?.has(date)) continue;
+          const countOnDay = assignments.filter((assignment) => assignment.off_date === date).length;
+          const capacity = isSunday(date) ? sundayMaxOff : maxOffPerDay;
+          if (countOnDay >= capacity) continue;
+          if (countOnDay < bestCount) {
+            bestCount = countOnDay;
+            best = date;
+          }
+        }
+        return best;
+      };
+
+      const freeDay = pickLeastLoaded(eligibleTueSat) ?? pickLeastLoaded(eligibleSun) ?? pickLeastLoaded(eligibleMon);
 
       if (!freeDay) {
         totalSkipped += 1;
@@ -147,7 +159,7 @@ export function buildOffAutoScheduleProposal(input: OffAutoScheduleInput): OffAu
           rider_code: rider.rider_code,
           full_name: rider.full_name,
           ward,
-          reason: "Hết ngày trống trong phường/COT (ưu tiên cuối tuần, tránh ngày cao điểm)",
+          reason: "Hết ngày trống trong phường/COT (chia đều T3–T7, trừ ngày sale/cao điểm)",
         });
         continue;
       }
