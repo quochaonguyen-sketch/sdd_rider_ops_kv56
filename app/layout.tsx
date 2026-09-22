@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import "leaflet/dist/leaflet.css";
 import "./globals.css";
 import { Geist } from "next/font/google";
@@ -15,8 +16,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="vi" suppressHydrationWarning className={cn("font-sans", geist.variable)}>
-      <head><script dangerouslySetInnerHTML={{ __html: themeBootScript }} /></head>
       <body>{children}</body>
+      <Script id="rider-ops-theme" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: themeBootScript }} />
     </html>
   );
 }

@@ -16,10 +16,15 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword(parsed.data);
+  const { data, error } = await supabase.auth.signInWithPassword(parsed.data);
 
   if (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 401 });
+  }
+
+  if (!data.user?.email?.toLowerCase().endsWith("@spxexpress.com")) {
+    await supabase.auth.signOut();
+    return NextResponse.json({ success: false, error: "Chỉ tài khoản @spxexpress.com mới được phép truy cập" }, { status: 403 });
   }
 
   return NextResponse.json({ success: true });

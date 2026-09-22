@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, ClipboardCheck, Columns2, ListChecks, ListTodo, LogOut, MapPinned, Menu, Moon, NotebookPen, PackageOpen, PackagePlus, PackageSearch, PanelLeftClose, PanelLeftOpen, PencilRuler, Repeat2, Sun, Truck, Upload, UsersRound, X } from "lucide-react";
+import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, ClipboardCheck, Columns2, ListChecks, ListTodo, LogOut, MapPinned, Menu, Moon, NotebookPen, PackageOpen, PackagePlus, PackageSearch, PanelLeftClose, PanelLeftOpen, PencilRuler, Radio, Repeat2, Sun, Truck, Upload, UsersRound, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/utils/cn";
 import { AppBrand, AppCopyright } from "@/components/layout/app-brand";
@@ -37,6 +37,7 @@ const volumeItems = [
   { href: "/volume/pickup", label: "Pickup", icon: PackagePlus },
 ];
 const pickupItems = [
+  { href: "/pickup-realtime", view: null, label: "Pickup Realtime", icon: Radio },
   { href: "/pickup-management", view: null, label: "Quản lý PUP", icon: ListChecks },
   { href: "/pickup-management?view=replacement", view: "replacement", label: "Thế pick", icon: Repeat2 },
 ];
@@ -50,7 +51,7 @@ const toolItems = [
   { href: "/zone-builder", label: "Zone Builder", icon: PencilRuler },
 ];
 const memberHiddenItems = new Set(["/zone-builder", "/pickup-management"]);
-const morePaths = ["/notes", "/performance", "/attendance", "/off-schedule", "/morning-delivery", "/return-orders", "/zones", "/zone-builder", "/pickup-management", "/volume", "/imports", "/settings"];
+const morePaths = ["/notes", "/performance", "/attendance", "/off-schedule", "/morning-delivery", "/return-orders", "/zones", "/zone-builder", "/pickup-management", "/pickup-realtime", "/volume", "/imports", "/settings"];
 type ThemeMode = "light" | "dark";
 const subscribeToFrameContext = () => () => {};
 
@@ -86,7 +87,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
   ];
   const volumeActive = pathname.startsWith("/volume");
   const [volumeOpen, setVolumeOpen] = useState(volumeActive);
-  const pickupActive = pathname.startsWith("/pickup-management");
+  const pickupActive = pathname.startsWith("/pickup-management") || pathname.startsWith("/pickup-realtime");
   const [pickupOpen, setPickupOpen] = useState(pickupActive);
   const returnActive = pathname.startsWith("/return-orders");
   const [returnOpen, setReturnOpen] = useState(returnActive);
@@ -96,7 +97,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
   const currentPage = returnActive
     ? returnItems.find((item) => item.view === searchParams.get("view")) ?? returnItems[0]
     : pickupActive
-      ? pickupItems.find((item) => item.view === searchParams.get("view")) ?? pickupItems[0]
+      ? pickupItems.find((item) => item.href === pathname || item.view === searchParams.get("view")) ?? pickupItems[0]
       : [...navItems, ...volumeItems].find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
   const splitItems = [...navItems.filter((item) => !memberToolRestricted || !memberHiddenItems.has(item.href)), ...volumeItems]
     .filter((item) => item.href !== pathname);

@@ -307,11 +307,21 @@ export function MorningDeliveryView() {
           realtime10am: realtime10amByRider.get(normalize(rider.rider_code)) ?? null,
           pickReplacement: pickupReplacementByRider.get(normalize(rider.rider_code)) ?? null,
         }))
-        .sort((a, b) =>
-          kvSortRank(a.rider.kv) - kvSortRank(b.rider.kv)
-          || absentStatusSortRank(a.attendance?.status) - absentStatusSortRank(b.attendance?.status)
-          || a.rider.rider_code.localeCompare(b.rider.rider_code, "vi", { numeric: true }),
-        ),
+        .sort((a, b) => {
+          const districtA = normalize(a.rider.delivery_district) || "zzz";
+          const districtB = normalize(b.rider.delivery_district) || "zzz";
+          const districtCmp = districtA.localeCompare(districtB, "vi", { numeric: true });
+          if (districtCmp !== 0) return districtCmp;
+          const wardA = normalize(a.rider.delivery_ward) || "zzz";
+          const wardB = normalize(b.rider.delivery_ward) || "zzz";
+          const wardCmp = wardA.localeCompare(wardB, "vi", { numeric: true });
+          if (wardCmp !== 0) return wardCmp;
+          const statusCmp = absentStatusSortRank(a.attendance?.status) - absentStatusSortRank(b.attendance?.status);
+          if (statusCmp !== 0) return statusCmp;
+          const kvCmp = kvSortRank(a.rider.kv) - kvSortRank(b.rider.kv);
+          if (kvCmp !== 0) return kvCmp;
+          return a.rider.rider_code.localeCompare(b.rider.rider_code, "vi", { numeric: true });
+        }),
     [assignedRiderIds, attendanceByRider, pickupReplacementByRider, realtime10amByRider, requiredRiders],
   );
   const assignedRiderCount = new Set(
@@ -674,12 +684,13 @@ export function MorningDeliveryView() {
   const editingDefaultDistrict = editingDefaultRider ? findDefaultDistrict(editingDefaultRider.delivery_district) : null;
 
   return (
-    <div className="space-y-5">
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="dashboard-control mx-auto max-w-[1600px] space-y-6 bg-[#fcfdff]/30">
+      <header className="rounded-xl border border-slate-200/60 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">Morning dispatch</p>
-          <h1 className="mt-1 text-2xl font-black text-slate-950">Điểm danh sáng & chia khu vực giao</h1>
-          <p className="mt-1 text-sm text-slate-500">Rider COT 1 đều có thể lên lấy hàng; nhóm chưa có tuyến pickup là nhóm bắt buộc.</p>
+          <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-900">Điểm danh sáng & chia khu vực giao</h1>
+          <p className="mt-1 text-sm leading-relaxed text-slate-500">Rider COT 1 đều có thể lên lấy hàng; nhóm chưa có tuyến pickup là nhóm bắt buộc.</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <label className="relative block min-w-[200px]">
@@ -703,23 +714,24 @@ export function MorningDeliveryView() {
             Sao chép gửi nhóm
           </Button>
         </div>
+        </div>
       </header>
 
-      {error ? <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p> : null}
-      {success ? <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{success}</p> : null}
+      {error ? <p className="rounded-lg border border-red-200/70 bg-red-50/80 p-3 text-sm font-medium text-red-700 shadow-sm">{error}</p> : null}
+      {success ? <p className="rounded-lg border border-emerald-200/70 bg-emerald-50/80 p-3 text-sm font-medium text-emerald-700 shadow-sm">{success}</p> : null}
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-5" aria-label="Tổng quan điểm danh sáng">
-        <Metric icon={Users} label="Bắt buộc chưa tuyến pick" value={requiredRiders.length} />
-        <Metric icon={UserCheck} label="Rider đã có mặt" value={assignedRiderCount} />
-        <Metric icon={Truck} label="Rider có đơn realtime" value={activeDeliveryRiderCount} />
-        <Metric icon={MapPin} label="Phường đã nhận" value={assignedAreaCount} />
-        <Metric icon={ClipboardCheck} label="Phường còn trống" value={Math.max(0, totalAreaCount - assignedAreaCount)} />
+        <Metric icon={Users} label="Bắt buộc chưa tuyến pick" value={requiredRiders.length} tone="slate" />
+        <Metric icon={UserCheck} label="Rider đã có mặt" value={assignedRiderCount} tone="emerald" />
+        <Metric icon={Truck} label="Rider có đơn realtime" value={activeDeliveryRiderCount} tone="blue" />
+        <Metric icon={MapPin} label="Phường đã nhận" value={assignedAreaCount} tone="amber" />
+        <Metric icon={ClipboardCheck} label="Phường còn trống" value={Math.max(0, totalAreaCount - assignedAreaCount)} tone="zinc" />
       </section>
 
       <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)_390px]">
-        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-          <div className="sticky top-0 z-10 border-b border-slate-100 bg-white/95 px-4 py-3 backdrop-blur">
-            <h2 className="font-bold text-slate-950">1. Quét Rider ID</h2>
+        <section className="overflow-hidden rounded-xl border border-slate-200/60 bg-white shadow-sm">
+          <div className="sticky top-0 z-10 border-b border-slate-100 bg-white/90 px-4 py-3 backdrop-blur-sm">
+            <h2 className="font-bold tracking-tight text-slate-900">1. Quét Rider ID</h2>
             <p className="mt-0.5 text-xs text-slate-500">Nhấn Enter sau khi máy quét nhập mã.</p>
           </div>
           <div className="space-y-4 p-4">
@@ -780,9 +792,9 @@ export function MorningDeliveryView() {
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-          <div className="sticky top-0 z-10 border-b border-slate-100 bg-white/95 px-4 py-3 backdrop-blur">
-            <h2 className="font-bold text-slate-950">2. Chọn khu vực giao</h2>
+        <section className="overflow-hidden rounded-xl border border-slate-200/60 bg-white shadow-sm">
+          <div className="sticky top-0 z-10 border-b border-slate-100 bg-white/90 px-4 py-3 backdrop-blur-sm">
+            <h2 className="font-bold tracking-tight text-slate-900">2. Chọn khu vực giao</h2>
             <p className="mt-0.5 text-xs text-slate-500">Một phường có thể gán nhiều rider để bổ sung hoặc thay rider OFF.</p>
           </div>
           <div className="border-b border-slate-100 p-3">
@@ -850,9 +862,9 @@ export function MorningDeliveryView() {
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-          <div className="sticky top-0 z-10 border-b border-slate-100 bg-white/95 px-4 py-3 backdrop-blur">
-            <h2 className="font-bold text-slate-950">3. Đã điểm danh & chia tuyến</h2>
+        <section className="overflow-hidden rounded-xl border border-slate-200/60 bg-white shadow-sm">
+          <div className="sticky top-0 z-10 border-b border-slate-100 bg-white/90 px-4 py-3 backdrop-blur-sm">
+            <h2 className="font-bold tracking-tight text-slate-900">3. Đã điểm danh & chia tuyến</h2>
             <p className="mt-0.5 text-xs text-slate-500">{groups.length} rider trong ngày {formatDate(date)}.</p>
           </div>
           <div className="grid gap-2 border-b border-slate-100 p-3">
@@ -1028,10 +1040,10 @@ export function MorningDeliveryView() {
         </div>, document.body,
       ) : null}
 
-      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-        <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <section className="overflow-hidden rounded-xl border border-slate-200/60 bg-white shadow-sm">
+        <div className="flex flex-col gap-2 border-b border-slate-100 bg-gradient-to-r from-white to-slate-50/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="font-bold text-slate-950">Rider bắt buộc chưa điểm danh</h2>
+            <h2 className="font-bold tracking-tight text-slate-900">Rider bắt buộc chưa điểm danh</h2>
             <p className="mt-0.5 text-xs text-slate-500">Rider COT 1 chưa có tuyến pickup và chưa được chia khu vực ngày {formatDate(date)}.</p>
           </div>
           <div className="flex items-center gap-2">
@@ -1051,12 +1063,13 @@ export function MorningDeliveryView() {
 
         {requiredAbsentRiders.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] text-left text-sm">
-              <thead className="bg-slate-50 text-[11px] font-bold uppercase text-slate-500">
+            <table className="w-full min-w-[1260px] text-left text-sm">
+              <thead className="bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-600 backdrop-blur-sm">
                 <tr>
                   <th className="px-4 py-3">Rider ID</th>
                   <th className="px-4 py-3">Tên rider</th>
                   <th className="px-4 py-3">KV</th>
+                  <th className="px-4 py-3">Khu vực</th>
                   <th className="px-4 py-3">Trạng thái</th>
                   <th className="px-4 py-3">Ghi chú lịch OFF</th>
                   <th className="px-4 py-3">Lý do không lên lấy hàng</th>
@@ -1064,7 +1077,7 @@ export function MorningDeliveryView() {
                   <th className="px-4 py-3 text-right">Lưu</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100/70 [&_tr:nth-child(even)]:bg-slate-50/40">
                 {requiredAbsentRiders.map(({ rider, attendance: log, realtime10am, pickReplacement }) => {
                   const off = isOffStatus(log?.status);
                   const realtimeOrderCount = Math.max(
@@ -1132,7 +1145,7 @@ function RequiredAbsentRiderRow({
     : null;
 
   return (
-    <tr className={cn("transition hover:bg-slate-50", pickReplacement && "bg-sky-50/60 hover:bg-sky-50")}>
+    <tr className={cn("transition-colors hover:bg-slate-50/70", pickReplacement && "bg-sky-50/40 hover:bg-sky-50/60")}>
       <td className="px-4 py-3 font-black text-slate-950">{rider.rider_code}</td>
       <td className="px-4 py-3 font-semibold text-slate-700">{rider.full_name?.trim() || "Chưa có tên"}</td>
       <td className="px-4 py-3">
@@ -1141,20 +1154,28 @@ function RequiredAbsentRiderRow({
         </span>
       </td>
       <td className="px-4 py-3">
+        <div className="min-w-[140px]">
+          <p className="text-sm font-semibold text-slate-800">{rider.delivery_district?.trim() || "Chưa gán"}</p>
+          <p className="text-xs text-slate-500">{rider.delivery_ward?.trim() || "—"}</p>
+        </div>
+      </td>
+      <td className="px-4 py-3">
         <span className={cn(
-          "inline-flex rounded-md px-2 py-1 text-[11px] font-bold",
+          "inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 ring-inset",
           pickReplacement
-            ? "bg-sky-100 text-sky-800"
+            ? "bg-sky-50 text-sky-700 ring-sky-200"
             : off
-              ? offStatusClass(attendance?.status)
+              ? offStatusClass(attendance?.status) + " ring-1"
               : status === "Chưa điểm danh"
-                ? "bg-orange-50 text-orange-700"
-                : "bg-red-50 text-red-700",
+                ? "bg-orange-50 text-orange-700 ring-orange-200"
+                : status === "Chưa có mặt"
+                  ? "bg-zinc-100 text-zinc-600 ring-zinc-200"
+                  : "bg-slate-100 text-slate-600 ring-slate-200",
         )}>
           {status}
         </span>
       </td>
-      <td className="max-w-[440px] px-4 py-3 text-slate-600">
+      <td className="max-w-[360px] px-4 py-3 text-slate-600">
         {pickReplacementNote ?? (off ? attendance?.note?.trim() || "Có lịch OFF, chưa có ghi chú." : "-")}
       </td>
       <td className="px-4 py-3">
@@ -1224,14 +1245,21 @@ function RiderScanInput({ inputRef, onScan }: { inputRef: RefObject<HTMLInputEle
   );
 }
 
-function Metric({ icon: Icon, label, value }: { icon: typeof Users; label: string; value: number }) {
+function Metric({ icon: Icon, label, value, tone = "slate" }: { icon: typeof Users; label: string; value: number; tone?: "slate" | "emerald" | "blue" | "amber" | "zinc" }) {
+  const toneMap: Record<string, string> = {
+    slate: "bg-slate-100 text-slate-600",
+    emerald: "bg-emerald-50 text-emerald-700",
+    blue: "bg-blue-50 text-blue-700",
+    amber: "bg-amber-50 text-amber-700",
+    zinc: "bg-zinc-100 text-zinc-600",
+  };
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
+    <div className="rounded-xl border border-slate-200/70 bg-white p-4 shadow-sm transition hover:shadow">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-bold uppercase text-slate-500">{label}</p>
-        <span className="grid size-8 place-items-center rounded-md bg-emerald-50 text-emerald-700"><Icon size={17} /></span>
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+        <span className={cn("grid size-8 place-items-center rounded-lg", toneMap[tone])}><Icon size={16} /></span>
       </div>
-      <p className="mt-3 text-2xl font-black text-slate-950">{value}</p>
+      <p className="mt-3 text-2xl font-black tracking-tight text-slate-900">{value}</p>
     </div>
   );
 }
@@ -1348,7 +1376,7 @@ function attendanceStatusLabel(status: string | null | undefined) {
 }
 
 function offStatusClass(status: string | null | undefined) {
-  if (status === "OFF_APPROVED") return "bg-blue-50 text-blue-700";
-  if (status === "OFF_UNEXPECTED") return "bg-red-50 text-red-700";
-  return "bg-amber-50 text-amber-700";
+  if (status === "OFF_APPROVED") return "bg-blue-50 text-blue-700 ring-blue-200";
+  if (status === "OFF_UNEXPECTED") return "bg-red-50 text-red-700 ring-red-200";
+  return "bg-amber-50 text-amber-700 ring-amber-200";
 }

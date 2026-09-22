@@ -28,6 +28,9 @@ export const getCurrentUserContext = cache(async (): Promise<CurrentUserContext 
     return null;
   }
 
+  const email = typeof claimsData.claims.email === "string" ? claimsData.claims.email.trim().toLowerCase() : "";
+  if (!email.endsWith("@spxexpress.com")) return null;
+
   const { data: profile, error: profileError } = await createAdminClient()
     .from("profiles")
     .select("full_name, role")
@@ -41,7 +44,7 @@ export const getCurrentUserContext = cache(async (): Promise<CurrentUserContext 
   return {
     user: {
       id: userId,
-      email: typeof claimsData.claims.email === "string" ? claimsData.claims.email : "",
+      email,
     },
     profile,
   };

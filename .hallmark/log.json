@@ -1,5 +1,12 @@
 ﻿[
     {
+        "date":  "2026-09-15",
+        "macrostructure":  "Control Ledger",
+        "theme":  "Cobalt adapted",
+        "enrichment":  "live snapshot strip and 48-hour paired bars",
+        "brief":  "Pickup Realtime control page for KV5 and KV6 with a mock pickup_48h_summary tab"
+    },
+    {
         "date":  "2026-08-28",
         "macrostructure":  "Control Ledger",
         "theme":  "custom (laser cyan · đêm ops căng)",
