@@ -25,13 +25,12 @@ const shiftLabels = {
 const RESEND_ONBOARDING_FROM = "Rider Operations <beth.t@example.com>";
 
 function escapeHtml(value: string) {
-  return value.replace(/[&<>'\"]/g, (character) => ({
-    "&": "&",
-    "<": "<",
-    ">": ">",
-    "'": "&#39;",
-    '"': """,
-  })[character] ?? character);
+  return value
+    .replaceAll("&", "&")
+    .replaceAll("<", "<")
+    .replaceAll(">", ">")
+    .replaceAll("'", "&#39;")
+    .replaceAll('"', """);
 }
 
 function formatDate(date: string) {
@@ -52,7 +51,6 @@ function canUseAsResendFrom(value: string) {
   const email = extractEmail(value);
   if (!email.includes("@")) return false;
   const domain = email.split("@")[1] ?? "";
-  // Resend rejects consumer inboxes as From unless the domain is verified.
   return !/(gmail|googlemail|yahoo|outlook|hotmail|icloud)\.com$/i.test(domain);
 }
 
@@ -74,7 +72,24 @@ function buildEmailHtml(input: OffRequestDecisionEmail) {
 
   return {
     decisionText,
-    html: `<div style="margin:0;background:#f4f7fb;padding:32px 16px;font-family:Arial,sans-serif;color:#101828"><div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #d7deea;border-radius:10px;overflow:hidden"><div style="padding:24px 28px;background:#111827;color:#f8fafc"><div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#a8b3c7">Rider Operations · KV5 + KV6</div><h1 style="margin:8px 0 0;font-size:22px;line-height:1.25">Kết quả đăng ký lịch OFF</h1></div><div style="padding:28px"><p style="margin:0 0 20px;line-height:1.6">Chào <strong>${riderName}</strong>, yêu cầu OFF phép của bạn <strong style="color:${accent}">${decisionText}</strong>.</p><table style="width:100%;border-collapse:collapse;font-size:14px"><tr><td style="padding:10px 0;color:#667085;border-bottom:1px solid #eaecf0">Mã rider</td><td style="padding:10px 0;text-align:right;color:#101828;border-bottom:1px solid #eaecf0">${escapeHtml(input.riderCode)}</td></tr><tr><td style="padding:10px 0;color:#667085;border-bottom:1px solid #eaecf0">Ngày OFF</td><td style="padding:10px 0;text-align:right;color:#101828;border-bottom:1px solid #eaecf0">${formatDate(input.offDate)}</td></tr><tr><td style="padding:10px 0;color:#667085">Khung thời gian</td><td style="padding:10px 0;text-align:right;color:#101828">${shiftLabels[input.shift]}</td></tr>${note}</table><p style="margin:22px 0 0;color:#667085;font-size:12px;line-height:1.5">Đây là email tự động từ hệ thống Rider Operations. Vui lòng liên hệ điều phối viên nếu thông tin chưa chính xác.</p></div></div></div>`,
+    html: [
+      '<div style="margin:0;background:#f4f7fb;padding:32px 16px;font-family:Arial,sans-serif;color:#101828">',
+      '<div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #d7deea;border-radius:10px;overflow:hidden">',
+      '<div style="padding:24px 28px;background:#111827;color:#f8fafc">',
+      '<div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#a8b3c7">Rider Operations · KV5 + KV6</div>',
+      '<h1 style="margin:8px 0 0;font-size:22px;line-height:1.25">Kết quả đăng ký lịch OFF</h1>',
+      "</div>",
+      '<div style="padding:28px">',
+      `<p style="margin:0 0 20px;line-height:1.6">Chào <strong>${riderName}</strong>, yêu cầu OFF phép của bạn <strong style="color:${accent}">${decisionText}</strong>.</p>`,
+      '<table style="width:100%;border-collapse:collapse;font-size:14px">',
+      `<tr><td style="padding:10px 0;color:#667085;border-bottom:1px solid #eaecf0">Mã rider</td><td style="padding:10px 0;text-align:right;color:#101828;border-bottom:1px solid #eaecf0">${escapeHtml(input.riderCode)}</td></tr>`,
+      `<tr><td style="padding:10px 0;color:#667085;border-bottom:1px solid #eaecf0">Ngày OFF</td><td style="padding:10px 0;text-align:right;color:#101828;border-bottom:1px solid #eaecf0">${formatDate(input.offDate)}</td></tr>`,
+      `<tr><td style="padding:10px 0;color:#667085">Khung thời gian</td><td style="padding:10px 0;text-align:right;color:#101828">${shiftLabels[input.shift]}</td></tr>`,
+      note,
+      "</table>",
+      '<p style="margin:22px 0 0;color:#667085;font-size:12px;line-height:1.5">Đây là email tự động từ hệ thống Rider Operations. Vui lòng liên hệ điều phối viên nếu thông tin chưa chính xác.</p>',
+      "</div></div></div>",
+    ].join(""),
   };
 }
 
@@ -124,12 +139,7 @@ export async function sendOffRequestDecisionEmail(input: OffRequestDecisionEmail
   }
 
   try {
-    const first = await sendWithResend(input, apiKey);
-    if (first.status === "SENT") return first;
-
-    // If a custom From was rejected, retry once with Resend onboarding sender.
-    const retry = await sendWithResend(input, apiKey);
-    return retry.status === "SENT" ? retry : first;
+    return await sendWithResend(input, apiKey);
   } catch (error) {
     return {
       status: "FAILED",
