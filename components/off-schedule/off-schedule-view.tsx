@@ -13,11 +13,27 @@ type ReviewResponse = {
   success: boolean;
   request?: RiderOffRequest;
   ward_warning?: WardConflict | null;
+  email_notification?: { status?: string; error?: string };
 };
 
 const typeLabel = { WEEKLY: "OFF tuần", PLANNED: "OFF phép", EMERGENCY: "OFF đột xuất" };
 const shiftLabel = { FULL_DAY: "Cả ngày", MORNING: "Buổi sáng", AFTERNOON: "Buổi chiều" };
 const statusLabel = { PENDING: "Chờ duyệt", APPROVED: "Đã duyệt", REJECTED: "Từ chối" };
+
+function emailNotice(item: RiderOffRequest, result: ReviewResponse | null, action: "APPROVE" | "REJECT" | "RESEND_EMAIL") {
+  const email = result?.request?.requester_email || item.requester_email;
+  const status = result?.email_notification?.status || result?.request?.email_notification_status;
+  const err = result?.email_notification?.error || result?.request?.email_notification_error;
+  if (action === "RESEND_EMAIL") {
+    if (status === "SENT") return `Đã gửi lại email tới ${email}.`;
+    return `Chưa gửi được email${err ? `: ${err}` : "."}`;
+  }
+  const verb = action === "APPROVE" ? "Đã duyệt" : "Đã từ chối";
+  if (!email) return `${verb} yêu cầu. Đơn này không có email để báo rider.`;
+  if (status === "SENT") return `${verb} và đã gửi email tới ${email}.`;
+  if (status === "NOT_CONFIGURED") return `${verb} nhưng email chưa cấu hình${err ? `: ${err}` : "."}`;
+  return `${verb} nhưng chưa gửi được email${err ? `: ${err}` : "."}`;
+}
 
 export function OffScheduleView() {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
@@ -64,7 +80,6 @@ export function OffScheduleView() {
         return;
       }
     }
-    // Optimistic: biến mất khỏi queue ngay, đồng bộ nền
     const previousRequests = requests;
     if (action === "APPROVE" || action === "REJECT") {
       const optimisticStatus = action === "APPROVE" ? "APPROVED" : "REJECTED";
@@ -93,18 +108,20 @@ export function OffScheduleView() {
         status: nextStatus,
         reviewed_at: result?.request?.reviewed_at ?? new Date().toISOString(),
         email_notification_status: result?.request?.email_notification_status ?? request.email_notification_status,
+        email_notification_error: result?.request?.email_notification_error ?? request.email_notification_error,
+        email_notified_at: result?.request?.email_notified_at ?? request.email_notified_at,
         ward_conflict: result?.ward_warning ?? request.ward_conflict,
       } : request));
     }
 
+    const messages = [emailNotice(item, result, action)];
     if (action === "APPROVE" && result?.ward_warning) {
       const conflict = result.ward_warning;
       const approvedNote = conflict.has_approved ? " (có người đã duyệt)" : "";
       const group = conflict.cot ? `Phường ${conflict.ward} (${conflict.cot})` : `Phường ${conflict.ward}`;
-      setNotice(
-        `${group} ngày này đã có ${conflict.count} người OFF cùng COT${approvedNote}: ${conflict.riders.map((rider) => rider.full_name || rider.rider_code).join(", ")}.`,
-      );
+      messages.push(`${group} ngày này đã có ${conflict.count} người OFF cùng COT${approvedNote}: ${conflict.riders.map((rider) => rider.full_name || rider.rider_code).join(", ")}.`);
     }
+    setNotice(messages.join(" "));
 
     if (action === "RESEND_EMAIL" && result?.request) {
       const updatedRequest = result.request;
@@ -117,9 +134,8 @@ export function OffScheduleView() {
     }
 
     setBusyId(null);
-  }, []);
+  }, [requests]);
 
-  // Combine all filtering into single pass for better performance
   const { summary, pendingRequests, approvedRequests, rejectedRequests } = useMemo(() => {
     let pendingCount = 0, approvedCount = 0, rejectedCount = 0;
     const pending: RiderOffRequest[] = [];
@@ -157,13 +173,11 @@ export function OffScheduleView() {
   const byDate = useMemo(() => {
     const dateMap = new Map<string, RiderOffRequest[]>();
     const baseDate = weekStart;
-    // Pre-allocate all dates
     for (let day = 0; day < 7; day++) {
       const date = addDays(baseDate, day);
       const dateStr = format(date, "yyyy-MM-dd");
       dateMap.set(dateStr, []);
     }
-    // Single pass to populate
     for (const item of requests) {
       const arr = dateMap.get(item.off_date);
       if (arr) arr.push(item);
@@ -230,7 +244,7 @@ const RequestRow = memo(({ item, canEdit, busyId, mode, onReview, batchCount }: 
   const dateObj = useMemo(() => new Date(`${item.off_date}T00:00:00`), [item.off_date]);
   const dayStr = useMemo(() => format(dateObj, "dd"), [dateObj]);
   const monthStr = useMemo(() => format(dateObj, "MMM", { locale: vi }), [dateObj]);
-  
+
   return <article className="off-schedule-request">
     <div className="off-schedule-date"><strong>{dayStr}</strong><span>{monthStr}</span></div>
     <div className="off-schedule-rider"><span>{item.rider_code}</span><h3>{item.rider?.full_name || "Chưa có tên rider"}</h3><p>{[item.rider?.kv, item.rider?.cot, item.rider?.delivery_district].filter(Boolean).join(" · ") || "Chưa có thông tin tuyến"}</p>{batchCount > 1 ? <small>Cùng đơn · {batchCount} ngày trong tuần</small> : null}</div>
@@ -267,7 +281,7 @@ function RequestRows({ items, canEdit, busyId, mode, onReview }: { items: RiderO
 const EmailState = memo(({ item }: { item: RiderOffRequest }) => {
   if (!item.requester_email) return <small className="off-schedule-email-state is-unsent"><MailWarning size={14} aria-hidden="true" />Không có email</small>;
   const sent = item.email_notification_status === "SENT";
-  return <small className={`off-schedule-email-state ${sent ? "is-sent" : "is-unsent"}`} title={item.email_notification_error || undefined}>{sent ? <MailCheck size={14} aria-hidden="true" /> : <MailWarning size={14} aria-hidden="true" />}{sent ? "Email đã gửi" : item.email_notification_status === "NOT_CONFIGURED" ? "Email chưa cấu hình" : "Email chưa gửi"}</small>;
+  return <small className={`off-schedule-email-state ${sent ? "is-sent" : "is-unsent"}`} title={item.email_notification_error || undefined}>{sent ? <MailCheck size={14} aria-hidden="true" /> : <MailWarning size={14} aria-hidden="true" />}{sent ? "Email đã gửi" : item.email_notification_status === "NOT_CONFIGURED" ? "Email chưa cấu hình" : item.email_notification_status === "FAILED" ? "Email lỗi" : "Email chưa gửi"}</small>;
 });
 EmailState.displayName = "EmailState";
 
@@ -277,7 +291,7 @@ const DayCard = memo(({ date, items }: { date: string; items: RiderOffRequest[] 
   const dayNum = useMemo(() => format(dateObj, "dd"), [dateObj]);
   const isToday = useMemo(() => date === format(new Date(), "yyyy-MM-dd"), [date]);
   const approved = useMemo(() => items.filter((item) => item.status === "APPROVED").length, [items]);
-  
+
   return <div className={isToday ? "is-today" : ""}>
     <span>{dayName}</span>
     <strong>{dayNum}</strong>
