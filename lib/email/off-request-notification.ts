@@ -25,12 +25,14 @@ const shiftLabels = {
 const RESEND_ONBOARDING_FROM = "Rider Operations <beth.t@example.com>";
 
 function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&")
-    .replaceAll("<", "<")
-    .replaceAll(">", ">")
-    .replaceAll("'", "&#39;")
-    .replaceAll('"', """);
+  const amp = String.fromCharCode(38);
+  return value.replace(/[&<>"']/g, (character) => {
+    if (character === "&") return amp + "amp;";
+    if (character === "<") return amp + "lt;";
+    if (character === ">") return amp + "gt;";
+    if (character === '"') return amp + "quot;";
+    return amp + "#39;";
+  });
 }
 
 function formatDate(date: string) {
