@@ -1,4 +1,4 @@
-/* LMHub Inventory · site tokens, stacked full-width area boards */
+/* LMHub Inventory · site tokens, side-by-side KV boards */
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -88,19 +88,10 @@ export function LmhubInventoryView() {
 
   const boards = useMemo(() => {
     const kvRows = rows.filter((row) => row.area === "KV5" || row.area === "KV6");
-    return {
-      kv5: buildBoard(kvRows, "KV5"),
-      kv6: buildBoard(kvRows, "KV6"),
-      all: kvRows.length,
-      kv5n: kvRows.filter((row) => row.area === "KV5").length,
-      kv6n: kvRows.filter((row) => row.area === "KV6").length,
-    };
+    return { kv5: buildBoard(kvRows, "KV5"), kv6: buildBoard(kvRows, "KV6"), all: kvRows.length, kv5n: kvRows.filter((row) => row.area === "KV5").length, kv6n: kvRows.filter((row) => row.area === "KV6").length };
   }, [rows]);
 
-  const filtered = useMemo(() => ({
-    kv5: filterBoard(boards.kv5, query, cot, heat),
-    kv6: filterBoard(boards.kv6, query, cot, heat),
-  }), [boards, query, cot, heat]);
+  const filtered = useMemo(() => ({ kv5: filterBoard(boards.kv5, query, cot, heat), kv6: filterBoard(boards.kv6, query, cot, heat) }), [boards, query, cot, heat]);
 
   const selectedOrders = useMemo(() => {
     if (!selected) return [];
@@ -117,24 +108,20 @@ export function LmhubInventoryView() {
     <div className="dashboard-control mx-auto max-w-[1600px] space-y-6">
       <header className="dashboard-command-header">
         <div className="min-w-0">
-          <div className="dashboard-kicker"><span className="dashboard-live-dot" />Tồn LMHub · KV5 rồi KV6</div>
+          <div className="dashboard-kicker"><span className="dashboard-live-dot" />Tồn LMHub · KV5 | KV6</div>
           <h1>Tồn khu vực</h1>
-          <p>Hai bảng xếp dọc cho dễ đọc. Màu theo token site. Bấm phường để xem đơn.</p>
+          <p>Hai bảng song song. Bấm phường để xem đơn.</p>
         </div>
         <div className="dashboard-command-actions">
-          <Button type="button" variant="secondary" onClick={() => void load()} disabled={loading}>
-            <RefreshCcw size={16} className={loading ? "animate-spin" : undefined} /><span>Làm mới</span>
-          </Button>
+          <Button type="button" variant="secondary" onClick={() => void load()} disabled={loading}><RefreshCcw size={16} className={loading ? "animate-spin" : undefined} /><span>Làm mới</span></Button>
         </div>
       </header>
-
       <section className="grid grid-cols-12 gap-3">
         <div className="col-span-6 lg:col-span-3"><KpiCard icon={PackageCheck} label="Tồn KV5 + KV6" value={boards.all} helper={formatDateTime(snapshotAt)} tone="blue" loading={loading} /></div>
         <div className="col-span-6 lg:col-span-3"><KpiCard icon={Truck} label="Tồn KV5" value={boards.kv5n} helper={`${boards.kv5.length} quận`} tone="blue" loading={loading} /></div>
         <div className="col-span-6 lg:col-span-3"><KpiCard icon={Truck} label="Tồn KV6" value={boards.kv6n} helper={`${boards.kv6.length} quận`} tone="blue" loading={loading} /></div>
         <div className="col-span-6 lg:col-span-3"><KpiCard icon={MapPin} label="Phường đỏ" value={hotCount} helper="≥ 36 đơn" tone={hotCount ? "red" : "green"} loading={loading} /></div>
       </section>
-
       <div className="flex flex-wrap items-center gap-2">
         <span className="relative min-w-[240px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" size={16} />
@@ -145,19 +132,17 @@ export function LmhubInventoryView() {
         <HeatLegend />
       </div>
       {error ? <div role="alert" className="dashboard-error">{error}</div> : null}
-
       {loading && !rows.length ? (
-        <div className="space-y-4">
-          <div className="h-[28rem] animate-pulse rounded-xl bg-[var(--color-paper-3)]" />
-          <div className="h-[28rem] animate-pulse rounded-xl bg-[var(--color-paper-3)]" />
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="h-[32rem] animate-pulse rounded-xl bg-[var(--color-paper-3)]" />
+          <div className="h-[32rem] animate-pulse rounded-xl bg-[var(--color-paper-3)]" />
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
           <AreaBoard title="Khu vực 5" districts={filtered.kv5} cot={cot} selected={selected} onSelect={(ward) => { setSelected(ward); setPage(1); }} />
           <AreaBoard title="Khu vực 6" districts={filtered.kv6} cot={cot} selected={selected} onSelect={(ward) => { setSelected(ward); setPage(1); }} />
         </div>
       )}
-
       {selected ? (
         <section className="overflow-hidden rounded-xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-rule)] px-4 py-3">
@@ -170,19 +155,10 @@ export function LmhubInventoryView() {
           <div className="max-h-[28rem] overflow-auto">
             <table className="w-full min-w-[880px] text-left text-sm">
               <thead className="sticky top-0 bg-[var(--color-paper-2)] text-xs text-[var(--color-muted)]">
-                <tr>
-                  <th className="px-4 py-3">Mã vận đơn</th>
-                  <th className="px-4 py-3">Zone</th>
-                  <th className="px-4 py-3">Loại</th>
-                  <th className="px-4 py-3">COT</th>
-                  <th className="px-4 py-3">Trạng thái</th>
-                  <th className="px-4 py-3 text-right">Về hub</th>
-                </tr>
+                <tr><th className="px-4 py-3">Mã vận đơn</th><th className="px-4 py-3">Zone</th><th className="px-4 py-3">Loại</th><th className="px-4 py-3">COT</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3 text-right">Về hub</th></tr>
               </thead>
               <tbody>
-                {!pageOrders.length ? (
-                  <tr><td colSpan={6} className="px-4 py-10 text-center text-[var(--color-muted)]">Không có đơn khớp lọc.</td></tr>
-                ) : pageOrders.map((row) => (
+                {!pageOrders.length ? <tr><td colSpan={6} className="px-4 py-10 text-center text-[var(--color-muted)]">Không có đơn khớp lọc.</td></tr> : pageOrders.map((row) => (
                   <tr key={row.shipment_id} className="border-t border-[var(--color-rule)]">
                     <td className="px-4 py-3 font-mono text-[13px] font-semibold text-[var(--color-ink)]">{row.shipment_id}</td>
                     <td className="px-4 py-3 text-[var(--color-ink-2)]">{row.zone_id || "—"}</td>
@@ -212,31 +188,27 @@ function AreaBoard({ title, districts, cot, selected, onSelect }: { title: strin
   const grand = districts.reduce((sum, item) => addCounts(sum, item.totals), emptyCounts());
   return (
     <section className="overflow-hidden rounded-xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
-      <div className="flex items-center justify-between bg-[var(--color-graphite)] px-5 py-3.5 text-[var(--color-graphite-ink)]">
-        <h2 className="text-base font-bold tracking-tight">{title}</h2>
-        <span className="font-mono text-base font-semibold">{visibleTotal(grand, cot).toLocaleString("vi-VN")} đơn</span>
+      <div className="flex items-center justify-between bg-[var(--color-graphite)] px-4 py-3 text-[var(--color-graphite-ink)]">
+        <h2 className="text-sm font-bold tracking-tight">{title}</h2>
+        <span className="font-mono text-sm font-semibold">{visibleTotal(grand, cot).toLocaleString("vi-VN")} đơn</span>
       </div>
-      <div className="overflow-auto">
-        <table className="w-full text-left text-[15px]">
+      <div className="max-h-[70vh] overflow-auto">
+        <table className="w-full text-left text-sm">
           <thead className="sticky top-0 z-10 bg-[var(--color-paper-2)] text-xs uppercase tracking-wide text-[var(--color-muted)]">
             <tr>
-              <th className="px-5 py-3 font-semibold">Quận / Phường</th>
-              <th className="w-28 px-4 py-3 text-right font-semibold">COT 1</th>
-              <th className="w-28 px-4 py-3 text-right font-semibold">COT 2</th>
-              <th className="w-32 px-4 py-3 text-right font-semibold">Tổng</th>
+              <th className="px-4 py-2.5 font-semibold">Quận / Phường</th>
+              <th className="w-20 px-3 py-2.5 text-right font-semibold">COT 1</th>
+              <th className="w-20 px-3 py-2.5 text-right font-semibold">COT 2</th>
+              <th className="w-24 px-3 py-2.5 text-right font-semibold">Tổng</th>
             </tr>
           </thead>
           <tbody>
-            {!districts.length ? (
-              <tr><td colSpan={4} className="px-5 py-10 text-center text-sm text-[var(--color-muted)]">Không có dòng khớp lọc.</td></tr>
-            ) : districts.map((district) => (
-              <DistrictRows key={`${district.area}-${district.district}`} district={district} cot={cot} selected={selected} onSelect={onSelect} />
-            ))}
+            {!districts.length ? <tr><td colSpan={4} className="px-4 py-10 text-center text-sm text-[var(--color-muted)]">Không có dòng khớp lọc.</td></tr> : districts.map((district) => <DistrictRows key={`${district.area}-${district.district}`} district={district} cot={cot} selected={selected} onSelect={onSelect} />)}
             {districts.length ? (
               <tr className="border-t border-[var(--color-rule-strong)] bg-[var(--color-paper-3)]">
-                <td className="px-5 py-3.5 font-bold text-[var(--color-ink)]">Tổng {title}</td>
-                <td className="px-4 py-3.5 text-right font-mono font-bold">{visibleCount(grand, "cot1", cot).toLocaleString("vi-VN")}</td>
-                <td className="px-4 py-3.5 text-right font-mono font-bold">{visibleCount(grand, "cot2", cot).toLocaleString("vi-VN")}</td>
+                <td className="px-4 py-3 font-bold text-[var(--color-ink)]">Tổng {title}</td>
+                <td className="px-3 py-3 text-right font-mono font-bold">{visibleCount(grand, "cot1", cot).toLocaleString("vi-VN")}</td>
+                <td className="px-3 py-3 text-right font-mono font-bold">{visibleCount(grand, "cot2", cot).toLocaleString("vi-VN")}</td>
                 <HeatCell value={visibleTotal(grand, cot)} strong />
               </tr>
             ) : null}
@@ -251,18 +223,18 @@ function DistrictRows({ district, cot, selected, onSelect }: { district: Distric
   return (
     <>
       <tr className="border-t border-[var(--color-rule)] bg-[var(--color-accent-soft)]">
-        <td className="px-5 py-3 font-bold text-[var(--color-accent)]">{district.district}</td>
-        <td className="px-4 py-3 text-right font-mono font-semibold text-[var(--color-ink)]">{visibleCount(district.totals, "cot1", cot).toLocaleString("vi-VN")}</td>
-        <td className="px-4 py-3 text-right font-mono font-semibold text-[var(--color-ink)]">{visibleCount(district.totals, "cot2", cot).toLocaleString("vi-VN")}</td>
+        <td className="px-4 py-2.5 font-bold text-[var(--color-accent)]">{district.district}</td>
+        <td className="px-3 py-2.5 text-right font-mono font-semibold text-[var(--color-ink)]">{visibleCount(district.totals, "cot1", cot).toLocaleString("vi-VN")}</td>
+        <td className="px-3 py-2.5 text-right font-mono font-semibold text-[var(--color-ink)]">{visibleCount(district.totals, "cot2", cot).toLocaleString("vi-VN")}</td>
         <HeatCell value={visibleTotal(district.totals, cot)} strong />
       </tr>
       {district.wards.map((ward) => {
         const active = selected?.area === ward.area && selected.district === ward.district && selected.ward === ward.ward;
         return (
           <tr key={ward.ward} onClick={() => onSelect(ward)} className={cn("cursor-pointer border-t border-[var(--color-rule)] hover:bg-[var(--color-paper-2)]", active && "bg-[var(--color-accent-soft)]")}>
-            <td className="px-5 py-3 pl-10 text-[var(--color-ink)]">{ward.ward}</td>
-            <td className="px-4 py-3 text-right font-mono text-[var(--color-ink-2)]">{visibleCount(ward, "cot1", cot).toLocaleString("vi-VN")}</td>
-            <td className="px-4 py-3 text-right font-mono text-[var(--color-ink-2)]">{visibleCount(ward, "cot2", cot).toLocaleString("vi-VN")}</td>
+            <td className="px-4 py-2.5 pl-8 text-[var(--color-ink)]">{ward.ward}</td>
+            <td className="px-3 py-2.5 text-right font-mono text-[var(--color-ink-2)]">{visibleCount(ward, "cot1", cot).toLocaleString("vi-VN")}</td>
+            <td className="px-3 py-2.5 text-right font-mono text-[var(--color-ink-2)]">{visibleCount(ward, "cot2", cot).toLocaleString("vi-VN")}</td>
             <HeatCell value={visibleTotal(ward, cot)} />
           </tr>
         );
@@ -270,9 +242,8 @@ function DistrictRows({ district, cot, selected, onSelect }: { district: Distric
     </>
   );
 }
-
 function HeatCell({ value, strong }: { value: number; strong?: boolean }) {
-  return <td className={cn("px-4 py-3 text-right font-mono", heatClass(value), strong && "font-bold")}>{value.toLocaleString("vi-VN")}</td>;
+  return <td className={cn("px-3 py-2.5 text-right font-mono", heatClass(value), strong && "font-bold")}>{value.toLocaleString("vi-VN")}</td>;
 }
 function HeatLegend() {
   return (
@@ -302,22 +273,9 @@ function filterBoard(districts: DistrictAgg[], query: string, cot: CotFilter, he
     return { ...district, wards, totals: wards.reduce((sum, ward) => addCounts(sum, ward), emptyCounts()) };
   }).filter((district) => district.wards.length > 0).sort((a, b) => visibleTotal(b.totals, cot) - visibleTotal(a.totals, cot));
 }
-function visibleTotal(counts: Counts, cot: CotFilter) {
-  if (cot === "cot1") return counts.cot1;
-  if (cot === "cot2") return counts.cot2;
-  return counts.total;
-}
-function visibleCount(counts: Counts, key: "cot1" | "cot2", cot: CotFilter) {
-  if (cot !== "all" && cot !== key) return 0;
-  return counts[key];
-}
-function heatLevel(value: number) {
-  if (value <= 0) return "none";
-  if (value <= 5) return "green";
-  if (value <= 20) return "yellow";
-  if (value <= 35) return "orange";
-  return "red";
-}
+function visibleTotal(counts: Counts, cot: CotFilter) { if (cot === "cot1") return counts.cot1; if (cot === "cot2") return counts.cot2; return counts.total; }
+function visibleCount(counts: Counts, key: "cot1" | "cot2", cot: CotFilter) { if (cot !== "all" && cot !== key) return 0; return counts[key]; }
+function heatLevel(value: number) { if (value <= 0) return "none"; if (value <= 5) return "green"; if (value <= 20) return "yellow"; if (value <= 35) return "orange"; return "red"; }
 function heatClass(value: number) {
   const level = heatLevel(value);
   if (level === "green") return "bg-[var(--color-success-soft)] text-[var(--color-success)]";
@@ -344,10 +302,7 @@ function buildBoard(rows: InventoryRow[], area: Area): DistrictAgg[] {
     return { district, area, wards: wardList, totals: wardList.reduce((sum, item) => addCounts(sum, item), emptyCounts()) };
   });
 }
-function cotBucket(value: string): "cot1" | "cot2" {
-  const text = normalize(value);
-  return text.includes("cot 1") || /\bcot\s*1\b/.test(text) ? "cot1" : "cot2";
-}
+function cotBucket(value: string): "cot1" | "cot2" { const text = normalize(value); return text.includes("cot 1") || /\bcot\s*1\b/.test(text) ? "cot1" : "cot2"; }
 function emptyCounts(): Counts { return { cot1: 0, cot2: 0, total: 0 }; }
 function addCounts(a: Counts, b: Counts): Counts { return { cot1: a.cot1 + b.cot1, cot2: a.cot2 + b.cot2, total: a.total + b.total }; }
 function normalizeArea(value: string): Area | string {
