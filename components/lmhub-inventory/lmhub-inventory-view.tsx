@@ -2,7 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, MapPin, PackageCheck, RefreshCcw, Search, Truck, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, MapPin, PackageCheck, RefreshCcw, Search, Truck, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
 import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
@@ -38,7 +38,7 @@ const COLUMNS = "snapshot_id,snapshot_at,shipment_id,received_time,ward,district
 const UNKNOWN_WARD = "Chưa xác định phường";
 const UNKNOWN_DISTRICT = "Chưa xác định quận";
 
-export function LmhubInventoryView() {
+export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean }) {
   const [rows, setRows] = useState<InventoryRow[]>([]);
   const [snapshotAt, setSnapshotAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,6 +48,10 @@ export function LmhubInventoryView() {
   const [heat, setHeat] = useState<HeatFilter>("all");
   const [selected, setSelected] = useState<WardAgg | null>(null);
   const [page, setPage] = useState(1);
+  const [queueing, setQueueing] = useState(false);
+  const [waitingSnapshot, setWaitingSnapshot] = useState(false);
+  const [queueNote, setQueueNote] = useState<string | null>(null);
+  const [queueMeta, setQueueMeta] = useState<{ pending: number; running: number; lastStatus: string; lastMessage: string } | null>(null);
   useReportInitialDataLoading("lmhub-inventory", loading);
 
   const requestRef = useRef(0);
@@ -86,6 +90,77 @@ export function LmhubInventoryView() {
   useEffect(() => { void load(); }, [load]);
   useSupabaseRealtime({ table: "lmhub_inventory_rows", onChange: scheduleLoad, debounceMs: 800 });
 
+  const refreshQueueStatus = useCallback(async () => {
+    const response = await fetch("/api/lmhub-inventory/refresh", { cache: "no-store" });
+    const payload = await response.json().catch(() => null) as { success?: boolean; pending?: number; running?: number; lastStatus?: string; lastMessage?: string; error?: string } | null;
+    if (!payload?.success) return payload;
+    setQueueMeta({
+      pending: payload.pending ?? 0,
+      running: payload.running ?? 0,
+      lastStatus: payload.lastStatus ?? "",
+      lastMessage: payload.lastMessage ?? "",
+    });
+    return payload;
+  }, []);
+
+  useEffect(() => { void refreshQueueStatus(); }, [refreshQueueStatus]);
+
+  const baselineRef = useRef<string | null>(null);
+  const queueLmhub = useCallback(async () => {
+    if (queueing) return;
+    setQueueing(true);
+    setQueueNote(null);
+    baselineRef.current = snapshotAt;
+    try {
+      const response = await fetch("/api/lmhub-inventory/refresh", { method: "POST" });
+      const payload = await response.json().catch(() => null) as { success?: boolean; queued?: boolean; cooldown?: boolean; retryAfterSec?: number; message?: string; error?: string; pending?: number; running?: number; lastStatus?: string; lastMessage?: string } | null;
+      if (!response.ok || !payload?.success) {
+        setQueueNote(payload?.error ?? "Không đẩy được việc fetch LMHub.");
+        return;
+      }
+      setQueueNote(payload.message ?? "Đã gửi yêu cầu.");
+      if (typeof payload.pending === "number") {
+        setQueueMeta({
+          pending: payload.pending ?? 0,
+          running: payload.running ?? 0,
+          lastStatus: payload.lastStatus ?? "",
+          lastMessage: payload.lastMessage ?? "",
+        });
+      }
+      if (payload.queued) setWaitingSnapshot(true);
+    } catch {
+      setQueueNote("Không kết nối được API fetch LMHub.");
+    } finally {
+      setQueueing(false);
+    }
+  }, [queueing, snapshotAt]);
+
+  useEffect(() => {
+    if (!waitingSnapshot) return;
+    let stopped = false;
+    const started = Date.now();
+    const tick = async () => {
+      if (stopped) return;
+      await load();
+      await refreshQueueStatus();
+      if (Date.now() - started > 8 * 60_000) {
+        setWaitingSnapshot(false);
+        setQueueNote("Worker chưa ghi snapshot mới sau 8 phút. Kiểm tra START_LMHUB_WORKER.bat rồi bấm Làm mới.");
+      }
+    };
+    void tick();
+    const timer = setInterval(() => void tick(), 8000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [waitingSnapshot, load, refreshQueueStatus]);
+
+  useEffect(() => {
+    if (!waitingSnapshot || !snapshotAt) return;
+    if (baselineRef.current && snapshotAt !== baselineRef.current) {
+      setWaitingSnapshot(false);
+      setQueueNote(`Đã có snapshot mới lúc ${formatDateTime(snapshotAt)}.`);
+    }
+  }, [waitingSnapshot, snapshotAt]);
+
   const boards = useMemo(() => {
     const kvRows = rows.filter((row) => row.area === "KV5" || row.area === "KV6");
     return { kv5: buildBoard(kvRows, "KV5"), kv6: buildBoard(kvRows, "KV6"), all: kvRows.length, kv5n: kvRows.filter((row) => row.area === "KV5").length, kv6n: kvRows.filter((row) => row.area === "KV6").length };
@@ -119,12 +194,25 @@ export function LmhubInventoryView() {
             <p className="text-xs text-[var(--color-muted)]">{formatRelative(snapshotAt)}</p>
           </div>
           <Button type="button" variant="secondary" onClick={() => void load()} disabled={loading}><RefreshCcw size={16} className={loading ? "animate-spin" : undefined} /><span>Làm mới</span></Button>
+          {canQueue ? (
+            <Button type="button" onClick={() => void queueLmhub()} disabled={queueing || waitingSnapshot}>
+              <Download size={16} className={queueing || waitingSnapshot ? "animate-pulse" : undefined} />
+              <span>{queueing ? "Đang đẩy..." : waitingSnapshot ? "Đang chờ worker" : "Fetch data"}</span>
+            </Button>
+          ) : null}
         </div>
       </header>
       <div className="dashboard-readout-strip">
         <span className="dashboard-live-dot" />
         Cập nhật gần nhất: {formatDateTime(snapshotAt)} · {formatRelative(snapshotAt)}
+        {queueMeta ? ` · Queue ${queueMeta.lastStatus || "EMPTY"} · PENDING ${queueMeta.pending} · RUNNING ${queueMeta.running}` : ""}
       </div>
+      {queueNote ? (
+        <div className="rounded-xl border border-[var(--color-rule)] bg-[var(--color-paper)] px-4 py-3 text-sm text-[var(--color-ink-2)]">
+          {waitingSnapshot ? <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-accent)]" /> : null}
+          {queueNote}
+        </div>
+      ) : null}
       <section className="grid grid-cols-12 gap-3">
         <div className="col-span-6 lg:col-span-3"><KpiCard icon={PackageCheck} label="Tồn KV5 + KV6" value={boards.all} helper={formatDateTime(snapshotAt)} tone="blue" loading={loading} /></div>
         <div className="col-span-6 lg:col-span-3"><KpiCard icon={Truck} label="Tồn KV5" value={boards.kv5n} helper={`${boards.kv5.length} quận`} tone="blue" loading={loading} /></div>
