@@ -1,5 +1,10 @@
-import { sendOffRequestDecisionEmail, type OffRequestEmailResult } from "./off-request-notification";
 import nodemailer from "nodemailer";
+
+export type OffRequestEmailResult = {
+  status: "SENT" | "FAILED" | "NOT_CONFIGURED";
+  providerId?: string;
+  error?: string;
+};
 
 export function getOffRequestOpsRecipients() {
   const configured = process.env.OFF_REQUEST_OPS_EMAIL?.split(/[,;\s]+/).map((item) => item.trim()).filter((item) => item.includes("@"));
@@ -28,7 +33,6 @@ export async function sendOffRequestSubmittedEmail(input: {
   if (!input.to.length) return { status: "FAILED", error: "Chua cau hinh OFF_REQUEST_OPS_EMAIL." };
   if (!from.includes("@")) return { status: "NOT_CONFIGURED", error: "Thieu OFF_REQUEST_FROM_EMAIL." };
 
-  const dates = input.offDates.join(", ");
   try {
     const transporter = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user, pass } });
     const info = await transporter.sendMail({
@@ -36,12 +40,10 @@ export async function sendOffRequestSubmittedEmail(input: {
       to: input.to.join(", "),
       replyTo: input.requesterEmail || undefined,
       subject: `[OFF moi] ${input.riderCode} · ${input.offDates.length} ngay`,
-      html: `<p>Rider <strong>${input.riderName || input.riderCode}</strong> vua gui yeu cau OFF.</p><p>Ma: ${input.riderCode}<br/>Loai: ${input.requestType}<br/>Ngay: ${dates}<br/>Ca: ${input.shift}<br/>Ly do: ${input.reason || "-"}</p><p>Vao Off Schedule de duyet.</p>`,
+      html: `<p>Rider <strong>${input.riderName || input.riderCode}</strong> vua gui yeu cau OFF.</p><p>Ma: ${input.riderCode}<br/>Loai: ${input.requestType}<br/>Ngay: ${input.offDates.join(", ")}<br/>Ca: ${input.shift}<br/>Ly do: ${input.reason || "-"}</p><p>Vao Off Schedule de duyet.</p>`,
     });
     return { status: "SENT", providerId: info.messageId };
   } catch (error) {
     return { status: "FAILED", error: error instanceof Error ? error.message : "Unable to send submitted email" };
   }
 }
-
-void sendOffRequestDecisionEmail;
