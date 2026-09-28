@@ -5,12 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { defaultPermissionsForRole, normalizePermissions, type MemberPermissions } from "@/lib/auth/permissions";
 
 const roleSchema = z.enum(["admin", "leader", "viewer", "member"]);
-const permissionsSchema = z.object({
-  approve_off: z.boolean(),
-  manage_attendance: z.boolean(),
-  manage_pickup: z.boolean(),
-  manage_zones: z.boolean(),
-}).partial();
+const permissionsSchema = z.record(z.string(), z.boolean());
 const createMemberSchema = z.object({
   email: z.email("Email không hợp lệ").trim().toLowerCase(),
   full_name: z.string().trim().min(2, "Họ tên cần ít nhất 2 ký tự").max(100),
