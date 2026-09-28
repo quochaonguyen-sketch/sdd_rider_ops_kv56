@@ -22,10 +22,30 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL("/login?error=domain", origin));
   }
 
-  const fullName = typeof data.user.user_metadata.full_name === "string" ? data.user.user_metadata.full_name : null;
-  const { error: profileError } = await createAdminClient()
+  const admin = createAdminClient();
+  const { data: allowed } = await admin
     .from("profiles")
-    .upsert({ id: data.user.id, email, full_name: fullName, role: "viewer" }, { onConflict: "id", ignoreDuplicates: true });
+    .select("id, role, full_name")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (!allowed) {
+    await supabase.auth.signOut();
+    return NextResponse.redirect(new URL("/login?error=not_allowed", origin));
+  }
+
+  const fullName = typeof data.user.user_metadata.full_name === "string"
+    ? data.user.user_metadata.full_name
+    : allowed.full_name;
+
+  const { error: profileError } = await admin
+    .from("profiles")
+    .upsert({
+      id: data.user.id,
+      email,
+      full_name: fullName,
+      role: allowed.role,
+    }, { onConflict: "id" });
 
   if (profileError) {
     await supabase.auth.signOut();

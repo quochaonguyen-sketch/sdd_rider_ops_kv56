@@ -30,14 +30,14 @@ export function LoginForm({ initialError }: { initialError?: string }) {
     <main className="flex min-h-screen flex-col items-center justify-center bg-[radial-gradient(circle_at_top,#dbeafe_0,transparent_38%)] bg-slate-50 px-4 py-8">
       <section className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-7 shadow-[0_24px_70px_rgba(15,23,42,0.1)]">
         <AppBrand className="mb-3" />
-        <p className="mb-6 pl-14 text-sm leading-5 text-slate-500">Đăng nhập bằng tài khoản Google công ty để quản lý và điều phối đội ngũ giao nhận.</p>
+        <p className="mb-6 pl-14 text-sm leading-5 text-slate-500">Chỉ đăng nhập Google. Email phải nằm trong danh sách thành viên được admin cấp quyền.</p>
         <div className="space-y-4">
           {error ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
           <Button type="button" className="w-full" disabled={loading} onClick={() => void signInWithGoogle()}>
             <GoogleIcon />
             {loading ? "Đang chuyển đến Google..." : "Đăng nhập với Google"}
           </Button>
-          <p className="text-center text-xs text-slate-500">Chỉ chấp nhận tài khoản có đuôi <strong>@spxexpress.com</strong>.</p>
+          <p className="text-center text-xs text-slate-500">Không dùng email/mật khẩu. Chỉ tài khoản <strong>@spxexpress.com</strong> đã được thêm.</p>
         </div>
       </section>
       <AppCopyright className="mt-6" />

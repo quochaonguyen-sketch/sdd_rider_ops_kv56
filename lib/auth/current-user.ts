@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { normalizePermissions, type MemberPermissions } from "@/lib/auth/permissions";
 
 export type CurrentUserContext = {
   user: {
@@ -10,15 +11,10 @@ export type CurrentUserContext = {
   profile: {
     full_name: string | null;
     role: string;
+    permissions: MemberPermissions;
   };
 };
 
-/**
- * Resolves the signed-in operator once per Server Component render.
- *
- * getClaims verifies the session JWT and avoids an unnecessary Auth server
- * round-trip when the Supabase project uses asymmetric signing keys.
- */
 export const getCurrentUserContext = cache(async (): Promise<CurrentUserContext | null> => {
   const supabase = await createClient();
   const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
@@ -31,21 +27,35 @@ export const getCurrentUserContext = cache(async (): Promise<CurrentUserContext 
   const email = typeof claimsData.claims.email === "string" ? claimsData.claims.email.trim().toLowerCase() : "";
   if (!email.endsWith("@spxexpress.com")) return null;
 
-  const { data: profile, error: profileError } = await createAdminClient()
+  const admin = createAdminClient();
+  const { data: profile, error: profileError } = await admin
     .from("profiles")
-    .select("full_name, role")
+    .select("full_name, role, email")
     .eq("id", userId)
-    .single();
+    .maybeSingle();
 
   if (profileError) {
     throw new Error(`Unable to load the signed-in user's profile: ${profileError.message}`);
   }
+
+  const { data: byEmail } = profile
+    ? { data: profile }
+    : await admin.from("profiles").select("full_name, role, email").eq("email", email).maybeSingle();
+
+  if (!byEmail) return null;
+
+  const { data: authUser } = await admin.auth.admin.getUserById(userId);
+  const permissions = normalizePermissions(authUser.user?.app_metadata?.permissions, byEmail.role);
 
   return {
     user: {
       id: userId,
       email,
     },
-    profile,
+    profile: {
+      full_name: byEmail.full_name,
+      role: byEmail.role,
+      permissions,
+    },
   };
 });

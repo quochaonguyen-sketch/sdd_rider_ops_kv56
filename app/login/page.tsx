@@ -2,6 +2,7 @@ import { LoginForm } from "@/components/layout/login-form";
 
 const messages: Record<string, string> = {
   domain: "Chỉ tài khoản @spxexpress.com mới được phép truy cập.",
+  not_allowed: "Email này chưa được thêm vào danh sách thành viên. Liên hệ admin để được cấp quyền.",
   oauth: "Không thể hoàn tất đăng nhập Google. Vui lòng thử lại.",
 };
 
