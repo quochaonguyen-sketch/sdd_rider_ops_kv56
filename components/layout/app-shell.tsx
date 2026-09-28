@@ -38,6 +38,7 @@ const volumeItems = [
 ];
 const pickupItems = [
   { href: "/pickup-realtime", view: null, label: "Pickup Realtime", icon: Radio },
+  { href: "/lmhub-inventory", view: null, label: "Tồn khu vực", icon: PackageOpen },
   { href: "/pickup-management", view: null, label: "Quản lý PUP", icon: ListChecks },
   { href: "/pickup-management?view=replacement", view: "replacement", label: "Thế pick", icon: Repeat2 },
 ];
@@ -51,7 +52,7 @@ const toolItems = [
   { href: "/zone-builder", label: "Zone Builder", icon: PencilRuler },
 ];
 const memberHiddenItems = new Set(["/zone-builder", "/pickup-management"]);
-const morePaths = ["/notes", "/performance", "/attendance", "/off-schedule", "/morning-delivery", "/return-orders", "/zones", "/zone-builder", "/pickup-management", "/pickup-realtime", "/volume", "/imports", "/settings"];
+const morePaths = ["/notes", "/performance", "/attendance", "/off-schedule", "/morning-delivery", "/return-orders", "/zones", "/zone-builder", "/pickup-management", "/pickup-realtime", "/lmhub-inventory", "/volume", "/imports", "/settings"];
 type ThemeMode = "light" | "dark";
 const subscribeToFrameContext = () => () => {};
 
@@ -87,7 +88,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
   ];
   const volumeActive = pathname.startsWith("/volume");
   const [volumeOpen, setVolumeOpen] = useState(volumeActive);
-  const pickupActive = pathname.startsWith("/pickup-management") || pathname.startsWith("/pickup-realtime");
+  const pickupActive = pathname.startsWith("/pickup-management") || pathname.startsWith("/pickup-realtime") || pathname.startsWith("/lmhub-inventory");
   const [pickupOpen, setPickupOpen] = useState(pickupActive);
   const returnActive = pathname.startsWith("/return-orders");
   const [returnOpen, setReturnOpen] = useState(returnActive);
