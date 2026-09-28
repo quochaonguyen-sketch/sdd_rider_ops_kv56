@@ -1,4 +1,5 @@
-import { ProtectedPage } from "@/components/layout/protected-page";
-import { TasksView } from "@/components/tasks/tasks-view";
+import { redirect } from "next/navigation";
 
-export default function TasksPage() { return <ProtectedPage><TasksView /></ProtectedPage>; }
+export default function TasksPage() {
+  redirect("/dashboard");
+}

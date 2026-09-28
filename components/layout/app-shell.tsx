@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, ClipboardCheck, Columns2, ListChecks, ListTodo, LogOut, MapPinned, Menu, Moon, NotebookPen, PackageOpen, PackagePlus, PackageSearch, PanelLeftClose, PanelLeftOpen, PencilRuler, Radio, Repeat2, Sun, Truck, Upload, UsersRound, X } from "lucide-react";
+import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, ClipboardCheck, Columns2, ListChecks, LogOut, MapPinned, Menu, Moon, NotebookPen, PackageOpen, PackagePlus, PackageSearch, PanelLeftClose, PanelLeftOpen, PencilRuler, Radio, Repeat2, Sun, Truck, Upload, UsersRound, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/utils/cn";
 import { AppBrand, AppCopyright } from "@/components/layout/app-brand";
@@ -17,7 +17,6 @@ import { OffRequestNotifications } from "@/components/layout/off-request-notific
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { href: "/realtime-dashboard", label: "Realtime Dashboard", icon: Activity },
-  { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/notes", label: "My Notes", icon: NotebookPen },
   { href: "/riders", label: "Riders", icon: Bike },
   { href: "/performance", label: "Performance", icon: BarChart3 },
@@ -82,7 +81,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
   const visibleReturnItems = returnItems;
   const moreNavItems = [
     ...volumeItems,
-    ...navItems.slice(4).filter((item) => item.href !== "/pickup-management" && item.href !== "/return-orders" && (!memberToolRestricted || !memberHiddenItems.has(item.href))),
+    ...navItems.slice(3).filter((item) => item.href !== "/pickup-management" && item.href !== "/return-orders" && (!memberToolRestricted || !memberHiddenItems.has(item.href))),
     ...visiblePickupItems,
     ...visibleReturnItems,
   ];
@@ -143,7 +142,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
         <div className="app-sidebar-context"><span className="app-live-dot" aria-hidden="true" /><span>Operations workspace</span></div>
         <nav className="app-sidebar-nav" aria-label="Điều hướng chính">
           <p className="app-nav-eyebrow">Workspace</p>
-          {navItems.slice(0, 11).filter((item) => item.href !== "/return-orders").map((item) => {
+          {navItems.slice(0, 10).filter((item) => item.href !== "/return-orders").map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span><NavigationPendingIndicator /></Link>;
@@ -177,7 +176,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
             })}
           </SidebarDisclosure> : null}
           <p className="app-nav-eyebrow app-nav-eyebrow-secondary">System</p>
-          {navItems.slice(13).map((item) => {
+          {navItems.slice(12).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-link", active && "is-active")}><Icon size={17} aria-hidden="true" /><span>{item.label}</span><NavigationPendingIndicator /></Link>;
