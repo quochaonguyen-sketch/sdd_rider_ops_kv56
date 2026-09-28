@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { canManageOperations } from "@/lib/auth/permissions";
-import { LMHUB_COOLDOWN_MS, LMHUB_QUEUE_SHEET, queueLmhubFetch, readLmhubQueueStatus } from "@/lib/google/lmhub-queue";
+import { LMHUB_COOLDOWN_MS, queueLmhubFetch, readLmhubQueueStatus } from "@/lib/lmhub/fetch-queue";
 
 async function sessionUser() {
   const client = await createClient();
@@ -18,7 +18,7 @@ export async function GET() {
   if (!session) return NextResponse.json({ success: false, error: "Chưa đăng nhập" }, { status: 401 });
   try {
     const status = await readLmhubQueueStatus();
-    return NextResponse.json({ success: true, queueSheet: LMHUB_QUEUE_SHEET, ...status });
+    return NextResponse.json({ success: true, queue: "supabase", ...status });
   } catch (error) {
     return NextResponse.json({ success: false, error: error instanceof Error ? error.message : "Không đọc được hàng đợi LMHub" }, { status: 400 });
   }
@@ -51,31 +51,30 @@ export async function POST() {
   }
 
   try {
-    const result = await queueLmhubFetch("WEB Tồn khu vực fetch");
-    if (!result.queued.length) {
-      const status = await readLmhubQueueStatus().catch(() => null);
+    const result = await queueLmhubFetch("WEB Tồn khu vực fetch", session.user.id);
+    if (!result.queued) {
       return NextResponse.json({
         success: true,
         queued: false,
-        ...status,
-        message: `Worker đang bận trên ${result.sheetCount} Sheet. Đợi xong rồi bấm lại.`,
+        ...result.status,
+        message: "Worker đang bận (PENDING/RUNNING trên Supabase). Đợi xong rồi bấm lại.",
       });
     }
+
     await session.admin.from("activity_logs").insert({
       entity_type: "lmhub_inventory",
       action: "queued",
-      message: `Queued LMHub fetch on ${result.queued.length}/${result.sheetCount} sheets`,
-      raw_data: result,
+      message: `Queued LMHub fetch job ${result.jobId}`,
+      raw_data: { jobId: result.jobId, queue: "supabase" },
     });
-    const status = await readLmhubQueueStatus().catch(() => null);
+
     return NextResponse.json({
       success: true,
       queued: true,
-      queuedCount: result.queued.length,
-      sheetCount: result.sheetCount,
-      queueSheet: LMHUB_QUEUE_SHEET,
-      ...status,
-      message: `Đã đẩy ${result.queued.length}/${result.sheetCount} việc vào ${LMHUB_QUEUE_SHEET}. Mở START_LMHUB_WORKER.bat nếu worker chưa chạy.`,
+      jobId: result.jobId,
+      queue: "supabase",
+      ...result.status,
+      message: "Đã đẩy việc vào hàng đợi Supabase. Worker sẽ nhận job và ghi snapshot mới.",
     });
   } catch (error) {
     return NextResponse.json({ success: false, error: error instanceof Error ? error.message : "Không đẩy được hàng đợi LMHub" }, { status: 400 });
