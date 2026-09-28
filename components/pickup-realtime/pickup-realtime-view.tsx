@@ -1,1 +1,1 @@
-PLACEHOLDER
+SEE_LOCAL_FILE_/tmp/kv56/components/pickup-realtime/pickup-realtime-view.tsx
