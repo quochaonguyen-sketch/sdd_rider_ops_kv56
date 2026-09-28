@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { canManageOperations } from "@/lib/auth/permissions";
+import { canApproveOff, normalizePermissions } from "@/lib/auth/permissions";
 import { computeWardOffConflicts, type ConflictRequest, type ConflictRiderInfo, type WardConflict } from "@/lib/off-schedule/conflicts";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +31,8 @@ export async function GET(request: Request) {
 
   const admin = createAdminClient();
   const { data: profile } = await admin.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  const { data: authUser } = await admin.auth.admin.getUserById(user.id);
+  const permissions = normalizePermissions(authUser.user?.app_metadata?.permissions, profile?.role);
   let query = admin
     .from("rider_off_requests")
     .select("*")
@@ -67,7 +69,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     success: true,
-    can_edit: canManageOperations(profile?.role),
+    can_edit: canApproveOff(profile?.role, permissions),
     requests: (requests ?? []).map((item) => ({
       ...item,
       evidence_url: item.evidence_path ? signedEvidence.get(item.evidence_path) ?? null : null,
@@ -115,8 +117,6 @@ async function computeWardConflicts(
   for (const rider of extraRiders.data ?? []) conflictRiderById.set(rider.id, rider);
   const riderByCode = new Map((extraRiders.data ?? []).map((rider) => [rider.rider_code, rider.id]));
 
-  // Merge requests + attendance OFF rows into one entry set (dedupe by rider+date),
-  // so a rider that is off through Google Sheet/attendance still triggers a warning.
   const entries = new Map<string, ConflictRequest>();
   for (const item of requests) {
     if (item.status === "REJECTED") continue;
