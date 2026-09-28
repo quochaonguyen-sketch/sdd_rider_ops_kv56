@@ -104,6 +104,7 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
   }, []);
 
   useEffect(() => { void refreshQueueStatus(); }, [refreshQueueStatus]);
+  useSupabaseRealtime({ table: "lmhub_fetch_jobs", onChange: () => { void refreshQueueStatus(); }, debounceMs: 400 });
 
   const baselineRef = useRef<string | null>(null);
   const queueLmhub = useCallback(async () => {
@@ -145,7 +146,7 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
       await refreshQueueStatus();
       if (Date.now() - started > 8 * 60_000) {
         setWaitingSnapshot(false);
-        setQueueNote("Worker chưa ghi snapshot mới sau 8 phút. Kiểm tra START_LMHUB_WORKER.bat rồi bấm Làm mới.");
+        setQueueNote("Worker chưa ghi snapshot mới sau 8 phút. Kiểm tra worker (claim_lmhub_fetch_job) rồi bấm Làm mới.");
       }
     };
     void tick();
@@ -205,7 +206,7 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
       <div className="dashboard-readout-strip">
         <span className="dashboard-live-dot" />
         Cập nhật gần nhất: {formatDateTime(snapshotAt)} · {formatRelative(snapshotAt)}
-        {queueMeta ? ` · Queue ${queueMeta.lastStatus || "EMPTY"} · PENDING ${queueMeta.pending} · RUNNING ${queueMeta.running}` : ""}
+        {queueMeta ? ` · Supabase ${queueMeta.lastStatus || "EMPTY"} · PENDING ${queueMeta.pending} · RUNNING ${queueMeta.running}` : ""}
       </div>
       {queueNote ? (
         <div className="rounded-xl border border-[var(--color-rule)] bg-[var(--color-paper)] px-4 py-3 text-sm text-[var(--color-ink-2)]">
@@ -279,159 +280,4 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
       ) : null}
     </div>
   );
-}
-
-function AreaBoard({ title, districts, cot, selected, onSelect, updatedAt }: { title: string; districts: DistrictAgg[]; cot: CotFilter; selected: WardAgg | null; onSelect: (ward: WardAgg) => void; updatedAt: string | null }) {
-  const grand = districts.reduce((sum, item) => addCounts(sum, item.totals), emptyCounts());
-  return (
-    <section className="overflow-hidden rounded-xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
-      <div className="flex items-center justify-between bg-[var(--color-graphite)] px-4 py-3 text-[var(--color-graphite-ink)]">
-        <div>
-          <h2 className="text-sm font-bold tracking-tight">{title}</h2>
-          <p className="text-[11px] font-medium text-[var(--color-graphite-ink)]/70">Cập nhật {formatDateTime(updatedAt)}</p>
-        </div>
-        <span className="font-mono text-sm font-semibold">{visibleTotal(grand, cot).toLocaleString("vi-VN")} đơn</span>
-      </div>
-      <div className="max-h-[70vh] overflow-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="sticky top-0 z-10 bg-[var(--color-paper-2)] text-xs uppercase tracking-wide text-[var(--color-muted)]">
-            <tr>
-              <th className="px-4 py-2.5 font-semibold">Quận / Phường</th>
-              <th className="w-20 px-3 py-2.5 text-right font-semibold">COT 1</th>
-              <th className="w-20 px-3 py-2.5 text-right font-semibold">COT 2</th>
-              <th className="w-24 px-3 py-2.5 text-right font-semibold">Tổng</th>
-            </tr>
-          </thead>
-          <tbody>
-            {!districts.length ? <tr><td colSpan={4} className="px-4 py-10 text-center text-sm text-[var(--color-muted)]">Không có dòng khớp lọc.</td></tr> : districts.map((district) => <DistrictRows key={`${district.area}-${district.district}`} district={district} cot={cot} selected={selected} onSelect={onSelect} />)}
-            {districts.length ? (
-              <tr className="border-t border-[var(--color-rule-strong)] bg-[var(--color-paper-3)]">
-                <td className="px-4 py-3 font-bold text-[var(--color-ink)]">Tổng {title}</td>
-                <td className="px-3 py-3 text-right font-mono font-bold">{visibleCount(grand, "cot1", cot).toLocaleString("vi-VN")}</td>
-                <td className="px-3 py-3 text-right font-mono font-bold">{visibleCount(grand, "cot2", cot).toLocaleString("vi-VN")}</td>
-                <HeatCell value={visibleTotal(grand, cot)} strong />
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function DistrictRows({ district, cot, selected, onSelect }: { district: DistrictAgg; cot: CotFilter; selected: WardAgg | null; onSelect: (ward: WardAgg) => void }) {
-  return (
-    <>
-      <tr className="border-t border-[var(--color-rule)] bg-[var(--color-accent-soft)]">
-        <td className="px-4 py-2.5 font-bold text-[var(--color-accent)]">{district.district}</td>
-        <td className="px-3 py-2.5 text-right font-mono font-semibold text-[var(--color-ink)]">{visibleCount(district.totals, "cot1", cot).toLocaleString("vi-VN")}</td>
-        <td className="px-3 py-2.5 text-right font-mono font-semibold text-[var(--color-ink)]">{visibleCount(district.totals, "cot2", cot).toLocaleString("vi-VN")}</td>
-        <HeatCell value={visibleTotal(district.totals, cot)} strong />
-      </tr>
-      {district.wards.map((ward) => {
-        const active = selected?.area === ward.area && selected.district === ward.district && selected.ward === ward.ward;
-        return (
-          <tr key={ward.ward} onClick={() => onSelect(ward)} className={cn("cursor-pointer border-t border-[var(--color-rule)] hover:bg-[var(--color-paper-2)]", active && "bg-[var(--color-accent-soft)]")}>
-            <td className="px-4 py-2.5 pl-8 text-[var(--color-ink)]">{ward.ward}</td>
-            <td className="px-3 py-2.5 text-right font-mono text-[var(--color-ink-2)]">{visibleCount(ward, "cot1", cot).toLocaleString("vi-VN")}</td>
-            <td className="px-3 py-2.5 text-right font-mono text-[var(--color-ink-2)]">{visibleCount(ward, "cot2", cot).toLocaleString("vi-VN")}</td>
-            <HeatCell value={visibleTotal(ward, cot)} />
-          </tr>
-        );
-      })}
-    </>
-  );
-}
-function HeatCell({ value, strong }: { value: number; strong?: boolean }) {
-  return <td className={cn("px-3 py-2.5 text-right font-mono", heatClass(value), strong && "font-bold")}>{value.toLocaleString("vi-VN")}</td>;
-}
-function HeatLegend() {
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
-      <span className="rounded-md bg-[var(--color-success-soft)] px-2 py-1 text-[var(--color-success)]">1–5 ít</span>
-      <span className="rounded-md bg-[var(--color-warning-soft)] px-2 py-1 text-[var(--color-warning)]">6–20 vừa</span>
-      <span className="rounded-md bg-[var(--color-warning-soft)] px-2 py-1 text-[var(--color-warning)]">21–35 cao</span>
-      <span className="rounded-md bg-[var(--color-error-soft)] px-2 py-1 text-[var(--color-error)]">36+ đỏ</span>
-    </div>
-  );
-}
-function Seg<T extends string>({ value, onChange, options }: { value: T; onChange: (value: T) => void; options: { id: T; label: string }[] }) {
-  return (
-    <div className="flex rounded-lg border border-[var(--color-rule)] bg-[var(--color-paper)] p-1">
-      {options.map((option) => (
-        <button key={option.id} type="button" onClick={() => onChange(option.id)} className={cn("rounded-md px-3 py-1.5 text-xs font-semibold", value === option.id ? "bg-[var(--color-graphite)] text-[var(--color-graphite-ink)]" : "text-[var(--color-ink-2)] hover:bg-[var(--color-paper-2)]")}>
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-function filterBoard(districts: DistrictAgg[], query: string, cot: CotFilter, heat: HeatFilter): DistrictAgg[] {
-  const q = normalize(query);
-  return districts.map((district) => {
-    const wards = district.wards.filter((ward) => visibleTotal(ward, cot) > 0).filter((ward) => heat === "all" || heatLevel(visibleTotal(ward, cot)) === "red").filter((ward) => !q || normalize(`${ward.district} ${ward.ward}`).includes(q)).sort((a, b) => visibleTotal(b, cot) - visibleTotal(a, cot));
-    return { ...district, wards, totals: wards.reduce((sum, ward) => addCounts(sum, ward), emptyCounts()) };
-  }).filter((district) => district.wards.length > 0).sort((a, b) => visibleTotal(b.totals, cot) - visibleTotal(a.totals, cot));
-}
-function visibleTotal(counts: Counts, cot: CotFilter) { if (cot === "cot1") return counts.cot1; if (cot === "cot2") return counts.cot2; return counts.total; }
-function visibleCount(counts: Counts, key: "cot1" | "cot2", cot: CotFilter) { if (cot !== "all" && cot !== key) return 0; return counts[key]; }
-function heatLevel(value: number) { if (value <= 0) return "none"; if (value <= 5) return "green"; if (value <= 20) return "yellow"; if (value <= 35) return "orange"; return "red"; }
-function heatClass(value: number) {
-  const level = heatLevel(value);
-  if (level === "green") return "bg-[var(--color-success-soft)] text-[var(--color-success)]";
-  if (level === "yellow") return "bg-[var(--color-warning-soft)] text-[var(--color-warning)]";
-  if (level === "orange") return "bg-[var(--color-warning-soft)] text-[var(--color-warning)]";
-  if (level === "red") return "bg-[var(--color-error-soft)] text-[var(--color-error)]";
-  return "text-[var(--color-muted)]";
-}
-function buildBoard(rows: InventoryRow[], area: Area): DistrictAgg[] {
-  const map = new Map<string, Map<string, Counts>>();
-  for (const row of rows) {
-    if (row.area !== area) continue;
-    const district = row.district || UNKNOWN_DISTRICT;
-    const ward = row.ward || UNKNOWN_WARD;
-    if (!map.has(district)) map.set(district, new Map());
-    const wards = map.get(district)!;
-    const current = wards.get(ward) ?? emptyCounts();
-    current[cotBucket(row.cot_group)] += 1;
-    current.total += 1;
-    wards.set(ward, current);
-  }
-  return [...map.entries()].map(([district, wards]) => {
-    const wardList: WardAgg[] = [...wards.entries()].map(([ward, counts]) => ({ ward, district, area, ...counts }));
-    return { district, area, wards: wardList, totals: wardList.reduce((sum, item) => addCounts(sum, item), emptyCounts()) };
-  });
-}
-function cotBucket(value: string): "cot1" | "cot2" { const text = normalize(value); return text.includes("cot 1") || /\bcot\s*1\b/.test(text) ? "cot1" : "cot2"; }
-function emptyCounts(): Counts { return { cot1: 0, cot2: 0, total: 0 }; }
-function addCounts(a: Counts, b: Counts): Counts { return { cot1: a.cot1 + b.cot1, cot2: a.cot2 + b.cot2, total: a.total + b.total }; }
-function normalizeArea(value: string): Area | string {
-  const key = normalize(String(value ?? "")).replace(/\s+/g, " ");
-  if (key === "kv5" || key === "khu vuc 5" || key === "khuvuc5" || key === "area 5") return "KV5";
-  if (key === "kv6" || key === "khu vuc 6" || key === "khuvuc6" || key === "area 6") return "KV6";
-  return String(value ?? "").trim();
-}
-function normalizeRow(row: InventoryRow): InventoryRow {
-  return { ...row, shipment_id: String(row.shipment_id ?? "").trim(), ward: String(row.ward ?? "").trim(), district: String(row.district ?? "").trim(), area: normalizeArea(String(row.area ?? "")), zone_id: String(row.zone_id ?? "").trim(), status: String(row.status ?? "").trim(), order_type: String(row.order_type ?? "").trim(), cot_group: String(row.cot_group ?? "").trim() };
-}
-function toTime(value: string | null): number { if (!value) return 0; const t = new Date(value).getTime(); return Number.isFinite(t) ? t : 0; }
-function normalize(value: string): string { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toLowerCase().trim(); }
-function formatDateTime(value: string | null): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "medium", timeZone: "Asia/Ho_Chi_Minh" }).format(date);
-}
-function formatRelative(value: string | null): string {
-  if (!value) return "Chưa có snapshot";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "Chưa có snapshot";
-  const diff = Date.now() - date.getTime();
-  if (diff < 30_000) return "vừa xong";
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 60) return `${minutes} phút trước`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} giờ trước`;
-  const days = Math.floor(hours / 24);
-  return `${days} ngày trước`;
 }
