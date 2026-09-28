@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { canManageOperations } from "@/lib/auth/permissions";
+import { canApproveOff, normalizePermissions } from "@/lib/auth/permissions";
 import { sendOffRequestDecisionEmail, type OffRequestEmailResult } from "@/lib/email/off-request-notification";
 import { processAttendanceSheetSync, type AttendanceSheetSyncResult } from "@/lib/google/attendance-sheet-sync";
 import { invalidateAttendanceCache } from "@/lib/cache/operations-cache";
@@ -28,8 +28,10 @@ export async function PATCH(request: Request, context: RouteContext<"/api/off-re
 
   const admin = createAdminClient();
   const { data: profile } = await admin.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (!canManageOperations(profile?.role)) {
-    return NextResponse.json({ success: false, error: "Bạn không có quyền xếp lịch OFF." }, { status: 403 });
+  const { data: authUser } = await admin.auth.admin.getUserById(user.id);
+  const permissions = normalizePermissions(authUser.user?.app_metadata?.permissions, profile?.role);
+  if (!canApproveOff(profile?.role, permissions)) {
+    return NextResponse.json({ success: false, error: "Bạn không có quyền duyệt OFF." }, { status: 403 });
   }
 
   const parsed = updateSchema.safeParse(await request.json().catch(() => null));
