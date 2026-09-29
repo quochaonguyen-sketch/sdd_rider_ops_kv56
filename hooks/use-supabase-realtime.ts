@@ -22,13 +22,15 @@ type RealtimeTable =
   | "pickup_48h_summary_groups"
   | "pickup_48h_rider_groups"
   | "pickup_assigned_rider_pivot"
+  | "pickup_inventory_assigned"
+  | "pickup_inventory_onhold"
+  | "pickup_inventory_created"
   | "lmhub_inventory_rows"
   | "lmhub_fetch_jobs";
 
 type Options<T extends Record<string, unknown>> = {
   table: RealtimeTable;
   onChange: (payload: RealtimePostgresChangesPayload<T>) => void;
-  /** Coalesce bulk database changes into one UI refresh. */
   debounceMs?: number;
 };
 
