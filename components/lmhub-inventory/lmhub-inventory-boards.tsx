@@ -24,6 +24,7 @@ export function AreaBoard({
   selected,
   onSelect,
   updatedAt,
+  columnLabel,
 }: {
   title: string;
   districts: DistrictAgg[];
@@ -31,6 +32,9 @@ export function AreaBoard({
   selected: InventoryFocus | null;
   onSelect: (focus: InventoryFocus) => void;
   updatedAt: string | null;
+  parentNoun?: string;
+  childNoun?: string;
+  columnLabel?: string;
 }) {
   const grand = districts.reduce((sum, item) => addCounts(sum, item.totals), emptyCounts());
   const keys = useMemo(() => districts.map((item) => districtKey(item.area, item.district)), [districts]);
@@ -70,7 +74,7 @@ export function AreaBoard({
         <table className="w-full text-left text-sm">
           <thead className="sticky top-0 z-10 bg-[var(--color-paper-2)] text-xs uppercase tracking-wide text-[var(--color-muted)]">
             <tr>
-              <th className="px-4 py-2.5 font-semibold">Quận / Phường</th>
+              <th className="px-4 py-2.5 font-semibold">{columnLabel ?? "Quận / Phường"}</th>
               <th className="w-20 px-3 py-2.5 text-right font-semibold">COT 1</th>
               <th className="w-20 px-3 py-2.5 text-right font-semibold">COT 2</th>
               <th className="w-24 px-3 py-2.5 text-right font-semibold">Tổng</th>
