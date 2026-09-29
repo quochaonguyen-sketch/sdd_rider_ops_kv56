@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, ClipboardCheck, Columns2, ListChecks, LogOut, MapPinned, Menu, Moon, NotebookPen, PackageOpen, PackagePlus, PackageSearch, PanelLeftClose, PanelLeftOpen, PencilRuler, Radio, Repeat2, Sun, Truck, Upload, UsersRound, X } from "lucide-react";
+import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, ClipboardCheck, Columns2, ListChecks, LogOut, MapPinned, Menu, Moon, NotebookPen, PackageOpen, PackagePlus, PackageSearch, PanelLeftClose, PanelLeftOpen, PencilRuler, Radio, Repeat2, Sun, Truck, Upload, UsersRound, Warehouse, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/utils/cn";
 import { AppBrand, AppCopyright } from "@/components/layout/app-brand";
@@ -38,10 +38,12 @@ const volumeItems = [
 ];
 const pickupItems = [
   { href: "/pickup-realtime", view: null, label: "Pickup Realtime", icon: Radio },
-  { href: "/lmhub-inventory", view: null, label: "Tồn pickup", icon: PackageOpen },
-  { href: "/inventory-delivery", view: null, label: "Tồn delivery", icon: Truck },
   { href: "/pickup-management", view: null, label: "Quản lý PUP", icon: ListChecks },
   { href: "/pickup-management?view=replacement", view: "replacement", label: "Thế pick", icon: Repeat2 },
+];
+const inventoryItems = [
+  { href: "/lmhub-inventory", view: null, label: "Tồn pickup", icon: PackageOpen },
+  { href: "/inventory-delivery", view: null, label: "Tồn delivery", icon: Truck },
 ];
 const returnItems = [
   { href: "/return-orders?view=dashboard", view: "dashboard", label: "Tổng quan", icon: BarChart3 },
@@ -80,17 +82,21 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
   const memberToolRestricted = user.role === "member";
   const visibleToolItems = memberToolRestricted ? [] : toolItems;
   const visiblePickupItems = memberToolRestricted ? [] : pickupItems;
+  const visibleInventoryItems = memberToolRestricted ? [] : inventoryItems;
   const visibleReturnItems = returnItems;
   const moreNavItems = [
     ...volumeItems,
     ...navItems.slice(3).filter((item) => item.href !== "/pickup-management" && item.href !== "/return-orders" && (!memberToolRestricted || !memberHiddenItems.has(item.href))),
     ...visiblePickupItems,
+    ...visibleInventoryItems,
     ...visibleReturnItems,
   ];
   const volumeActive = pathname.startsWith("/volume");
   const [volumeOpen, setVolumeOpen] = useState(volumeActive);
-  const pickupActive = pathname.startsWith("/pickup-management") || pathname.startsWith("/pickup-realtime") || pathname.startsWith("/lmhub-inventory") || pathname.startsWith("/inventory-delivery");
+  const pickupActive = pathname.startsWith("/pickup-management") || pathname.startsWith("/pickup-realtime");
   const [pickupOpen, setPickupOpen] = useState(pickupActive);
+  const inventoryActive = pathname.startsWith("/lmhub-inventory") || pathname.startsWith("/inventory-delivery");
+  const [inventoryOpen, setInventoryOpen] = useState(inventoryActive);
   const returnActive = pathname.startsWith("/return-orders");
   const [returnOpen, setReturnOpen] = useState(returnActive);
   const toolsActive = visibleToolItems.some((item) => pathname.startsWith(item.href));
@@ -100,7 +106,9 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
     ? returnItems.find((item) => item.view === searchParams.get("view")) ?? returnItems[0]
     : pickupActive
       ? pickupItems.find((item) => item.href === pathname || item.view === searchParams.get("view")) ?? pickupItems[0]
-      : [...navItems, ...volumeItems].find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+      : inventoryActive
+        ? inventoryItems.find((item) => item.href === pathname) ?? inventoryItems[0]
+        : [...navItems, ...volumeItems].find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
   const splitItems = [...navItems.filter((item) => !memberToolRestricted || !memberHiddenItems.has(item.href)), ...volumeItems]
     .filter((item) => item.href !== pathname);
   const activeSplitRoute = splitRoute === pathname ? (splitItems[0]?.href ?? "/dashboard") : splitRoute;
@@ -158,6 +166,13 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
           </SidebarDisclosure>
           {visiblePickupItems.length > 0 ? <SidebarDisclosure label="Pickup" icon={ListChecks} open={pickupOpen} active={pickupActive} onToggle={() => setPickupOpen((current) => !current)}>
             {visiblePickupItems.map((item) => {
+              const active = isNavigationItemActive(item, pathname, searchParams.get("view"));
+              const Icon = item.icon;
+              return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-sub-link", active && "is-active")}><Icon size={15} aria-hidden="true" /><span>{item.label}</span><NavigationPendingIndicator /></Link>;
+            })}
+          </SidebarDisclosure> : null}
+          {visibleInventoryItems.length > 0 ? <SidebarDisclosure label="Tồn kho" icon={Warehouse} open={inventoryOpen} active={inventoryActive} onToggle={() => setInventoryOpen((current) => !current)}>
+            {visibleInventoryItems.map((item) => {
               const active = isNavigationItemActive(item, pathname, searchParams.get("view"));
               const Icon = item.icon;
               return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("app-nav-sub-link", active && "is-active")}><Icon size={15} aria-hidden="true" /><span>{item.label}</span><NavigationPendingIndicator /></Link>;
