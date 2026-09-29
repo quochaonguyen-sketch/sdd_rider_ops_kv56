@@ -47,7 +47,7 @@ export function ShareRow({ label, value, total, tone }: { label: string; value: 
 }
 
 export function BarChart({ rows }: { rows: BarRow[] }) {
-  if (!rows.length) return <p className="py-8 text-center text-sm text-[var(--color-muted)]">Chưa có dữ liệu quận.</p>;
+  if (!rows.length) return <p className="py-8 text-center text-sm text-[var(--color-muted)]">Chưa có dữ liệu.</p>;
   const max = Math.max(...rows.map((row) => row.value), 1);
   return (
     <div className="space-y-2">

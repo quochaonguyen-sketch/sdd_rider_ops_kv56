@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Download, MapPin, PackageCheck, RefreshCcw, Search, Truck, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Download, MapPin, PackageCheck, RefreshCcw, Search, Truck, X } from "lucide-react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
@@ -9,8 +10,8 @@ import { useReportInitialDataLoading } from "@/components/layout/app-loading-sto
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { BarChart, ChartHead, Donut, RiskStrip, ShareRow } from "@/components/lmhub-inventory/lmhub-inventory-charts";
-import { AreaBoard, HeatLegend, Seg } from "@/components/lmhub-inventory/lmhub-inventory-boards";
-import { formatDateTime, formatRelative, PAGE_SIZE, RELOAD_DEBOUNCE_MS } from "@/components/lmhub-inventory/lmhub-inventory-model";
+import { HeatLegend, Seg } from "@/components/lmhub-inventory/lmhub-inventory-boards";
+import { formatDateTime, formatRelative, heatClass, RELOAD_DEBOUNCE_MS } from "@/components/lmhub-inventory/lmhub-inventory-model";
 import {
   PAGE_ROWS,
   PICKUP_STATUS_COLUMNS,
@@ -18,15 +19,14 @@ import {
   PICKUP_STATUS_TABLE,
   buildPickupBoard,
   filterPickupBoard,
-  matchesFocus,
-  matchesRiderCot,
-  n,
   pickupAnalytics,
-  searchBlob,
+  riderCotLabel,
   visibleBoardTotal,
+  visibleTotal,
+  type Area,
   type CotFilter,
+  type DistrictAgg,
   type HeatFilter,
-  type InventoryFocus,
   type PickupStatusKey,
   type PickupStatusRow,
 } from "@/components/lmhub-inventory/pickup-inventory-model";
@@ -41,8 +41,7 @@ export function PickupInventoryView({ canQueue = false }: { canQueue?: boolean }
   const [query, setQuery] = useState("");
   const [cot, setCot] = useState<CotFilter>("all");
   const [heat, setHeat] = useState<HeatFilter>("all");
-  const [selected, setSelected] = useState<InventoryFocus | null>(null);
-  const [page, setPage] = useState(1);
+  const [modal, setModal] = useState<{ area: string; ward: string } | null>(null);
   const [queueing, setQueueing] = useState(false);
   const [waitingSnapshot, setWaitingSnapshot] = useState(false);
   const [queueNote, setQueueNote] = useState<string | null>(null);
@@ -174,24 +173,22 @@ export function PickupInventoryView({ canQueue = false }: { canQueue?: boolean }
   const boards = { kv5: filtered.kv5, kv6: filtered.kv6, kv5n: visibleBoardTotal(filtered.kv5, cot), kv6n: visibleBoardTotal(filtered.kv6, cot), all: analytics.visible };
   const statusLabel = PICKUP_STATUS_LABEL[status];
 
-  const selectedRows = useMemo(() => {
-    if (!selected) return [];
-    const q = query.trim();
-    return rows
-      .filter((row) => matchesFocus(row, selected))
-      .filter((row) => matchesRiderCot(row.cot, cot))
-      .filter((row) => !q || searchBlob([row.district, row.ward, row.zone, row.cot]).includes(searchBlob([q])))
-      .sort((a, b) => n(b.orders) - n(a.orders) || String(a.zone ?? "").localeCompare(String(b.zone ?? ""), "vi"));
-  }, [rows, selected, query, cot]);
-
-  const pageCount = Math.max(1, Math.ceil(selectedRows.length / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount);
-  const pageRows = selectedRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-  const selectFocus = (focus: InventoryFocus) => { setSelected(focus); setPage(1); };
+  const kv5Wards = useMemo(() => mergeWards(filtered.kv5, cot), [filtered, cot]);
+  const kv6Wards = useMemo(() => mergeWards(filtered.kv6, cot), [filtered, cot]);
+  const topWards = useMemo(() => {
+    const map = new Map<string, { label: string; area: Area; value: number }>();
+    for (const district of [...filtered.kv5, ...filtered.kv6]) {
+      for (const ward of district.wards) {
+        const current = map.get(ward.ward) ?? { label: ward.ward, area: ward.area, value: 0 };
+        current.value += visibleTotal(ward, cot);
+        map.set(ward.ward, current);
+      }
+    }
+    return [...map.values()].filter((item) => item.value > 0).sort((a, b) => b.value - a.value).slice(0, 10);
+  }, [filtered, cot]);
   const changeStatus = (next: PickupStatusKey) => {
     setStatus(next);
-    setSelected(null);
-    setPage(1);
+    setModal(null);
   };
 
   return (
@@ -200,7 +197,7 @@ export function PickupInventoryView({ canQueue = false }: { canQueue?: boolean }
         <div className="min-w-0">
           <div className="dashboard-kicker"><span className="dashboard-live-dot" />Điều hành tồn · Pickup {statusLabel}</div>
           <h1>Tồn pickup</h1>
-          <p>Raw pickup_48h_no_api2 REPLACE mỗi vòng. Bảng phải: mã PUP còn đơn Assigned / Onhold / Created.</p>
+          <p>Bảng phẳng theo phường. Bấm một phường để mở chi tiết mã PUP + mã đơn {statusLabel}.</p>
         </div>
         <div className="dashboard-command-actions">
           <div className="min-w-[190px] rounded-xl border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2">
@@ -237,7 +234,7 @@ export function PickupInventoryView({ canQueue = false }: { canQueue?: boolean }
       ) : null}
 
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <StatTile label={`${statusLabel} KV5 + KV6`} value={boards.all} hint={`${analytics.riders} phường · ${analytics.zones} quận`} accent="ink" />
+        <StatTile label={`${statusLabel} KV5 + KV6`} value={boards.all} hint={`${analytics.riders} phường còn ${statusLabel}`} accent="ink" />
         <StatTile label="Khu vực 5" value={boards.kv5n} hint={`${analytics.visible ? Math.round((boards.kv5n / analytics.visible) * 100) : 0}% ${statusLabel}`} accent="blue" />
         <StatTile label="Khu vực 6" value={boards.kv6n} hint={`${analytics.visible ? Math.round((boards.kv6n / analytics.visible) * 100) : 0}% ${statusLabel}`} accent="teal" />
         <StatTile label="Phường đỏ" value={analytics.hotRiders} hint={`≥ 36 đơn ${statusLabel}`} accent={analytics.hotRiders ? "red" : "green"} />
@@ -259,8 +256,8 @@ export function PickupInventoryView({ canQueue = false }: { canQueue?: boolean }
           </div>
         </article>
         <article className="xl:col-span-8 overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
-          <ChartHead title="Áp lực theo quận" caption={`Top quận còn ${statusLabel}`} />
-          <div className="px-5 pb-5"><BarChart rows={analytics.topZones} /></div>
+          <ChartHead title="Áp lực theo phường" caption={`Top phường còn ${statusLabel}`} />
+          <div className="px-5 pb-5"><BarChart rows={topWards} /></div>
         </article>
         <article className="xl:col-span-12 overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
           <ChartHead title="Phổ rủi ro phường" caption="Hết tồn / ít / vừa / cao / đỏ" />
@@ -271,7 +268,7 @@ export function PickupInventoryView({ canQueue = false }: { canQueue?: boolean }
       <div className="flex flex-wrap items-center gap-2">
         <span className="relative min-w-[240px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" size={16} />
-          <Input value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} placeholder="Tìm quận, phường, tuyến" className="pl-9" />
+          <Input value={query} onChange={(e) => { setQuery(e.target.value); }} placeholder="Tìm phường" className="pl-9" />
         </span>
         <Seg value={cot} onChange={setCot} options={[{ id: "all", label: "Cả COT" }, { id: "cot1", label: "COT 1" }, { id: "cot2", label: "COT 2" }]} />
         <Seg value={heat} onChange={setHeat} options={[{ id: "all", label: "Tất cả phường" }, { id: "hot", label: "Chỉ phường đỏ" }]} />
@@ -280,110 +277,191 @@ export function PickupInventoryView({ canQueue = false }: { canQueue?: boolean }
 
       {error ? <div role="alert" className="dashboard-error">{error}</div> : null}
       {loading && !rows.length ? (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-          <div className="h-[36rem] animate-pulse rounded-2xl bg-[var(--color-paper-3)] xl:col-span-6" />
-          <div className="h-[36rem] animate-pulse rounded-2xl bg-[var(--color-paper-3)] xl:col-span-6" />
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="h-[36rem] animate-pulse rounded-2xl bg-[var(--color-paper-3)]" />
+          <div className="h-[36rem] animate-pulse rounded-2xl bg-[var(--color-paper-3)]" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-12">
-          <div className="space-y-4 xl:col-span-6">
-            <AreaBoard title="Khu vực 5" districts={filtered.kv5} cot={cot} selected={selected} updatedAt={snapshotAt} onSelect={selectFocus} columnLabel={`Quận / Phường ${statusLabel}`} />
-            <AreaBoard title="Khu vực 6" districts={filtered.kv6} cot={cot} selected={selected} updatedAt={snapshotAt} onSelect={selectFocus} columnLabel={`Quận / Phường ${statusLabel}`} />
-          </div>
-          <aside className="xl:sticky xl:top-4 xl:col-span-6">
-            <ZonePanel statusLabel={statusLabel} selected={selected} rows={pageRows} total={selectedRows.length} page={safePage} pageCount={pageCount} onPrev={() => setPage((value) => Math.max(1, value - 1))} onNext={() => setPage((value) => Math.min(pageCount, value + 1))} onClose={() => setSelected(null)} />
-          </aside>
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
+          <WardTable title="Khu vực 5" wards={kv5Wards} cot={cot} statusLabel={statusLabel} updatedAt={snapshotAt} onSelect={(ward) => setModal({ area: ward.area, ward: ward.ward })} />
+          <WardTable title="Khu vực 6" wards={kv6Wards} cot={cot} statusLabel={statusLabel} updatedAt={snapshotAt} onSelect={(ward) => setModal({ area: ward.area, ward: ward.ward })} />
         </div>
       )}
+      {modal ? <WardModal area={modal.area} ward={modal.ward} statusLabel={statusLabel} cot={cot} onClose={() => setModal(null)} /> : null}
     </div>
   );
 }
 
-function ZonePanel({ statusLabel, selected, rows, total, page, pageCount, onPrev, onNext, onClose }: { statusLabel: string; selected: InventoryFocus | null; rows: PickupStatusRow[]; total: number; page: number; pageCount: number; onPrev: () => void; onNext: () => void; onClose: () => void; }) {
-  const [pups, setPups] = useState<Array<{ pup: string; name: string; zone: string; riders: string; orders: number }>>([]);
-  useEffect(() => {
-    if (!selected) { setPups([]); return; }
-    let cancelled = false;
-    const run = async () => {
-      const supabase = createClient();
-      let query = supabase.from("pickup_48h_no_api2").select("pickup_point_id,pickup_point_name,zone_name,assigned_riders_today,status,ward,area").eq("area", selected.area).eq("status", statusLabel);
-      if (selected.ward) query = query.eq("ward", selected.ward);
-      const result = await query.limit(2000);
-      if (cancelled || result.error) return;
-      const map = new Map<string, { pup: string; name: string; zone: string; riders: string; orders: number }>();
-      for (const row of result.data ?? []) {
-        const pup = String(row.pickup_point_id || row.zone_name || "—");
-        const current = map.get(pup) ?? { pup, name: String(row.pickup_point_name || ""), zone: String(row.zone_name || ""), riders: String(row.assigned_riders_today || ""), orders: 0 };
-        current.orders += 1;
-        if (!current.riders && row.assigned_riders_today) current.riders = String(row.assigned_riders_today);
-        map.set(pup, current);
-      }
-      setPups([...map.values()].sort((a, b) => b.orders - a.orders || a.pup.localeCompare(b.pup)));
-    };
-    void run();
-    return () => { cancelled = true; };
-  }, [selected, statusLabel]);
+type FlatWard = { ward: string; area: Area; cot1: number; cot2: number; total: number };
 
-  if (!selected) {
-    return (
-      <section className="flex min-h-[28rem] items-center justify-center rounded-2xl border border-dashed border-[var(--color-rule)] bg-[var(--color-paper)] px-6 text-center">
-        <div>
-          <p className="text-sm font-bold text-[var(--color-ink)]">Chưa chọn quận / phường</p>
-          <p className="mt-1 text-sm text-[var(--color-muted)]">Bấm một quận hoặc phường để xem PUP còn đơn {statusLabel}.</p>
-        </div>
-      </section>
-    );
+function mergeWards(districts: DistrictAgg[], cot: CotFilter): FlatWard[] {
+  const map = new Map<string, FlatWard>();
+  for (const district of districts) {
+    for (const ward of district.wards) {
+      const current = map.get(ward.ward) ?? { ward: ward.ward, area: ward.area, cot1: 0, cot2: 0, total: 0 };
+      current.cot1 += ward.cot1;
+      current.cot2 += ward.cot2;
+      current.total += ward.total;
+      map.set(ward.ward, current);
+    }
   }
-  const orders = pups.reduce((sum, row) => sum + row.orders, 0) || rows.reduce((sum, row) => sum + n(row.orders), 0);
-  const cot1 = rows.reduce((sum, row) => sum + (String(row.cot).toUpperCase().includes("2") ? 0 : n(row.orders)), 0);
-  const cot2 = rows.reduce((sum, row) => sum + (String(row.cot).toUpperCase().includes("2") ? n(row.orders) : 0), 0);
+  return [...map.values()].sort((a, b) => visibleTotal(b, cot) - visibleTotal(a, cot) || a.ward.localeCompare(b.ward, "vi"));
+}
+
+function WardTable({ title, wards, cot, statusLabel, updatedAt, onSelect }: { title: string; wards: FlatWard[]; cot: CotFilter; statusLabel: string; updatedAt: string | null; onSelect: (ward: FlatWard) => void }) {
+  const total = wards.reduce((sum, ward) => sum + visibleTotal(ward, cot), 0);
   return (
     <section className="overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-rule)] px-4 py-3">
+      <div className="flex items-center justify-between bg-[var(--color-graphite)] px-4 py-3 text-[var(--color-graphite-ink)]">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">{selected.area} · {statusLabel}</p>
-          <h2 className="text-base font-bold text-[var(--color-ink)]">{selected.ward ?? selected.district}</h2>
-          <p className="text-sm text-[var(--color-muted)]">{pups.length.toLocaleString("vi-VN")} PUP · {orders.toLocaleString("vi-VN")} đơn {statusLabel}</p>
+          <h2 className="text-sm font-bold tracking-tight">{title}</h2>
+          <p className="text-[11px] font-medium text-[var(--color-graphite-ink)]/70">Cập nhật {formatDateTime(updatedAt)}</p>
         </div>
-        <Button type="button" variant="secondary" onClick={onClose}><X size={16} /> Đóng</Button>
+        <span className="font-mono text-sm font-semibold">{total.toLocaleString("vi-VN")} đơn</span>
       </div>
-      <div className="grid grid-cols-3 gap-2 border-b border-[var(--color-rule)] px-4 py-3 text-xs">
-        <MiniMetric label="COT 1" value={cot1} />
-        <MiniMetric label="COT 2" value={cot2} />
-        <MiniMetric label="Tổng" value={orders} />
-      </div>
-      <div className="max-h-[min(70vh,40rem)] overflow-auto">
-        <table className="w-full min-w-[520px] text-left text-sm">
-          <thead className="sticky top-0 bg-[var(--color-paper-2)] text-xs text-[var(--color-muted)]">
+      <div className="max-h-[60vh] overflow-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="sticky top-0 z-10 bg-[var(--color-paper-2)] text-xs uppercase tracking-wide text-[var(--color-muted)]">
             <tr>
-              <th className="px-4 py-3">Mã PUP</th>
-              <th className="px-4 py-3">Tên / tuyến</th>
-              <th className="px-4 py-3">Rider</th>
-              <th className="px-4 py-3 text-right">Còn đơn</th>
+              <th className="px-4 py-2.5 font-semibold">Phường {statusLabel}</th>
+              <th className="w-20 px-3 py-2.5 text-right font-semibold">COT 1</th>
+              <th className="w-20 px-3 py-2.5 text-right font-semibold">COT 2</th>
+              <th className="w-24 px-3 py-2.5 text-right font-semibold">Tổng</th>
             </tr>
           </thead>
           <tbody>
-            {!(pups.length || rows.length) ? (
-              <tr><td colSpan={4} className="px-4 py-10 text-center text-[var(--color-muted)]">Chưa có raw PUP. Chạy pickup_48h để REPLACE bảng pickup_48h_no_api2.</td></tr>
-            ) : (pups.length ? pups : rows.map((row) => ({ pup: row.zone || "—", name: row.ward || "", zone: row.zone || "", riders: "", orders: n(row.orders) }))).map((row) => (
-              <tr key={row.pup} className="border-t border-[var(--color-rule)]">
-                <td className="px-4 py-3 font-mono text-[13px] font-semibold text-[var(--color-ink)]">{row.pup}</td>
-                <td className="px-4 py-3 text-[var(--color-ink-2)]">{row.name || row.zone || "—"}</td>
-                <td className="px-4 py-3 text-xs text-[var(--color-ink-2)]">{row.riders || "—"}</td>
-                <td className="px-4 py-3 text-right font-mono font-semibold">{row.orders.toLocaleString("vi-VN")}</td>
+            {!wards.length ? (
+              <tr>
+                <td colSpan={4} className="px-4 py-10 text-center text-sm text-[var(--color-muted)]">
+                  Không có phường khớp lọc.
+                </td>
               </tr>
-            ))}
+            ) : (
+              wards.map((ward) => {
+                const grand = visibleTotal(ward, cot);
+                return (
+                  <tr key={ward.ward} onClick={() => onSelect(ward)} className="cursor-pointer border-t border-[var(--color-rule)] hover:bg-[var(--color-paper-2)]">
+                    <td className="px-4 py-2.5 font-semibold text-[var(--color-accent)]">{ward.ward}</td>
+                    <td className={`px-3 py-2.5 text-right font-mono ${ward.cot1 <= 0 ? "text-slate-300" : "text-[var(--color-ink-2)]"}`}>{ward.cot1.toLocaleString("vi-VN")}</td>
+                    <td className={`px-3 py-2.5 text-right font-mono ${ward.cot2 <= 0 ? "text-slate-300" : "text-[var(--color-ink-2)]"}`}>{ward.cot2.toLocaleString("vi-VN")}</td>
+                    <td className="px-1 py-1">
+                      <div className={`px-3 py-2 text-right font-mono font-semibold ${heatClass(grand)} rounded-md`}>{grand.toLocaleString("vi-VN")}</div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
-      <div className="flex items-center justify-between border-t border-[var(--color-rule)] px-4 py-3 text-sm">
-        <span className="text-[var(--color-muted)]">Trang {page}/{pageCount}</span>
-        <div className="flex gap-2">
-          <Button type="button" variant="secondary" disabled={page <= 1} onClick={onPrev}><ChevronLeft size={16} /> Trước</Button>
-          <Button type="button" variant="secondary" disabled={page >= pageCount} onClick={onNext}>Sau <ChevronRight size={16} /></Button>
+    </section>
+  );
+}
+
+type WardOrder = { pup: string; pupName: string; order: string; cot: string; rider: string };
+
+function WardModal({ area, ward, statusLabel, cot, onClose }: { area: string; ward: string; statusLabel: string; cot: CotFilter; onClose: () => void }) {
+  const [orders, setOrders] = useState<WardOrder[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(true);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      setLoadingOrders(true);
+      const supabase = createClient();
+      const result = await supabase
+        .from("pickup_48h_no_api2")
+        .select("pickup_point_id,pickup_point_name,shipment_id,cot_group,assigned_riders_today")
+        .eq("area", area)
+        .eq("ward", ward)
+        .eq("status", statusLabel)
+        .limit(2000);
+      if (cancelled) return;
+      if (!result.error) {
+        const list = (result.data ?? []) as Array<{ pickup_point_id?: string | null; pickup_point_name?: string | null; shipment_id?: string | null; cot_group?: string | null; assigned_riders_today?: string | null }>;
+        setOrders(
+          list.map((row) => ({
+            pup: String(row.pickup_point_id || "—"),
+            pupName: String(row.pickup_point_name || ""),
+            order: String(row.shipment_id || "—"),
+            cot: riderCotLabel(String(row.cot_group || "")),
+            rider: String(row.assigned_riders_today || ""),
+          })),
+        );
+      }
+      setLoadingOrders(false);
+    };
+    void run();
+    return () => { cancelled = true; };
+  }, [area, ward, statusLabel]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const q = search.trim().toLowerCase();
+  const visible = orders
+    .filter((row) => (cot === "all" ? true : row.cot.toLowerCase() === cot))
+    .filter((row) => !q || `${row.pup} ${row.pupName} ${row.order} ${row.rider}`.toLowerCase().includes(q));
+  const cot1 = orders.filter((row) => row.cot !== "COT2").length;
+  const cot2 = orders.filter((row) => row.cot === "COT2").length;
+  const pupCount = new Set(orders.map((row) => row.pup)).size;
+
+  return createPortal(
+    <div role="dialog" aria-modal="true" aria-label={`Chi tiết ${ward}`} className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper)] shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-rule)] px-4 py-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">{area} · {statusLabel}</p>
+            <h2 className="text-base font-bold text-[var(--color-ink)]">{ward}</h2>
+            <p className="text-sm text-[var(--color-muted)]">{pupCount.toLocaleString("vi-VN")} PUP · {orders.length.toLocaleString("vi-VN")} đơn · COT1 {cot1.toLocaleString("vi-VN")} · COT2 {cot2.toLocaleString("vi-VN")}</p>
+          </div>
+          <Button type="button" variant="secondary" onClick={onClose}><X size={16} /> Đóng</Button>
+        </div>
+        <div className="border-b border-[var(--color-rule)] px-4 py-3">
+          <span className="relative block">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" size={16} />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm mã PUP, mã đơn, rider" className="pl-9" />
+          </span>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          <table className="w-full min-w-[560px] text-left text-sm">
+            <thead className="sticky top-0 bg-[var(--color-paper-2)] text-xs text-[var(--color-muted)]">
+              <tr>
+                <th className="px-4 py-3">Mã PUP</th>
+                <th className="px-4 py-3">Mã đơn</th>
+                <th className="px-4 py-3">COT</th>
+                <th className="px-4 py-3">Rider</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loadingOrders ? (
+                <tr><td colSpan={4} className="px-4 py-10 text-center text-[var(--color-muted)]">Đang tải chi tiết...</td></tr>
+              ) : !visible.length ? (
+                <tr><td colSpan={4} className="px-4 py-10 text-center text-[var(--color-muted)]">Không có đơn {statusLabel} trong phường này.</td></tr>
+              ) : visible.map((row, index) => (
+                <tr key={`${row.pup}-${row.order}-${index}`} className="border-t border-[var(--color-rule)]">
+                  <td className="px-4 py-3">
+                    <p className="font-mono text-[13px] font-semibold text-[var(--color-ink)]">{row.pup}</p>
+                    {row.pupName ? <p className="text-xs text-[var(--color-muted)]">{row.pupName}</p> : null}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-[13px] text-[var(--color-ink-2)]">{row.order}</td>
+                  <td className="px-4 py-3 text-xs font-semibold text-[var(--color-ink-2)]">{row.cot}</td>
+                  <td className="px-4 py-3 text-xs text-[var(--color-ink-2)]">{row.rider || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="border-t border-[var(--color-rule)] px-4 py-2 text-xs text-[var(--color-muted)]">
+          Hiển thị {visible.length.toLocaleString("vi-VN")}/{orders.length.toLocaleString("vi-VN")} đơn (tối đa 2000).
         </div>
       </div>
-    </section>
+    </div>,
+    document.body,
   );
 }
 
