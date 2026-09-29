@@ -1,14 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Download, MapPin, PackageCheck, RefreshCcw, Search, Truck, X } from "lucide-react";
+import { ChevronDown, Download, MapPin, PackageCheck, RefreshCcw, Search, Truck, X } from "lucide-react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
 import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { BarChart, ChartHead, Donut, RiskStrip, ShareRow } from "@/components/lmhub-inventory/lmhub-inventory-charts";
 import { HeatLegend, Seg } from "@/components/lmhub-inventory/lmhub-inventory-boards";
 import { formatDateTime, formatRelative, heatClass, RELOAD_DEBOUNCE_MS } from "@/components/lmhub-inventory/lmhub-inventory-model";
@@ -42,6 +43,9 @@ export function PickupInventoryView({ canQueue = false }: { canQueue?: boolean }
   const [cot, setCot] = useState<CotFilter>("all");
   const [heat, setHeat] = useState<HeatFilter>("all");
   const [modal, setModal] = useState<{ area: string; ward: string } | null>(null);
+  const [areaFilter, setAreaFilter] = useState<"all" | Area>("all");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [riderCache, setRiderCache] = useState<Record<string, WardRiders>>({});
   const [queueing, setQueueing] = useState(false);
   const [waitingSnapshot, setWaitingSnapshot] = useState(false);
   const [queueNote, setQueueNote] = useState<string | null>(null);
@@ -189,7 +193,100 @@ export function PickupInventoryView({ canQueue = false }: { canQueue?: boolean }
   const changeStatus = (next: PickupStatusKey) => {
     setStatus(next);
     setModal(null);
+    setExpanded(null);
+    setRiderCache({});
   };
+
+  const toggleWard = useCallback((ward: FlatWard) => {
+    const key = `${ward.area}||${ward.ward}`;
+    setExpanded((current) => (current === key ? null : key));
+  }, []);
+
+  const retryWard = useCallback((ward: FlatWard) => {
+    const key = `${ward.area}||${ward.ward}`;
+    setRiderCache((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setExpanded(key);
+  }, []);
+
+  // Snapshot moi -> cache rider theo phuong het han (ten rider chi co tu snapshot moi).
+  const snapshotRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (snapshotRef.current !== snapshotAt) {
+      snapshotRef.current = snapshotAt;
+      setRiderCache({});
+    }
+  }, [snapshotAt]);
+
+  // Lazy-load ten rider cua phuong dang mo: gom tu pickup_48h_no_api2
+  // (assigned_riders_today + cot_group), chia 2 cot COT1 / COT2.
+  // FIX treo "Đang tải...": query Supabase khong co timeout mac dinh nen
+  // mang cham / PostgREST quet seq se treo vinh vien. Dung AbortController
+  // 15s + hien loi + nut Thu lai thay vi loading vo han.
+  useEffect(() => {
+    if (!expanded || riderCache[expanded]) return;
+    let cancelled = false;
+    const key = expanded;
+    const separator = expanded.indexOf("||");
+    const area = expanded.slice(0, separator);
+    const ward = expanded.slice(separator + 2);
+    setRiderCache((prev) => {
+      if (prev[key]) return prev;
+      return { ...prev, [key]: { loading: true, cot1: [], cot2: [], error: null } };
+    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const run = async () => {
+      try {
+        const supabase = createClient();
+        const result = await supabase
+          .from("pickup_48h_no_api2")
+          .select("shipment_id,cot_group,assigned_riders_today")
+          .eq("area", area)
+          .eq("ward", ward)
+          .eq("status", PICKUP_STATUS_LABEL[status])
+          .abortSignal(controller.signal)
+          .limit(2000);
+        if (cancelled) return;
+        if (result.error) throw result.error;
+        const agg = new Map<string, RiderShare & { bucket: "COT1" | "COT2" }>();
+        for (const row of (result.data ?? []) as Array<{ shipment_id?: string | null; cot_group?: string | null; assigned_riders_today?: string | null }>) {
+          const bucket = riderCotLabel(String(row.cot_group || "")) === "COT2" ? "COT2" : "COT1";
+          const names = String(row.assigned_riders_today || "")
+            .split(/[,;\n]+/)
+            .map((part) => part.trim())
+            .filter((part) => part && part !== "—");
+          const list = names.length ? names : ["(chưa có tên rider)"];
+          for (const name of list) {
+            const mapKey = `${bucket}||${name}`;
+            const current = agg.get(mapKey) ?? { name, orders: 0, bucket };
+            current.orders += 1;
+            agg.set(mapKey, current);
+          }
+        }
+        const byOrders = (a: RiderShare, b: RiderShare) => b.orders - a.orders || a.name.localeCompare(b.name, "vi");
+        const cot1 = [...agg.values()].filter((item) => item.bucket === "COT1").sort(byOrders);
+        const cot2 = [...agg.values()].filter((item) => item.bucket === "COT2").sort(byOrders);
+        if (!cancelled) setRiderCache((prev) => ({ ...prev, [key]: { loading: false, cot1, cot2, error: null } }));
+      } catch (err) {
+        if (cancelled) return;
+        const isAbort = err instanceof Error && (err.name === "AbortError" || /abort|aborted/i.test(err.message));
+        const message = isAbort
+          ? `Query rider quá 15s chưa xong (${area} · ${ward} · ${PICKUP_STATUS_LABEL[status]}). Có thể bảng pickup_48h_no_api2 thiếu index (area, ward, status) hoặc mạng chậm. Bấm Thử lại.`
+          : err instanceof Error ? err.message : "Không tải được rider.";
+        // eslint-disable-next-line no-console
+        console.error("[pickup-rider]", { area, ward, status, error: err });
+        if (!cancelled) setRiderCache((prev) => ({ ...prev, [key]: { loading: false, cot1: [], cot2: [], error: message } }));
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    };
+    void run();
+    return () => { cancelled = true; clearTimeout(timeoutId); };
+  }, [expanded, riderCache, status]);
 
   return (
     <div className="dashboard-control mx-auto max-w-[1680px] space-y-5">
@@ -197,7 +294,7 @@ export function PickupInventoryView({ canQueue = false }: { canQueue?: boolean }
         <div className="min-w-0">
           <div className="dashboard-kicker"><span className="dashboard-live-dot" />Điều hành tồn · Pickup {statusLabel}</div>
           <h1>Tồn pickup</h1>
-          <p>Bảng phẳng theo phường. Bấm một phường để mở chi tiết mã PUP + mã đơn {statusLabel}.</p>
+          <p>Bảng phẳng theo phường. Bấm một phường để sổ ra tên rider theo cột COT 1 / COT 2; bấm Chi tiết để mở mã PUP + mã đơn.</p>
         </div>
         <div className="dashboard-command-actions">
           <div className="min-w-[190px] rounded-xl border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2">
@@ -266,6 +363,13 @@ export function PickupInventoryView({ canQueue = false }: { canQueue?: boolean }
       </section>
 
       <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-[190px]">
+          <Select value={areaFilter} onChange={(e) => setAreaFilter(e.target.value as "all" | Area)} aria-label="Lọc khu vực">
+            <option value="all">Cả KV5 + KV6</option>
+            <option value="KV5">Chỉ KV5</option>
+            <option value="KV6">Chỉ KV6</option>
+          </Select>
+        </span>
         <span className="relative min-w-[240px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" size={16} />
           <Input value={query} onChange={(e) => { setQuery(e.target.value); }} placeholder="Tìm phường" className="pl-9" />
@@ -277,14 +381,18 @@ export function PickupInventoryView({ canQueue = false }: { canQueue?: boolean }
 
       {error ? <div role="alert" className="dashboard-error">{error}</div> : null}
       {loading && !rows.length ? (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4">
           <div className="h-[36rem] animate-pulse rounded-2xl bg-[var(--color-paper-3)]" />
           <div className="h-[36rem] animate-pulse rounded-2xl bg-[var(--color-paper-3)]" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
-          <WardTable title="Khu vực 5" wards={kv5Wards} cot={cot} statusLabel={statusLabel} updatedAt={snapshotAt} onSelect={(ward) => setModal({ area: ward.area, ward: ward.ward })} />
-          <WardTable title="Khu vực 6" wards={kv6Wards} cot={cot} statusLabel={statusLabel} updatedAt={snapshotAt} onSelect={(ward) => setModal({ area: ward.area, ward: ward.ward })} />
+        <div className="grid grid-cols-1 items-start gap-4">
+          {areaFilter !== "KV6" ? (
+            <WardTable title="Khu vực 5" wards={kv5Wards} cot={cot} statusLabel={statusLabel} updatedAt={snapshotAt} expandedKey={expanded} riderCache={riderCache} onToggle={toggleWard} onRetry={retryWard} onDetail={(ward) => setModal({ area: ward.area, ward: ward.ward })} />
+          ) : null}
+          {areaFilter !== "KV5" ? (
+            <WardTable title="Khu vực 6" wards={kv6Wards} cot={cot} statusLabel={statusLabel} updatedAt={snapshotAt} expandedKey={expanded} riderCache={riderCache} onToggle={toggleWard} onRetry={retryWard} onDetail={(ward) => setModal({ area: ward.area, ward: ward.ward })} />
+          ) : null}
         </div>
       )}
       {modal ? <WardModal area={modal.area} ward={modal.ward} statusLabel={statusLabel} cot={cot} onClose={() => setModal(null)} /> : null}
@@ -293,6 +401,8 @@ export function PickupInventoryView({ canQueue = false }: { canQueue?: boolean }
 }
 
 type FlatWard = { ward: string; area: Area; cot1: number; cot2: number; total: number };
+type RiderShare = { name: string; orders: number };
+type WardRiders = { loading: boolean; cot1: RiderShare[]; cot2: RiderShare[]; error: string | null };
 
 function mergeWards(districts: DistrictAgg[], cot: CotFilter): FlatWard[] {
   const map = new Map<string, FlatWard>();
@@ -308,7 +418,7 @@ function mergeWards(districts: DistrictAgg[], cot: CotFilter): FlatWard[] {
   return [...map.values()].sort((a, b) => visibleTotal(b, cot) - visibleTotal(a, cot) || a.ward.localeCompare(b.ward, "vi"));
 }
 
-function WardTable({ title, wards, cot, statusLabel, updatedAt, onSelect }: { title: string; wards: FlatWard[]; cot: CotFilter; statusLabel: string; updatedAt: string | null; onSelect: (ward: FlatWard) => void }) {
+function WardTable({ title, wards, cot, statusLabel, updatedAt, expandedKey, riderCache, onToggle, onRetry, onDetail }: { title: string; wards: FlatWard[]; cot: CotFilter; statusLabel: string; updatedAt: string | null; expandedKey: string | null; riderCache: Record<string, WardRiders>; onToggle: (ward: FlatWard) => void; onRetry: (ward: FlatWard) => void; onDetail: (ward: FlatWard) => void }) {
   const total = wards.reduce((sum, ward) => sum + visibleTotal(ward, cot), 0);
   return (
     <section className="overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
@@ -339,15 +449,31 @@ function WardTable({ title, wards, cot, statusLabel, updatedAt, onSelect }: { ti
             ) : (
               wards.map((ward) => {
                 const grand = visibleTotal(ward, cot);
+                const key = `${ward.area}||${ward.ward}`;
+                const isOpen = expandedKey === key;
                 return (
-                  <tr key={ward.ward} onClick={() => onSelect(ward)} className="cursor-pointer border-t border-[var(--color-rule)] hover:bg-[var(--color-paper-2)]">
-                    <td className="px-4 py-2.5 font-semibold text-[var(--color-accent)]">{ward.ward}</td>
-                    <td className={`px-3 py-2.5 text-right font-mono ${ward.cot1 <= 0 ? "text-slate-300" : "text-[var(--color-ink-2)]"}`}>{ward.cot1.toLocaleString("vi-VN")}</td>
-                    <td className={`px-3 py-2.5 text-right font-mono ${ward.cot2 <= 0 ? "text-slate-300" : "text-[var(--color-ink-2)]"}`}>{ward.cot2.toLocaleString("vi-VN")}</td>
-                    <td className="px-1 py-1">
-                      <div className={`px-3 py-2 text-right font-mono font-semibold ${heatClass(grand)} rounded-md`}>{grand.toLocaleString("vi-VN")}</div>
-                    </td>
-                  </tr>
+                  <Fragment key={ward.ward}>
+                    <tr onClick={() => onToggle(ward)} className={`cursor-pointer border-t border-[var(--color-rule)] hover:bg-[var(--color-paper-2)] ${isOpen ? "bg-[var(--color-paper-2)]" : ""}`}>
+                      <td className="px-4 py-2.5">
+                        <span className="flex items-center gap-1.5 font-semibold text-[var(--color-accent)]">
+                          <ChevronDown size={15} className={`shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                          {ward.ward}
+                        </span>
+                      </td>
+                      <td className={`px-3 py-2.5 text-right font-mono ${ward.cot1 <= 0 ? "text-slate-300" : "text-[var(--color-ink-2)]"}`}>{ward.cot1.toLocaleString("vi-VN")}</td>
+                      <td className={`px-3 py-2.5 text-right font-mono ${ward.cot2 <= 0 ? "text-slate-300" : "text-[var(--color-ink-2)]"}`}>{ward.cot2.toLocaleString("vi-VN")}</td>
+                      <td className="px-1 py-1">
+                        <div className={`px-3 py-2 text-right font-mono font-semibold ${heatClass(grand)} rounded-md`}>{grand.toLocaleString("vi-VN")}</div>
+                      </td>
+                    </tr>
+                    {isOpen ? (
+                      <tr className="border-t border-[var(--color-rule)]">
+                        <td colSpan={4} className="bg-[var(--color-paper-2)]/60 px-4 py-3">
+                          <RiderPanel info={riderCache[key]} cot={cot} ward={ward} onDetail={() => onDetail(ward)} onRetry={() => onRetry(ward)} />
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 );
               })
             )}
@@ -355,6 +481,65 @@ function WardTable({ title, wards, cot, statusLabel, updatedAt, onSelect }: { ti
         </table>
       </div>
     </section>
+  );
+}
+
+function RiderPanel({ info, cot, ward, onDetail, onRetry }: { info: WardRiders | undefined; cot: CotFilter; ward: FlatWard; onDetail: () => void; onRetry: () => void }) {
+  if (!info || info.loading) {
+    return <p className="py-2 text-center text-sm text-[var(--color-muted)]">Đang tải tên rider... (tối đa 15s sẽ báo lỗi nếu query chậm)</p>;
+  }
+  if (info.error) {
+    return (
+      <div className="py-2 text-center">
+        <p className="text-sm text-red-600">{info.error}</p>
+        <button type="button" onClick={onRetry} className="mt-2 rounded-lg border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-1.5 text-xs font-bold text-[var(--color-accent)] hover:bg-[var(--color-paper-2)]">
+          Thử lại
+        </button>
+      </div>
+    );
+  }
+  const showCot1 = cot !== "cot2";
+  const showCot2 = cot !== "cot1";
+  const unassigned = info.cot1.some((item) => item.name === "(chưa có tên rider)") || info.cot2.some((item) => item.name === "(chưa có tên rider)");
+  return (
+    <div>
+      <div className={`grid grid-cols-1 gap-3 ${showCot1 && showCot2 ? "sm:grid-cols-2" : ""}`}>
+        {showCot1 ? <RiderColumn title="COT 1" shares={info.cot1} tone="blue" /> : null}
+        {showCot2 ? <RiderColumn title="COT 2" shares={info.cot2} tone="teal" /> : null}
+      </div>
+      {unassigned ? (
+        <p className="mt-2 text-xs text-[var(--color-muted)]">Một số đơn chưa có tên rider (snapshot cũ trước khi job ghi cột rider).</p>
+      ) : null}
+      <div className="mt-2 text-right">
+        <button type="button" onClick={onDetail} className="text-xs font-bold text-[var(--color-accent)] hover:underline">
+          Chi tiết PUP / đơn {ward.ward} →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RiderColumn({ title, shares, tone }: { title: string; shares: RiderShare[]; tone: "blue" | "teal" }) {
+  const total = shares.reduce((sum, item) => sum + item.orders, 0);
+  return (
+    <div className="overflow-hidden rounded-xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
+      <div className={`flex items-center justify-between px-3 py-2 text-xs font-bold uppercase tracking-wide ${tone === "blue" ? "bg-blue-50 text-blue-700" : "bg-teal-50 text-teal-700"}`}>
+        <span>{title}</span>
+        <span className="font-mono">{total.toLocaleString("vi-VN")} đơn</span>
+      </div>
+      {!shares.length ? (
+        <p className="px-3 py-3 text-xs text-slate-400">—</p>
+      ) : (
+        <ul className="divide-y divide-[var(--color-rule)]">
+          {shares.map((item) => (
+            <li key={item.name} className="flex items-center justify-between gap-2 px-3 py-1.5 text-[13px]">
+              <span className="min-w-0 truncate font-semibold text-[var(--color-ink-2)]">{item.name}</span>
+              <span className="shrink-0 font-mono text-xs text-[var(--color-muted)]">{item.orders.toLocaleString("vi-VN")} đơn</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -367,33 +552,40 @@ function WardModal({ area, ward, statusLabel, cot, onClose }: { area: string; wa
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     const run = async () => {
       setLoadingOrders(true);
-      const supabase = createClient();
-      const result = await supabase
-        .from("pickup_48h_no_api2")
-        .select("pickup_point_id,pickup_point_name,shipment_id,cot_group,assigned_riders_today")
-        .eq("area", area)
-        .eq("ward", ward)
-        .eq("status", statusLabel)
-        .limit(2000);
-      if (cancelled) return;
-      if (!result.error) {
-        const list = (result.data ?? []) as Array<{ pickup_point_id?: string | null; pickup_point_name?: string | null; shipment_id?: string | null; cot_group?: string | null; assigned_riders_today?: string | null }>;
-        setOrders(
-          list.map((row) => ({
-            pup: String(row.pickup_point_id || "—"),
-            pupName: String(row.pickup_point_name || ""),
-            order: String(row.shipment_id || "—"),
-            cot: riderCotLabel(String(row.cot_group || "")),
-            rider: String(row.assigned_riders_today || ""),
-          })),
-        );
+      try {
+        const supabase = createClient();
+        const result = await supabase
+          .from("pickup_48h_no_api2")
+          .select("pickup_point_id,pickup_point_name,shipment_id,cot_group,assigned_riders_today")
+          .eq("area", area)
+          .eq("ward", ward)
+          .eq("status", statusLabel)
+          .abortSignal(controller.signal)
+          .limit(2000);
+        if (cancelled) return;
+        if (!result.error) {
+          const list = (result.data ?? []) as Array<{ pickup_point_id?: string | null; pickup_point_name?: string | null; shipment_id?: string | null; cot_group?: string | null; assigned_riders_today?: string | null }>;
+          setOrders(
+            list.map((row) => ({
+              pup: String(row.pickup_point_id || "—"),
+              pupName: String(row.pickup_point_name || ""),
+              order: String(row.shipment_id || "—"),
+              cot: riderCotLabel(String(row.cot_group || "")),
+              rider: String(row.assigned_riders_today || ""),
+            })),
+          );
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        if (!cancelled) setLoadingOrders(false);
       }
-      setLoadingOrders(false);
     };
     void run();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(timeoutId); controller.abort(); };
   }, [area, ward, statusLabel]);
 
   useEffect(() => {
