@@ -1,17 +1,17 @@
 import { ProtectedPage } from "@/components/layout/protected-page";
-import { PickupInventoryView } from "@/components/lmhub-inventory/pickup-inventory-view";
+import { LmhubInventoryView } from "@/components/lmhub-inventory/lmhub-inventory-view";
 import { notFound } from "next/navigation";
 import { getCurrentUserContext } from "@/lib/auth/current-user";
-import { canAccessPickupManagement } from "@/lib/auth/permissions";
+import { canAccessPickupManagement, canManageOperations } from "@/lib/auth/permissions";
 
-export default async function LmhubInventoryPage() {
+export default async function InventoryDeliveryPage() {
   const context = await getCurrentUserContext();
 
   if (context && !canAccessPickupManagement(context.profile.role, context.profile.permissions)) notFound();
 
   return (
     <ProtectedPage>
-      <PickupInventoryView />
+      <LmhubInventoryView canQueue={canManageOperations(context?.profile.role)} />
     </ProtectedPage>
   );
 }
