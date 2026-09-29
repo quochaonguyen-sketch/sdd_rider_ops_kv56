@@ -21,6 +21,7 @@ type RealtimeTable =
   | "pickup_48h_realtime_riders"
   | "pickup_48h_summary_groups"
   | "pickup_48h_rider_groups"
+  | "pickup_assigned_rider_pivot"
   | "lmhub_inventory_rows";
 
 type Options<T extends Record<string, unknown>> = {
