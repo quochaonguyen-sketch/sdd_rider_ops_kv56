@@ -21,6 +21,7 @@ type RealtimeTable =
   | "pickup_48h_realtime_riders"
   | "pickup_48h_summary_groups"
   | "pickup_48h_rider_groups"
+  | "pickup_48h_no_api2"
   | "pickup_assigned_rider_pivot"
   | "pickup_inventory_assigned"
   | "pickup_inventory_onhold"
