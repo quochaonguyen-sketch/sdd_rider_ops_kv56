@@ -254,7 +254,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
   );
 }
 
-function isNavigationItemActive(item: { href: string; view?: string | null }, pathname: string; currentView: string | null) {
+function isNavigationItemActive(item: { href: string; view?: string | null }, pathname: string, currentView: string | null) {
   const itemPath = item.href.split("?")[0];
   if (itemPath !== pathname && !pathname.startsWith(`${itemPath}/`)) return false;
   if (itemPath !== "/pickup-management" && itemPath !== "/return-orders") return true;
