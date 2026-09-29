@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { canManageOperations } from "@/lib/auth/permissions";
-import { LMHUB_COOLDOWN_MS, queueLmhubFetch, readLmhubQueueStatus } from "@/lib/lmhub/fetch-queue";
+import { LMHUB_COOLDOWN_MS, normalizeLmhubKind, queueLmhubFetch, readLmhubQueueStatus } from "@/lib/lmhub/fetch-queue";
 
 async function sessionUser() {
   const client = await createClient();
@@ -24,18 +24,28 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   const session = await sessionUser();
   if (!session) return NextResponse.json({ success: false, error: "Chưa đăng nhập" }, { status: 401 });
   if (!canManageOperations(session.role)) {
     return NextResponse.json({ success: false, error: "Bạn không có quyền fetch tồn LMHub" }, { status: 403 });
   }
 
+  let requestedKind = "delivery";
+  try {
+    const body = await request.json().catch(() => null) as { kind?: string } | null;
+    if (body?.kind) requestedKind = body.kind;
+  } catch {
+    requestedKind = "delivery";
+  }
+  const kind = normalizeLmhubKind(requestedKind);
+
   const { data: lastLog } = await session.admin
     .from("activity_logs")
     .select("created_at")
     .eq("entity_type", "lmhub_inventory")
     .eq("action", "queued")
+    .contains("raw_data", { kind })
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -46,35 +56,43 @@ export async function POST() {
       queued: false,
       cooldown: true,
       retryAfterSec: wait,
-      message: `Chống spam: 1 phút chỉ chạy 1 lần. Đợi ${wait}s rồi bấm lại.`,
+      message: `Chống spam: 1 phút chỉ chạy 1 lần cùng loại. Đợi ${wait}s rồi bấm lại.`,
     });
   }
 
   try {
-    const result = await queueLmhubFetch("WEB Tồn khu vực fetch", session.user.id);
+    const label = kind === "pickup" ? "WEB Tồn pickup fetch" : kind === "all" ? "WEB Tồn pickup+delivery fetch" : "WEB Tồn delivery fetch";
+    const result = await queueLmhubFetch(label, session.user.id, kind);
     if (!result.queued) {
       return NextResponse.json({
         success: true,
         queued: false,
+        kind,
         ...result.status,
-        message: "Worker đang bận (PENDING/RUNNING trên Supabase). Đợi xong rồi bấm lại.",
+        message: result.message ?? "Job cùng loại đã nằm trong hàng đợi. Worker sẽ chạy tuần tự.",
       });
     }
 
     await session.admin.from("activity_logs").insert({
       entity_type: "lmhub_inventory",
       action: "queued",
-      message: `Queued LMHub fetch job ${result.jobId}`,
-      raw_data: { jobId: result.jobId, queue: "supabase" },
+      message: `Queued ${kind} job ${result.jobId}`,
+      raw_data: { jobId: result.jobId, queue: "supabase", kind },
     });
 
     return NextResponse.json({
       success: true,
       queued: true,
+      kind,
       jobId: result.jobId,
       queue: "supabase",
       ...result.status,
-      message: "Đã đẩy việc vào hàng đợi Supabase. Worker sẽ nhận job và ghi snapshot mới.",
+      message:
+        kind === "pickup"
+          ? "Đã xếp tồn pickup vào hàng đợi chung. Nếu đang chạy tồn delivery thì job này đợi."
+          : kind === "all"
+            ? "Đã xếp tồn pickup + delivery vào hàng đợi chung."
+            : "Đã xếp tồn delivery vào hàng đợi chung. Nếu đang chạy tồn pickup thì job này đợi.",
     });
   } catch (error) {
     return NextResponse.json({ success: false, error: error instanceof Error ? error.message : "Không đẩy được hàng đợi LMHub" }, { status: 400 });
