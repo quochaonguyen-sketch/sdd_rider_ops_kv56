@@ -22,7 +22,8 @@ type RealtimeTable =
   | "pickup_48h_summary_groups"
   | "pickup_48h_rider_groups"
   | "pickup_assigned_rider_pivot"
-  | "lmhub_inventory_rows";
+  | "lmhub_inventory_rows"
+  | "lmhub_fetch_jobs";
 
 type Options<T extends Record<string, unknown>> = {
   table: RealtimeTable;
