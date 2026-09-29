@@ -30,16 +30,15 @@ export type PickupStatusRow = {
 };
 
 export const PICKUP_STATUS_COLUMNS = "area,district,ward,zone,cot,orders,snapshot_id,snapshot_at,updated_at";
-export const PICKUP_PIVOT_TABLE = "pickup_48h_status_pivot";
 export const PAGE_ROWS = 1000;
 export const PAGE_SIZE = 40;
 export const UNKNOWN_DISTRICT = "Chưa có quận";
 export const UNKNOWN_WARD = "Chưa có phường";
 
-export const PICKUP_STATUS_TABLE: Record<PickupStatusKey, "pickup_48h_status_pivot"> = {
-  assigned: "pickup_48h_status_pivot",
-  onhold: "pickup_48h_status_pivot",
-  created: "pickup_48h_status_pivot",
+export const PICKUP_STATUS_TABLE: Record<PickupStatusKey, "pickup_inventory_assigned" | "pickup_inventory_onhold" | "pickup_inventory_created"> = {
+  assigned: "pickup_inventory_assigned",
+  onhold: "pickup_inventory_onhold",
+  created: "pickup_inventory_created",
 };
 
 export const PICKUP_STATUS_LABEL: Record<PickupStatusKey, string> = {
