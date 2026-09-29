@@ -1,0 +1,3 @@
+-- Ton pickup khong luu bang inventory rieng.
+-- Board doc view pickup_inventory_* (pivot tu raw pickup_48h_no_api2).
+-- Rider theo phuong: rpc pickup_48h_ward_riders(area, ward, status).
