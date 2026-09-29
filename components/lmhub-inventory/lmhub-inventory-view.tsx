@@ -10,7 +10,29 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { BarChart, ChartHead, Donut, RiskStrip, ShareRow } from "@/components/lmhub-inventory/lmhub-inventory-charts";
 import { AreaBoard, HeatLegend, Seg } from "@/components/lmhub-inventory/lmhub-inventory-boards";
-import { COLUMNS, PAGE_ROWS, PAGE_SIZE, RELOAD_DEBOUNCE_MS, UNKNOWN_DISTRICT, UNKNOWN_WARD, buildAnalytics, buildBoard, cotBucket, filterBoard, formatDateTime, formatRelative, normalize, normalizeRow, pct, toTime, visibleBoardTotal, type CotFilter, type HeatFilter, type InventoryRow, type WardAgg } from "@/components/lmhub-inventory/lmhub-inventory-model";
+import {
+  COLUMNS,
+  PAGE_ROWS,
+  PAGE_SIZE,
+  RELOAD_DEBOUNCE_MS,
+  UNKNOWN_DISTRICT,
+  UNKNOWN_WARD,
+  buildAnalytics,
+  buildBoard,
+  cotBucket,
+  filterBoard,
+  formatDateTime,
+  formatRelative,
+  normalize,
+  normalizeRow,
+  pct,
+  toTime,
+  visibleBoardTotal,
+  type CotFilter,
+  type HeatFilter,
+  type InventoryFocus,
+  type InventoryRow,
+} from "@/components/lmhub-inventory/lmhub-inventory-model";
 
 export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean }) {
   const [rows, setRows] = useState<InventoryRow[]>([]);
@@ -20,7 +42,7 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
   const [query, setQuery] = useState("");
   const [cot, setCot] = useState<CotFilter>("all");
   const [heat, setHeat] = useState<HeatFilter>("all");
-  const [selected, setSelected] = useState<WardAgg | null>(null);
+  const [selected, setSelected] = useState<InventoryFocus | null>(null);
   const [page, setPage] = useState(1);
   const [queueing, setQueueing] = useState(false);
   const [waitingSnapshot, setWaitingSnapshot] = useState(false);
@@ -136,7 +158,16 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
   const selectedOrders = useMemo(() => {
     if (!selected) return [];
     const q = normalize(query);
-    return rows.filter((row) => row.area === selected.area && (row.district || UNKNOWN_DISTRICT) === selected.district && (row.ward || UNKNOWN_WARD) === selected.ward && (cot === "all" || cotBucket(row.cot_group) === cot) && (!q || normalize(`${row.shipment_id} ${row.zone_id} ${row.cot_group} ${row.order_type}`).includes(q))).sort((a, b) => toTime(b.received_time) - toTime(a.received_time));
+    return rows
+      .filter((row) => {
+        if (row.area !== selected.area) return false;
+        if ((row.district || UNKNOWN_DISTRICT) !== selected.district) return false;
+        if (selected.ward && (row.ward || UNKNOWN_WARD) !== selected.ward) return false;
+        if (cot !== "all" && cotBucket(row.cot_group) !== cot) return false;
+        if (q && !normalize(`${row.shipment_id} ${row.zone_id} ${row.cot_group} ${row.order_type} ${row.ward} ${row.district}`).includes(q)) return false;
+        return true;
+      })
+      .sort((a, b) => toTime(b.received_time) - toTime(a.received_time));
   }, [rows, selected, query, cot]);
 
   const pageCount = Math.max(1, Math.ceil(selectedOrders.length / PAGE_SIZE));
@@ -144,13 +175,18 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
   const pageOrders = selectedOrders.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const busy = (queueMeta?.pending ?? 0) + (queueMeta?.running ?? 0) > 0 || waitingSnapshot;
 
+  const selectFocus = (focus: InventoryFocus) => {
+    setSelected(focus);
+    setPage(1);
+  };
+
   return (
     <div className="dashboard-control mx-auto max-w-[1680px] space-y-5">
       <header className="dashboard-command-header">
         <div className="min-w-0">
           <div className="dashboard-kicker"><span className="dashboard-live-dot" />Điều hành tồn · LMHub</div>
           <h1>Tồn khu vực</h1>
-          <p>Nhìn nhanh áp lực theo khu vực, quận và COT. Bấm phường để mở danh sách đơn.</p>
+          <p>KV5 rồi KV6 xếp dọc. Thu/mở quận. Bấm quận hoặc phường để xem danh sách đơn bên phải.</p>
         </div>
         <div className="dashboard-command-actions">
           <div className="min-w-[190px] rounded-xl border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2">
@@ -212,7 +248,7 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
           <div className="px-5 pb-5"><BarChart rows={analytics.topDistricts} /></div>
         </article>
         <article className="xl:col-span-12 overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
-          <ChartHead title="Phổ rủi ro phường" caption="Ít / vừa / cao / đỏ — giúp ưu tiên xử lý" />
+          <ChartHead title="Phổ rủi ro phường" caption="Hết tồn / ít / vừa / cao / đỏ" />
           <div className="px-5 pb-5"><RiskStrip bins={analytics.heatBins} /></div>
         </article>
       </section>
@@ -229,65 +265,112 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
 
       {error ? <div role="alert" className="dashboard-error">{error}</div> : null}
       {loading && !rows.length ? (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <div className="h-[32rem] animate-pulse rounded-2xl bg-[var(--color-paper-3)]" />
-          <div className="h-[32rem] animate-pulse rounded-2xl bg-[var(--color-paper-3)]" />
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+          <div className="h-[36rem] animate-pulse rounded-2xl bg-[var(--color-paper-3)] xl:col-span-6" />
+          <div className="h-[36rem] animate-pulse rounded-2xl bg-[var(--color-paper-3)] xl:col-span-6" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
-          <AreaBoard title="Khu vực 5" districts={filtered.kv5} cot={cot} selected={selected} updatedAt={snapshotAt} onSelect={(ward) => { setSelected(ward); setPage(1); }} />
-          <AreaBoard title="Khu vực 6" districts={filtered.kv6} cot={cot} selected={selected} updatedAt={snapshotAt} onSelect={(ward) => { setSelected(ward); setPage(1); }} />
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-12">
+          <div className="space-y-4 xl:col-span-6">
+            <AreaBoard title="Khu vực 5" districts={filtered.kv5} cot={cot} selected={selected} updatedAt={snapshotAt} onSelect={selectFocus} />
+            <AreaBoard title="Khu vực 6" districts={filtered.kv6} cot={cot} selected={selected} updatedAt={snapshotAt} onSelect={selectFocus} />
+          </div>
+          <aside className="xl:sticky xl:top-4 xl:col-span-6">
+            <OrderPanel
+              selected={selected}
+              orders={pageOrders}
+              total={selectedOrders.length}
+              page={safePage}
+              pageCount={pageCount}
+              onPrev={() => setPage((value) => Math.max(1, value - 1))}
+              onNext={() => setPage((value) => Math.min(pageCount, value + 1))}
+              onClose={() => setSelected(null)}
+            />
+          </aside>
         </div>
       )}
-
-      {selected ? (
-        <section className="overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-rule)] px-4 py-3">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">{selected.area} · {selected.district}</p>
-              <h2 className="text-base font-bold text-[var(--color-ink)]">{selected.ward}</h2>
-              <p className="text-sm text-[var(--color-muted)]">{selectedOrders.length.toLocaleString("vi-VN")} đơn khớp lọc</p>
-            </div>
-            <Button type="button" variant="secondary" onClick={() => setSelected(null)}><X size={16} /> Đóng</Button>
-          </div>
-          <div className="max-h-[28rem] overflow-auto">
-            <table className="w-full min-w-[880px] text-left text-sm">
-              <thead className="sticky top-0 bg-[var(--color-paper-2)] text-xs text-[var(--color-muted)]">
-                <tr>
-                  <th className="px-4 py-3">Mã vận đơn</th>
-                  <th className="px-4 py-3">Zone</th>
-                  <th className="px-4 py-3">Loại</th>
-                  <th className="px-4 py-3">COT</th>
-                  <th className="px-4 py-3">Trạng thái</th>
-                  <th className="px-4 py-3 text-right">Về hub</th>
-                </tr>
-              </thead>
-              <tbody>
-                {!pageOrders.length ? (
-                  <tr><td colSpan={6} className="px-4 py-10 text-center text-[var(--color-muted)]">Không có đơn khớp lọc.</td></tr>
-                ) : pageOrders.map((row) => (
-                  <tr key={row.shipment_id} className="border-t border-[var(--color-rule)]">
-                    <td className="px-4 py-3 font-mono text-[13px] font-semibold text-[var(--color-ink)]">{row.shipment_id}</td>
-                    <td className="px-4 py-3 text-[var(--color-ink-2)]">{row.zone_id || "—"}</td>
-                    <td className="px-4 py-3">{row.order_type || "—"}</td>
-                    <td className="px-4 py-3 text-[var(--color-ink-2)]">{row.cot_group || "—"}</td>
-                    <td className="px-4 py-3">{row.status || "—"}</td>
-                    <td className="px-4 py-3 text-right font-mono text-xs">{formatDateTime(row.received_time)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="flex items-center justify-between border-t border-[var(--color-rule)] px-4 py-3 text-sm">
-            <span className="text-[var(--color-muted)]">Trang {safePage}/{pageCount}</span>
-            <div className="flex gap-2">
-              <Button type="button" variant="secondary" disabled={safePage <= 1} onClick={() => setPage((v) => Math.max(1, v - 1))}><ChevronLeft size={16} /> Trước</Button>
-              <Button type="button" variant="secondary" disabled={safePage >= pageCount} onClick={() => setPage((v) => Math.min(pageCount, v + 1))}>Sau <ChevronRight size={16} /></Button>
-            </div>
-          </div>
-        </section>
-      ) : null}
     </div>
+  );
+}
+
+function OrderPanel({
+  selected,
+  orders,
+  total,
+  page,
+  pageCount,
+  onPrev,
+  onNext,
+  onClose,
+}: {
+  selected: InventoryFocus | null;
+  orders: InventoryRow[];
+  total: number;
+  page: number;
+  pageCount: number;
+  onPrev: () => void;
+  onNext: () => void;
+  onClose: () => void;
+}) {
+  if (!selected) {
+    return (
+      <section className="flex min-h-[28rem] items-center justify-center rounded-2xl border border-dashed border-[var(--color-rule)] bg-[var(--color-paper)] px-6 text-center">
+        <div>
+          <p className="text-sm font-bold text-[var(--color-ink)]">Chưa chọn địa bàn</p>
+          <p className="mt-1 text-sm text-[var(--color-muted)]">Bấm một quận hoặc phường bên trái để hiện danh sách đơn ở đây.</p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-rule)] px-4 py-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">{selected.area} · {selected.district}</p>
+          <h2 className="text-base font-bold text-[var(--color-ink)]">{selected.ward ?? "Tất cả phường trong quận"}</h2>
+          <p className="text-sm text-[var(--color-muted)]">{total.toLocaleString("vi-VN")} đơn khớp lọc</p>
+        </div>
+        <Button type="button" variant="secondary" onClick={onClose}><X size={16} /> Đóng</Button>
+      </div>
+      <div className="max-h-[min(70vh,40rem)] overflow-auto">
+        <table className="w-full min-w-[640px] text-left text-sm">
+          <thead className="sticky top-0 bg-[var(--color-paper-2)] text-xs text-[var(--color-muted)]">
+            <tr>
+              <th className="px-4 py-3">Mã vận đơn</th>
+              <th className="px-4 py-3">Phường</th>
+              <th className="px-4 py-3">Zone</th>
+              <th className="px-4 py-3">Loại</th>
+              <th className="px-4 py-3">COT</th>
+              <th className="px-4 py-3">Trạng thái</th>
+              <th className="px-4 py-3 text-right">Về hub</th>
+            </tr>
+          </thead>
+          <tbody>
+            {!orders.length ? (
+              <tr><td colSpan={7} className="px-4 py-10 text-center text-[var(--color-muted)]">Không có đơn. Phường/quận này đang hết tồn.</td></tr>
+            ) : orders.map((row) => (
+              <tr key={row.shipment_id} className="border-t border-[var(--color-rule)]">
+                <td className="px-4 py-3 font-mono text-[13px] font-semibold text-[var(--color-ink)]">{row.shipment_id}</td>
+                <td className="px-4 py-3 text-[var(--color-ink-2)]">{row.ward || "—"}</td>
+                <td className="px-4 py-3 text-[var(--color-ink-2)]">{row.zone_id || "—"}</td>
+                <td className="px-4 py-3">{row.order_type || "—"}</td>
+                <td className="px-4 py-3 text-[var(--color-ink-2)]">{row.cot_group || "—"}</td>
+                <td className="px-4 py-3">{row.status || "—"}</td>
+                <td className="px-4 py-3 text-right font-mono text-xs">{formatDateTime(row.received_time)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center justify-between border-t border-[var(--color-rule)] px-4 py-3 text-sm">
+        <span className="text-[var(--color-muted)]">Trang {page}/{pageCount}</span>
+        <div className="flex gap-2">
+          <Button type="button" variant="secondary" disabled={page <= 1} onClick={onPrev}><ChevronLeft size={16} /> Trước</Button>
+          <Button type="button" variant="secondary" disabled={page >= pageCount} onClick={onNext}>Sau <ChevronRight size={16} /></Button>
+        </div>
+      </div>
+    </section>
   );
 }
 

@@ -17,6 +17,11 @@ export type InventoryRow = {
 export type Counts = { cot1: number; cot2: number; total: number };
 export type WardAgg = { ward: string; district: string; area: Area } & Counts;
 export type DistrictAgg = { district: string; area: Area; wards: WardAgg[]; totals: Counts };
+export type InventoryFocus = {
+  area: Area;
+  district: string;
+  ward: string | null;
+};
 
 export const PAGE_SIZE = 40;
 export const PAGE_ROWS = 1000;
@@ -24,10 +29,24 @@ export const RELOAD_DEBOUNCE_MS = 1500;
 export const COLUMNS = "snapshot_id,snapshot_at,shipment_id,received_time,ward,district,area,zone_id,status,order_type,cot_group";
 export const UNKNOWN_WARD = "Chưa xác định phường";
 export const UNKNOWN_DISTRICT = "Chưa xác định quận";
+
+export function focusKey(focus: InventoryFocus) {
+  return `${focus.area}::${focus.district}::${focus.ward ?? "*"}`;
+}
+
+export function districtKey(area: string, district: string) {
+  return `${area}::${district}`;
+}
+
+export function sameFocus(a: InventoryFocus | null, b: InventoryFocus) {
+  return !!a && a.area === b.area && a.district === b.district && a.ward === b.ward;
+}
+
 export function buildAnalytics(kv5: DistrictAgg[], kv6: DistrictAgg[], cot: CotFilter) {
   const districts = [...kv5, ...kv6];
   const wards = districts.flatMap((item) => item.wards);
   const heatBins = [
+    { key: "zero", label: "Hết tồn (0)", count: 0, className: "bg-white border border-[var(--color-rule)]" },
     { key: "green", label: "Ít (1–5)", count: 0, className: "bg-[var(--color-success)]" },
     { key: "yellow", label: "Vừa (6–20)", count: 0, className: "bg-[var(--color-warning)]" },
     { key: "orange", label: "Cao (21–35)", count: 0, className: "bg-[#d97706]" },
@@ -49,6 +68,7 @@ export function buildAnalytics(kv5: DistrictAgg[], kv6: DistrictAgg[], cot: CotF
     districts: districts.length,
     wards: wards.length,
     hotWards: wards.filter((ward) => heatLevel(visibleTotal(ward, "all")) === "red").length,
+    emptyWards: wards.filter((ward) => visibleTotal(ward, cot) <= 0).length,
     visible: visibleBoardTotal(kv5, cot) + visibleBoardTotal(kv6, cot),
     cot1,
     cot2,
@@ -66,13 +86,24 @@ export function filterBoard(districts: DistrictAgg[], query: string, cot: CotFil
   return districts
     .map((district) => {
       const wards = district.wards
-        .filter((ward) => visibleTotal(ward, cot) > 0)
         .filter((ward) => heat === "all" || heatLevel(visibleTotal(ward, cot)) === "red")
         .filter((ward) => !q || normalize(`${ward.district} ${ward.ward}`).includes(q))
-        .sort((a, b) => visibleTotal(b, cot) - visibleTotal(a, cot));
-      return { ...district, wards, totals: wards.reduce((sum, ward) => addCounts(sum, ward), emptyCounts()) };
+        .sort((a, b) => {
+          const diff = visibleTotal(b, cot) - visibleTotal(a, cot);
+          if (diff) return diff;
+          return a.ward.localeCompare(b.ward, "vi");
+        });
+      return {
+        ...district,
+        wards,
+        totals: district.wards.reduce((sum, ward) => addCounts(sum, ward), emptyCounts()),
+      };
     })
-    .filter((district) => district.wards.length > 0)
+    .filter((district) => {
+      if (heat === "hot") return district.wards.length > 0;
+      if (!q) return true;
+      return district.wards.length > 0 || normalize(district.district).includes(q);
+    })
     .sort((a, b) => visibleTotal(b.totals, cot) - visibleTotal(a.totals, cot));
 }
 
@@ -86,7 +117,7 @@ export function visibleCount(counts: Counts, key: "cot1" | "cot2", cot: CotFilte
   return counts[key];
 }
 export function heatLevel(value: number) {
-  if (value <= 0) return "none";
+  if (value <= 0) return "zero";
   if (value <= 5) return "green";
   if (value <= 20) return "yellow";
   if (value <= 35) return "orange";
@@ -94,13 +125,15 @@ export function heatLevel(value: number) {
 }
 export function heatClass(value: number) {
   const level = heatLevel(value);
+  if (level === "zero") return "bg-white text-slate-300";
   if (level === "green") return "bg-[var(--color-success-soft)] text-[var(--color-success)]";
   if (level === "yellow" || level === "orange") return "bg-[var(--color-warning-soft)] text-[var(--color-warning)]";
   if (level === "red") return "bg-[var(--color-error-soft)] text-[var(--color-error)]";
-  return "text-[var(--color-muted)]";
+  return "bg-white text-slate-300";
 }
 export function heatBarClass(value: number) {
   const level = heatLevel(value);
+  if (level === "zero") return "bg-white";
   if (level === "green") return "bg-[var(--color-success)]";
   if (level === "yellow" || level === "orange") return "bg-[var(--color-warning)]";
   if (level === "red") return "bg-[var(--color-error)]";
