@@ -41,6 +41,16 @@ export function useSupabaseRealtime<T extends Record<string, unknown>>({
   debounceMs = 500,
 }: Options<T>) {
   const onChangeRef = useRef(onChange);
+  // Mỗi hook 1 channel riêng: trước đây channel đặt tên theo bảng nên 2 hook
+  // cùng bảng (VD pickup_48h_realtime_riders) dùng chung channel -> supabase-js
+  // ném "cannot add postgres_changes callbacks after subscribe()".
+  const channelNameRef = useRef<string | null>(null);
+  if (channelNameRef.current === null) {
+    channelNameRef.current =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? `realtime:${table}:${crypto.randomUUID()}`
+        : `realtime:${table}:${Math.random().toString(36).slice(2)}`;
+  }
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -51,7 +61,7 @@ export function useSupabaseRealtime<T extends Record<string, unknown>>({
     let timer: ReturnType<typeof setTimeout> | undefined;
     let latestPayload: RealtimePostgresChangesPayload<T> | undefined;
     const channel = supabase
-      .channel(`realtime:${table}`)
+      .channel(channelNameRef.current ?? `realtime:${table}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table },
