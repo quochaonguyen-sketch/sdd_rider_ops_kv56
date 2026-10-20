@@ -10,8 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { canonicalDistrictShortName } from "@/lib/locations/hcm";
+import { BACKUP_DISTRICT, OPERATIONAL_DISTRICT_NAMES } from "@/lib/locations/operational-districts";
 
-const KV5_DISTRICT_ORDER = ["Quận 2", "Quận 9", "Bình Thạnh", "Quận 3", "Hóc Môn", "Quận 12", "Gò Vấp"];
+const KV5_DISTRICT_ORDER = [...OPERATIONAL_DISTRICT_NAMES, BACKUP_DISTRICT];
 
 export type WeeklyAttendanceStatus = "working" | "off" | "incident";
 export type WeeklyScheduleValue =

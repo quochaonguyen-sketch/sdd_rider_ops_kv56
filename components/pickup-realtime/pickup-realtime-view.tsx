@@ -338,7 +338,7 @@ const FilterPanel = memo(function FilterPanel({ filters, query, options, hasFilt
         <FilterField label="Khu vực">
           <Select value={filters.area} onChange={(event) => onArea(toAreaFilter(event.target.value))}>
             <option value="all">KV5 + KV6</option>
-            {AREAS.map((area) => <option key={area} value={area}>{area === "KV5" ? "KV5 · Q3, Bình Thạnh, Thủ Đức (cũ)" : "KV6 · Gò Vấp, Q12, Hóc Môn (cũ)"}</option>)}
+            {AREAS.map((area) => <option key={area} value={area}>{area === "KV5" ? "KV5 · Thủ Đức, Gò Vấp, Quận 12, Hóc Môn" : "KV6"}</option>)}
           </Select>
         </FilterField>
         <FilterField label="Phường">

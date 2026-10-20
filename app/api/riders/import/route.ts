@@ -1,3 +1,4 @@
+import { riderDeliveryDistrict } from "@/lib/locations/operational-districts";
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { canonicalDistrictName } from "@/lib/locations/hcm";
@@ -60,9 +61,9 @@ function cellText(value: unknown) {
   return text || null;
 }
 
-function normalizeBinhThanhDistrict(value: string | null | undefined) {
+function normalizeDistrict(value: string | null | undefined) {
   const trimmed = value?.trim() || null;
-  return canonicalDistrictName(trimmed) === "Quận Bình Thạnh" ? "Quận Bình Thạnh" : trimmed;
+  return canonicalDistrictName(trimmed) || trimmed;
 }
 
 function parseRows(sheet: XLSX.WorkSheet) {
@@ -110,14 +111,14 @@ function parseRows(sheet: XLSX.WorkSheet) {
     rows.push({
       row: rowNumber,
       kv: values.kv ?? null,
-      home_district: normalizeBinhThanhDistrict(values.home_district),
+      home_district: normalizeDistrict(values.home_district),
       cot: values.cot ?? null,
       rider_code: riderCode,
       full_name: values.full_name ?? null,
-      pickup_district: normalizeBinhThanhDistrict(values.pickup_district),
+      pickup_district: normalizeDistrict(values.pickup_district),
       pickup_ward: values.pickup_ward ?? null,
       point_name: values.point_name ?? null,
-      delivery_district: normalizeBinhThanhDistrict(values.delivery_district),
+      delivery_district: riderDeliveryDistrict(values.delivery_district),
       delivery_ward: values.delivery_ward ?? null,
       status: rawStatus,
     });

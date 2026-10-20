@@ -94,7 +94,10 @@ function ControlButton({ label, onClick, disabled = false, border = false, stand
   return <button type="button" title={label} aria-label={label} disabled={disabled} onClick={onClick} className={`${standalone ? "rounded-xl border border-slate-200 shadow-lg" : border ? "border-t border-slate-200" : ""} grid size-10 place-items-center bg-white text-slate-700 transition hover:bg-slate-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:text-slate-300`}>{children}</button>;
 }
 
-function featureZoneId(feature: WardFeature) { return zoneId(feature.properties.districtId, compactZoneName(feature.properties.wardKey)); }
+function featureZoneId(feature: WardFeature) {
+  const districtId = ["quan-2", "quan-9"].includes(feature.properties.districtId) ? "thu-duc" : feature.properties.districtId;
+  return zoneId(districtId, compactZoneName(feature.properties.wardKey));
+}
 
 function loadBoundaries() {
   boundariesRequest ??= fetch("/data/hcm-legacy-wards.geojson", { cache: "force-cache" }).then((response) => {

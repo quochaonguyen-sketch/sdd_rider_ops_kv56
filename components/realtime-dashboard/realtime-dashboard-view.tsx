@@ -33,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/utils/cn";
 import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
+import { isBackupDistrict, operationalDistrict } from "@/lib/locations/operational-districts";
 
 type RealtimeRider = { id: string; driver_id: string; driver_name: string | null; total_assigned: number; delivered: number; delivering: number; failed: number; zone_id: string | null; first_delivery_at: string | null; idle_delivery_seconds: number; snapshot_id: string; snapshot_at: string };
 type RiderProfile = { rider_code: string; full_name: string | null; kv: string | null; delivery_district: string | null; delivery_ward: string | null; cot: string | null };
@@ -129,12 +130,13 @@ export function RealtimeDashboardView() {
     return rows.flatMap((row): DisplayRider[] => {
       const profile = profileMap.get(normalize(row.driver_id));
       if (!profile) return [];
-      const isKv = isKv56(profile.kv);
-      const isCommon = !isKv && (isBackupDistrict(profile.delivery_district) || (!profile.delivery_district?.trim() && !profile.kv?.trim()));
+      const deliveryDistrict = operationalDistrict(profile.delivery_district);
+      const isKv = isKv56(profile.kv) && !!deliveryDistrict;
+      const isCommon = isBackupDistrict(profile.delivery_district) || (!profile.delivery_district?.trim() && !profile.kv?.trim());
       if (!isKv && !isCommon) return [];
       const progress = row.total_assigned ? Math.round((row.delivered / row.total_assigned) * 100) : 0;
       let kv = profile.kv?.trim() || "—";
-      let district = profile.delivery_district?.trim() || "Chưa xác định quận";
+      let district = deliveryDistrict?.name || "Chưa xác định quận";
       let ward = profile.delivery_ward?.trim() || "Chưa xác định phường";
       if (isCommon) {
         kv = COMMON_KV;
@@ -497,11 +499,6 @@ function buildKvAggregates(details: DistrictDetail[]): Record<"kv5" | "kv6" | "c
 }
 function statusLabel(status: RiderStatus) { return ({ delivering: "Đang giao", completed: "Đã giao xong", warning: "Cảnh báo" } as const)[status]; }
 function isKv56(value: string | null) { return /^(?:kv|khu vuc)?\s*[56]$/i.test(normalize(value ?? "")); }
-function isBackupDistrict(value: string | null) {
-  if (!value) return false;
-  const n = normalize(value).replace(/\s+/g, "");
-  return n === "backup";
-}
 function normalize(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toLowerCase().trim(); }
 function formatDateTime(value: string | null | undefined) { if (!value) return "—"; const date = new Date(value); if (!Number.isFinite(date.getTime())) return "—"; return new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Ho_Chi_Minh" }).format(date); }
 function formatAge(seconds: number) { if (seconds < 60) return `${seconds} giây trước`; if (seconds < 3600) return `${Math.floor(seconds / 60)} phút trước`; return formatDateTime(new Date(Date.now() - seconds * 1000).toISOString()); }

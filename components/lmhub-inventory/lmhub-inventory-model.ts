@@ -1,3 +1,5 @@
+import { operationalDistrict } from "@/lib/locations/operational-districts";
+
 export type Area = "KV5" | "KV6";
 export type CotFilter = "all" | "cot1" | "cot2";
 export type HeatFilter = "all" | "hot";
@@ -31,18 +33,13 @@ export const UNKNOWN_WARD = "Chưa xác định phường";
 export const UNKNOWN_DISTRICT = "Chưa xác định quận";
 
 export function deliveryDistrictName(value: string): string | null {
-  const key = normalize(value).replace(/[.]/g, "").replace(/\s+/g, " ");
-  if (["thu duc", "quan thu duc", "tp thu duc", "thanh pho thu duc"].includes(key)) return "Thủ Đức";
-  if (["go vap", "quan go vap", "q go vap"].includes(key)) return "Gò Vấp";
-  if (["12", "quan 12", "q12", "q 12"].includes(key)) return "Quận 12";
-  if (["hoc mon", "huyen hoc mon"].includes(key)) return "Hóc Môn";
-  return null;
+  return operationalDistrict(value)?.name ?? null;
 }
 
 export function deliveryInventoryRows(rows: InventoryRow[]): InventoryRow[] {
   return rows.flatMap((row) => {
     const district = deliveryDistrictName(row.district);
-    return district ? [{ ...row, district }] : [];
+    return district ? [{ ...row, district, area: operationalDistrict(district)!.area }] : [];
   });
 }
 

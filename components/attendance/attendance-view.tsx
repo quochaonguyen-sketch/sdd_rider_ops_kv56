@@ -1,5 +1,7 @@
 "use client";
 
+import { BACKUP_DISTRICT, OPERATIONAL_DISTRICT_NAMES } from "@/lib/locations/operational-districts";
+
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
@@ -1482,7 +1484,7 @@ function uniqueOptions(values: Array<string | null>) {
 }
 
 function sortKv5Districts(values: string[]) {
-  const order = ["Quận 2", "Quận 9", "Bình Thạnh", "Quận 3", "Hóc Môn", "Quận 12", "Gò Vấp"];
+  const order = [...OPERATIONAL_DISTRICT_NAMES, BACKUP_DISTRICT];
   return [...values].sort((a, b) => {
     const aIndex = order.indexOf(a);
     const bIndex = order.indexOf(b);

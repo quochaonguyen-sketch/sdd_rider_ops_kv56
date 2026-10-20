@@ -810,11 +810,9 @@ function kvNumber(value: string | null | undefined): 5 | 6 | null {
 }
 function normalizeText(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim(); }
 function resolveKvDistrict(value: string | null | undefined) { const key = compactZoneName(value ?? ""); if (!key) return null; return MAP_DISTRICTS.find((district) => [district.name, district.shortName, district.code, ...district.aliases].some((candidate) => compactZoneName(candidate) === key)) ?? null; }
-function volumeDistrictInfo(row: VolumeRow) { const mapped = resolveKvDistrict(row.district); if (mapped) return { name: mapped.name, shortName: mapped.shortName, area: mapped.area }; const key = compactZoneName(row.district ?? ""); if (["thanhphothuduc", "thuduc", "tpthuduc"].includes(key)) return { name: "Thành phố Thủ Đức", shortName: "TP Thủ Đức", area: "KV5" }; const name = row.district?.trim(); return name && isKv56(row.area) ? { name, shortName: name.replace(/^Thành phố\s+/i, "TP ").replace(/^Quận\s+/i, "Q. ").replace(/^Huyện\s+/i, "H. "), area: normalizeText(row.area ?? "").endsWith("6") ? "KV6" : "KV5" } : null; }
-function isKv56VolumeRow(row: VolumeRow) { return isKv56(row.area) || Boolean(resolveKvDistrict(row.district)); }
+function volumeDistrictInfo(row: VolumeRow) { const mapped = resolveKvDistrict(row.district); return mapped ? { name: mapped.name, shortName: mapped.shortName, area: mapped.area } : null; }
+function isKv56VolumeRow(row: VolumeRow) { return Boolean(resolveKvDistrict(row.district)); }
 function kvAreaOf(row: VolumeRow): 5 | 6 | null {
-  const fromArea = kvNumber(row.area);
-  if (fromArea) return fromArea;
   const mapped = resolveKvDistrict(row.district);
   if (mapped) return mapped.area === "KV6" ? 6 : 5;
   return null;

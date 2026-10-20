@@ -2,6 +2,9 @@ import { cache } from "react";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma/client";
+import { BACKUP_DISTRICT, OPERATIONAL_DISTRICTS, operationalDistrictValues, riderDeliveryDistrict } from "@/lib/locations/operational-districts";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { summarizePerformance, type PerformanceProfile, type PerformanceRecord } from "./performance-data";
 
 export const performanceSortSchema = z.enum(["area", "rider", "delivery", "pickup", "deliveryRate", "pickupRate"]);
 export const performanceDirectionSchema = z.enum(["asc", "desc"]);
@@ -120,7 +123,7 @@ export function parsePerformanceFilters(params: SearchParamsLike): PerformanceFi
     period: performancePeriodSchema.catch("day").parse(getParam(params, "period")),
     q: (getParam(params, "q") ?? "").trim().slice(0, 80),
     kv: performanceKvSchema.catch("all").parse(getParam(params, "kv")),
-    district: (getParam(params, "district") ?? "all").trim().slice(0, 80) || "all",
+    district: riderDeliveryDistrict((getParam(params, "district") ?? "all").trim().slice(0, 80)) || "all",
     ward: (getParam(params, "ward") ?? "all").trim().slice(0, 80) || "all",
     cot: (getParam(params, "cot") ?? "all").trim().slice(0, 40) || "all",
     sort: performanceSortSchema.catch("area").parse(getParam(params, "sort")),
@@ -153,7 +156,7 @@ function orderClause(sort: PerformanceSortKey, direction: PerformanceDirection) 
   return Prisma.sql`final.delivery_delivered ${dir}, ${areaAsc}`;
 }
 
-export const getDriverPerformance = cache(async (filters: PerformanceFilters): Promise<PerformanceResult> => {
+async function getDriverPerformanceFromDatabase(filters: PerformanceFilters): Promise<PerformanceResult> {
   const orderBy = orderClause(filters.sort, filters.dir);
   const offset = (filters.page - 1) * filters.pageSize;
   const { start, end } = periodRange(filters.date, filters.period);
@@ -166,6 +169,17 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
   const likeQuery = `%${filters.q}%`;
   const kvClause = filters.kv === "all" ? Prisma.empty : Prisma.sql`and upper(coalesce(kv, '')) = ${filters.kv}`;
   const districtClause = filters.district === "all" ? Prisma.empty : Prisma.sql`and delivery_district = ${filters.district}`;
+  const districtCases = OPERATIONAL_DISTRICTS.map((district) => Prisma.sql`
+    when lower(trim(delivery_district)) in (${Prisma.join(operationalDistrictValues(district.name).map((value) => value.toLocaleLowerCase("vi")))}) then ${district.name}
+  `);
+  const currentRiders = Prisma.sql`
+    select rider_code, full_name, upper(trim(kv)) as kv, cot, pickup_district, delivery_ward,
+      case ${Prisma.join(districtCases, " ")}
+        when lower(trim(delivery_district)) in ('bk', 'backup') then ${BACKUP_DISTRICT}
+      end as delivery_district
+    from public.riders
+    where status = 'active'
+  `;
   const wardClause = filters.ward === "all" ? Prisma.empty : Prisma.sql`and delivery_ward = ${filters.ward}`;
   const cotClause = filters.cot === "all" ? Prisma.empty : Prisma.sql`and cot = ${filters.cot}`;
   const searchClause = filters.q
@@ -207,7 +221,7 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
       total_active_riders: bigint | null;
     }>
   >`
-    with rider_scope as (
+    with current_riders as (${currentRiders}), rider_scope as (
       select
         rider_code,
         full_name,
@@ -216,8 +230,9 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
         pickup_district,
         delivery_district,
         delivery_ward
-      from public.riders
+      from current_riders
       where upper(coalesce(kv, '')) in ('KV5', 'KV6')
+        and delivery_district is not null
         ${kvClause}
         ${districtClause}
         ${wardClause}
@@ -277,13 +292,14 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
   `;
 
   const options = await prisma.$queryRaw<Array<{ delivery_district: string | null; cot: string | null }>>`
-    with rider_scope as (
+    with current_riders as (${currentRiders}), rider_scope as (
       select
         rider_code,
         cot,
         delivery_district
-      from public.riders
+      from current_riders
       where upper(coalesce(kv, '')) in ('KV5', 'KV6')
+        and delivery_district is not null
         ${kvClause}
     )
     select distinct
@@ -296,13 +312,14 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
   `;
 
   const wardOptions = await prisma.$queryRaw<Array<{ delivery_ward: string | null }>>`
-    with rider_scope as (
+    with current_riders as (${currentRiders}), rider_scope as (
       select
         rider_code,
         delivery_district,
         delivery_ward
-      from public.riders
+      from current_riders
       where upper(coalesce(kv, '')) in ('KV5', 'KV6')
+        and delivery_district is not null
         ${kvClause}
         ${districtClause}
     )
@@ -317,13 +334,14 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
   const wardOnHoldRows = await prisma.$queryRaw<
     Array<{ delivery_ward: string | null; delivery_district: string | null; delivery_assigned: bigint; delivery_delivered: bigint }>
   >`
-    with rider_scope as (
+    with current_riders as (${currentRiders}), rider_scope as (
       select
         rider_code,
         delivery_district,
         delivery_ward
-      from public.riders
+      from current_riders
       where upper(coalesce(kv, '')) in ('KV5', 'KV6')
+        and delivery_district is not null
         ${kvClause}
         ${districtClause}
     )
@@ -394,7 +412,52 @@ export const getDriverPerformance = cache(async (filters: PerformanceFilters): P
       ),
     },
   };
+}
+
+export const getDriverPerformance = cache(async (filters: PerformanceFilters): Promise<PerformanceResult> => {
+  // A service-key deployment can use the Data API without a Postgres pool URL.
+  const databaseUrl = process.env.DATABASE_URL;
+  const hasDatabaseUrl = databaseUrl && !/^postgres(?:ql)?:\/\/[^@]*@host(?=[:/])/.test(databaseUrl);
+  if (hasDatabaseUrl) {
+    try {
+      return await getDriverPerformanceFromDatabase(filters);
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientInitializationError)
+        && !(error instanceof Prisma.PrismaClientKnownRequestError && ["P1001", "P1002", "P1017"].includes(error.code))) throw error;
+    }
+  }
+  return getDriverPerformanceFromSupabase(filters);
 });
+
+async function getDriverPerformanceFromSupabase(filters: PerformanceFilters): Promise<PerformanceResult> {
+  const admin = createAdminClient();
+  const profiles: PerformanceProfile[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await admin.from("riders")
+      .select("rider_code,full_name,kv,cot,pickup_district,delivery_district,delivery_ward,status")
+      .eq("status", "active").order("rider_code").range(from, from + 999);
+    if (error) throw new Error(`Không thể tải rider: ${error.message}`);
+    profiles.push(...(data ?? []) as PerformanceProfile[]);
+    if ((data ?? []).length < 1000) break;
+  }
+  const codes = profiles.filter((profile) => /^(KV5|KV6)$/.test(profile.kv?.trim().toUpperCase() ?? "")
+    && riderDeliveryDistrict(profile.delivery_district)
+    && (filters.kv === "all" || profile.kv?.trim().toUpperCase() === filters.kv)).map((profile) => profile.rider_code);
+  const { start, end } = periodRange(filters.date, filters.period);
+  const records: PerformanceRecord[] = [];
+  for (let index = 0; index < codes.length; index += 100) {
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await admin.from("driver_performance_daily")
+        .select("report_date,driver_id,driver_name,contract_type_name,delivery_assigned,delivery_delivered,pickup_assigned,pickup_picked")
+        .in("driver_id", codes.slice(index, index + 100)).gte("report_date", start).lte("report_date", end)
+        .order("performance_id").range(from, from + 999);
+      if (error) throw new Error(`Không thể tải Performance: ${error.message}`);
+      records.push(...(data ?? []) as PerformanceRecord[]);
+      if ((data ?? []).length < 1000) break;
+    }
+  }
+  return summarizePerformance(filters, profiles, records);
+}
 
 function decimalToNumber(value: Prisma.Decimal | null | undefined) {
   if (value === null || value === undefined) return null;

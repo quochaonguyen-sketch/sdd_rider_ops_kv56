@@ -1,6 +1,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export const RETURN_ORDER_DISTRICTS = ["Quận 12", "Quận Gò Vấp", "Quận Bình Thạnh", "Quận 3"] as const;
+import { OPERATIONAL_DISTRICT_NAMES, operationalDistrict, operationalDistrictValues } from "@/lib/locations/operational-districts";
+
+export const RETURN_ORDER_DISTRICTS = OPERATIONAL_DISTRICT_NAMES;
 
 export type ReturnOrderRow = {
   shipment_id: string;
@@ -100,7 +102,7 @@ export function parseReturnOrderFilters(
     params instanceof URLSearchParams ? params.get(key) ?? "" : first(params[key]);
   const page = Math.max(1, Number.parseInt(get("page"), 10) || 1);
   const pageSize = Math.min(100, Math.max(10, Number.parseInt(get("pageSize"), 10) || 50));
-  const district = get("district");
+  const district = operationalDistrict(get("district"))?.name ?? "";
   const rawStatus = get("status");
   return {
     q: get("q").trim().slice(0, 100),
@@ -151,24 +153,28 @@ async function loadReturnDashboardContext(
       .select("*", { count: "exact", head: true })
       .eq("snapshot_id", snapshotId)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("seller_district", operationalDistrictValues())
       .eq("order_status", 67),
     supabase
       .from("return_order_snapshots")
       .select("*", { count: "exact", head: true })
       .eq("snapshot_id", snapshotId)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("seller_district", operationalDistrictValues())
       .eq("order_status", 10),
     supabase
       .from("return_order_snapshots")
       .select("*", { count: "exact", head: true })
       .eq("snapshot_id", snapshotId)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("seller_district", operationalDistrictValues())
       .eq("order_status", 72),
     supabase
       .from("return_order_snapshots")
       .select("*", { count: "exact", head: true })
       .eq("snapshot_id", snapshotId)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("seller_district", operationalDistrictValues())
       .in("order_status", [10, 67, 72]),
     supabase
       .from("return_order_snapshots")
@@ -177,6 +183,7 @@ async function loadReturnDashboardContext(
       )
       .eq("snapshot_id", snapshotId)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("seller_district", operationalDistrictValues())
       .eq("order_status", 72)
       .neq("return_driver_id", ""),
     supabase
@@ -186,14 +193,15 @@ async function loadReturnDashboardContext(
       )
       .eq("snapshot_id", snapshotId)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("seller_district", operationalDistrictValues())
       .in("order_status", [10, 67]),
     supabase
       .from("return_order_snapshots")
       .select("seller_district,seller_new_ward,seller_ward")
       .eq("snapshot_id", snapshotId)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
-      .in("order_status", [10, 67, 72])
-      .in("seller_district", [...RETURN_ORDER_DISTRICTS]),
+      .in("seller_district", operationalDistrictValues())
+      .in("order_status", [10, 67, 72]),
     supabase
       .from("riders")
       .select("rider_code,full_name,kv,cot"),
@@ -203,8 +211,9 @@ async function loadReturnDashboardContext(
         .select("*", { count: "exact", head: true })
         .eq("snapshot_id", snapshotId)
         .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+        .in("seller_district", operationalDistrictValues())
         .in("order_status", [10, 67, 72])
-        .eq("seller_district", district),
+        .in("seller_district", operationalDistrictValues(district)),
     ),
   ]);
   if (fm.error) throw fm.error;
@@ -283,11 +292,12 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
     )
     .eq("snapshot_id", latest.snapshot_id)
     .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+    .in("seller_district", operationalDistrictValues())
     .in("order_status", [10, 67, 72]);
 
   if (filters.status === "backlog") query = query.in("order_status", [10, 67]);
   if (filters.status === "returning") query = query.eq("order_status", 72);
-  if (filters.district) query = query.eq("seller_district", filters.district);
+  if (filters.district) query = query.in("seller_district", operationalDistrictValues(filters.district));
   const search = safeSearch(filters.q);
   if (search) {
     query = query.or(
@@ -363,6 +373,8 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
     const returnDriverProfile = riderProfileFor(returnDriverId, returnDriverName);
     return {
       ...row,
+      seller_district: operationalDistrict(row.seller_district)?.name ?? row.seller_district,
+      seller_area: operationalDistrict(row.seller_district) ? "Khu vực 5" : row.seller_area,
       return_riders_cot1: assignmentWithKv(row.return_riders_cot1),
       return_riders_cot2: assignmentWithKv(row.return_riders_cot2),
       return_driver_id: returnDriverId,
@@ -393,6 +405,7 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
     const current = riderTotals.get(id);
     const cots = current?.cots ?? new Set<string>();
     const profile = riderProfileFor(id, assignment?.rider_name || row.return_driver_name);
+    if (!profile) continue;
     const assignedCot = String(assignment?.cot || "").trim().toLocaleUpperCase("vi");
     if (["COT1", "1"].includes(assignedCot)) {
       cots.add("COT1");
@@ -426,7 +439,7 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
           shipmentId: row.shipment_id,
           shopeeOrderSn: String(row.shopee_order_sn || "").trim(),
           zone: String(row.return_zone || "").trim(),
-          district: String(row.seller_district || "").trim(),
+          district: operationalDistrict(row.seller_district)?.name ?? String(row.seller_district || "").trim(),
           ward: String(row.seller_new_ward || row.seller_ward || "").trim(),
           deliveringAt: row.delivering_time,
         },
@@ -469,7 +482,7 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
         shipmentId: row.shipment_id,
         shopeeOrderSn: String(row.shopee_order_sn || "").trim(),
         zone: String(row.return_zone || "").trim(),
-        district: String(row.seller_district || "").trim(),
+        district: operationalDistrict(row.seller_district)?.name ?? String(row.seller_district || "").trim(),
         ward: String(row.seller_new_ward || row.seller_ward || "").trim(),
         cot,
         assignment: manuallyAssignedId ? "manual" : "candidate",
@@ -480,7 +493,7 @@ export async function getReturnOrders(filters: ReturnOrderFilters): Promise<Retu
   const wardCounts = new Map<string, Map<string, number>>();
   for (const district of RETURN_ORDER_DISTRICTS) wardCounts.set(district, new Map());
   for (const row of wardRows.data ?? []) {
-    const district = row.seller_district || "Chưa xác định";
+    const district = operationalDistrict(row.seller_district)?.name || "Chưa xác định";
     const districtWards = wardCounts.get(district);
     if (!districtWards) continue;
     const ward = row.seller_new_ward || row.seller_ward || "Chưa xác định";
@@ -611,6 +624,7 @@ export async function getReturnPivotData(): Promise<ReturnPivotData> {
       .select("shipment_id,return_driver_id,return_driver_name,return_riders_cot1,return_riders_cot2,create_time,seller_district,seller_ward,seller_new_ward")
       .eq("snapshot_id", latest.snapshot_id)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("seller_district", operationalDistrictValues())
       .in("order_status", [10, 67, 72])
       .range(from, from + pageSize - 1);
     if (result.error) throw result.error;
@@ -655,6 +669,7 @@ export async function getReturnPivotData(): Promise<ReturnPivotData> {
   let unassigned = 0;
 
   const ensureRider = (riderCode: string, riderName: string, profile: { full_name?: string | null; kv?: string | null; cot?: string | null; delivery_district?: string | null; delivery_ward?: string | null; point_name?: string | null } | undefined) => {
+    if (!profile) return null;
     const key = normalizeIdentity(riderCode) || normalizeIdentity(riderName);
     if (!key) return null;
     const existing = riderMap.get(key);
@@ -701,8 +716,8 @@ export async function getReturnPivotData(): Promise<ReturnPivotData> {
     }
     if (row.create_time && (!entry.oldestAt || row.create_time < entry.oldestAt)) entry.oldestAt = row.create_time;
     addToPivotCell(entry.orders, assignedCot || normalizeCotLabel(entry.cot) || "", row.shipment_id);
-    const orderDistrict = String((row as any).seller_district || "").trim();
-    const orderWard = String((row as any).seller_new_ward || (row as any).seller_ward || "").trim();
+    const orderDistrict = operationalDistrict(row.seller_district)?.name ?? String(row.seller_district || "").trim();
+    const orderWard = String(row.seller_new_ward || row.seller_ward || "").trim();
     if (orderDistrict) entry.orderDistricts.add(orderDistrict);
     if (orderWard) entry.orderWards.add(orderWard);
   }
@@ -833,6 +848,7 @@ export async function getReturnAssignData(): Promise<ReturnAssignData> {
       .select("shipment_id,order_status,seller_district,seller_ward,seller_new_ward,seller_area,return_zone,create_time")
       .eq("snapshot_id", latest.snapshot_id)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("seller_district", operationalDistrictValues())
       .in("order_status", [10, 67])
       .order("create_time", { ascending: true, nullsFirst: false })
       .range(from, from + pageSize - 1);
@@ -866,7 +882,7 @@ export async function getReturnAssignData(): Promise<ReturnAssignData> {
     return {
       shipmentId: row.shipment_id,
       status: row.order_status,
-      district: String(row.seller_district || "").trim(),
+      district: operationalDistrict(row.seller_district)?.name ?? String(row.seller_district || "").trim(),
       ward: String(row.seller_new_ward || row.seller_ward || "").trim(),
       area: String(row.seller_area || "").trim(),
       zone: String(row.return_zone || "").trim(),
@@ -937,6 +953,7 @@ export async function getReturnDashboardData(): Promise<ReturnDashboardData> {
       .select("shipment_id,order_status,seller_district,seller_ward,seller_new_ward,return_zone,create_time")
       .eq("snapshot_id", latest.snapshot_id)
       .in("seller_area", ["Khu vực 5", "Khu vực 6"])
+      .in("seller_district", operationalDistrictValues())
       .in("order_status", [10, 67, 72])
       .range(from, from + pageSize - 1);
     if (result.error) throw result.error;
@@ -971,7 +988,7 @@ export async function getReturnDashboardData(): Promise<ReturnDashboardData> {
     if (order.order_status === 72) returning += 1;
     else backlog += 1;
 
-    const d = String(order.seller_district || "Chưa xác định").trim() || "Chưa xác định";
+    const d = operationalDistrict(order.seller_district)?.name ?? (String(order.seller_district || "Chưa xác định").trim() || "Chưa xác định");
     districtMap.set(d, (districtMap.get(d) ?? 0) + 1);
 
     const w = String(order.seller_new_ward || order.seller_ward || "Chưa xác định").trim() || "Chưa xác định";

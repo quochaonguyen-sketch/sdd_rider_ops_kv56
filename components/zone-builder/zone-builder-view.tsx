@@ -19,12 +19,10 @@ const ZoneMap = dynamic(
 
 const colors = ["#2563eb", "#f97316", "#16a34a", "#dc2626", "#7c3aed", "#0891b2", "#ca8a04", "#be123c"];
 const presetDistricts = [
-  { id: "hoc-mon", name: "Huyen Hoc Mon", color: "#dc2626" },
-  { id: "quan-12", name: "Quan 12", color: "#7c3aed" },
-  { id: "go-vap", name: "Quan Go Vap", color: "#2563eb" },
-  { id: "binh-thanh", name: "Quan Binh Thanh", color: "#0891b2" },
-  { id: "quan-3", name: "Quan 3", color: "#f59e0b" },
-  { id: "quan-2", name: "Quan 2", color: "#10b981" },
+  { id: "thu-duc", name: "Thủ Đức", color: "#10b981" },
+  { id: "go-vap", name: "Gò Vấp", color: "#2563eb" },
+  { id: "quan-12", name: "Quận 12", color: "#7c3aed" },
+  { id: "hoc-mon", name: "Hóc Môn", color: "#dc2626" },
 ];
 const presetDistrictNameById = Object.fromEntries(presetDistricts.map((district) => [district.id, district.name]));
 
@@ -165,14 +163,16 @@ export function ZoneBuilderView() {
           presetDistricts.map((district) => ({
             ...district,
             features: collection.features
-              .filter((feature) => feature.properties?.districtId === district.id)
+              .filter((feature) => district.id === "thu-duc"
+                ? ["thu-duc", "quan-2", "quan-9"].includes(String(feature.properties?.districtId))
+                : feature.properties?.districtId === district.id)
               .map((feature) => {
                 const wardKey = String(feature.properties?.wardKey ?? "");
                 return {
                   ...feature,
                   properties: {
                     ...feature.properties,
-                    wardName: wardNameByDistrict[district.id]?.[wardKey] ?? wardKey,
+                    wardName: wardNameByDistrict[String(feature.properties?.districtId)]?.[wardKey] ?? wardKey,
                   },
                 };
               }),
@@ -325,7 +325,7 @@ export function ZoneBuilderView() {
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-orange-600">Zone drawing</p>
           <h1 className="mt-1 text-2xl font-black text-slate-950">Zone Builder KV 5,6</h1>
-          <p className="mt-1 text-sm text-slate-500">Co san Q12, Go Vap, Hoc Mon, Q2, Q3, Binh Thanh; ve them va xuat GeoJSON.</p>
+          <p className="mt-1 text-sm text-slate-500">Thủ Đức, Gò Vấp, Quận 12, Hóc Môn; vẽ thêm và xuất GeoJSON.</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>

@@ -1,3 +1,4 @@
+import { riderDeliveryDistrict } from "@/lib/locations/operational-districts";
 import { NextResponse } from "next/server";
 import { canManageRiders } from "@/lib/auth/permissions";
 import { readRidersFromThiCongPlan, thiCongPlanConfig } from "@/lib/google/thi-cong-plan";
@@ -7,7 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { invalidateRidersCache } from "@/lib/cache/operations-cache";
 
 function normalizedDistrict(value: string | null) {
-  return canonicalDistrictName(value) === "Quận Bình Thạnh" ? "Quận Bình Thạnh" : value;
+  return canonicalDistrictName(value) || value;
 }
 
 async function managerSession() {
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
         ...rider,
         home_district: normalizedDistrict(rider.home_district),
         pickup_district: normalizedDistrict(rider.pickup_district),
-        delivery_district: normalizedDistrict(rider.delivery_district),
+        delivery_district: riderDeliveryDistrict(rider.delivery_district),
         name: rider.full_name,
       }));
       const { error } = await session.admin.from("riders").upsert(payload, { onConflict: "rider_code" });

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma/client";
+import { isBackupDistrict, operationalDistrict } from "@/lib/locations/operational-districts";
 
 type PerformanceRow = {
   report_date: Date;
@@ -97,7 +98,9 @@ export async function GET(request: Request) {
   for (const row of rows) {
     const reportDate = row.report_date.toISOString().slice(0, 10);
     const riderCode = row.driver_id.trim().toUpperCase();
-    const district = row.district?.trim() || "Chưa xác định";
+    const mappedDistrict = operationalDistrict(row.district);
+    if (!mappedDistrict && !isBackupDistrict(row.district)) continue;
+    const district = mappedDistrict?.name ?? "BK";
     const area = row.kv === "KV6" ? "KV6" : "KV5";
     const assigned = Number(row.delivery_assigned);
     const delivered = Number(row.delivery_delivered);

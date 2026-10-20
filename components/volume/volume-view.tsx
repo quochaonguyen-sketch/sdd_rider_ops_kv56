@@ -10,6 +10,7 @@ import {
   type DeliveryViewMode,
 } from "@/components/volume/delivery-volume-dashboard";
 import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
+import { operationalDistrict } from "@/lib/locations/operational-districts";
 
 type VolumeKind = "delivery" | "pickup";
 
@@ -100,7 +101,11 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
       offset += PAGE_SIZE;
     }
 
-    setRows(loaded);
+    const currentDistrictRows = (data: VolumeRow[]) => data.flatMap((row) => {
+      const district = operationalDistrict(row.district);
+      return district ? [{ ...row, district: district.name, area: district.area }] : [];
+    });
+    setRows(kind === "delivery" ? currentDistrictRows(loaded) : loaded);
 
     if (kind === "delivery") {
       const comparisonLoaded: VolumeRow[] = [];
@@ -126,7 +131,7 @@ export function VolumeView({ kind }: { kind: VolumeKind }) {
         if (batch.length < PAGE_SIZE) break;
         comparisonOffset += PAGE_SIZE;
       }
-      setComparisonRows(comparisonLoaded);
+      setComparisonRows(currentDistrictRows(comparisonLoaded));
     } else {
       setComparisonRows([]);
     }

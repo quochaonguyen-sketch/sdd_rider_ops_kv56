@@ -1,3 +1,5 @@
+import { OPERATIONAL_DISTRICTS } from "./operational-districts.ts";
+
 export type WardDefinition = {
   name: string;
   aliases?: string[];
@@ -11,7 +13,7 @@ export type DistrictDefinition = {
   wards: WardDefinition[];
 };
 
-export const hcmDistricts: DistrictDefinition[] = [
+const legacyDistricts: DistrictDefinition[] = [
   {
     id: "go-vap",
     name: "Quận Gò Vấp",
@@ -167,6 +169,19 @@ export const hcmDistricts: DistrictDefinition[] = [
     ],
   },
 ];
+
+export const hcmDistricts: DistrictDefinition[] = OPERATIONAL_DISTRICTS.map((district) => ({
+  id: district.id,
+  name: district.name,
+  shortName: district.name,
+  aliases: [...district.aliases],
+  wards: district.id === "thu-duc"
+    ? [
+        ...["Bình Chiểu", "Tam Bình", "Tam Phú", "Linh Đông", "Linh Tây", "Linh Chiểu", "Linh Trung", "Linh Xuân", "Hiệp Bình Chánh", "Hiệp Bình Phước", "Trường Thọ", "Bình Thọ"].map((name) => ({ name })),
+        ...legacyDistricts.filter((item) => item.id === "quan-2" || item.id === "quan-9").flatMap((item) => item.wards),
+      ]
+    : legacyDistricts.find((item) => item.id === district.id)?.wards ?? [],
+}));
 
 export function districtDefinitionFor(
   value: string | null | undefined,
