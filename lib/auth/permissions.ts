@@ -7,7 +7,6 @@ export type PermissionKey =
   | "manage_return"
   | "manage_pickup"
   | "manage_zones"
-  | "manage_morning"
   | "manage_volume"
   | "manage_imports"
   | "manage_performance";
@@ -21,7 +20,6 @@ export const PERMISSION_OPTIONS: Array<{ key: PermissionKey; label: string; hint
   { key: "manage_return", label: "Return", hint: "Tra cứu và điều phối hàng trả" },
   { key: "manage_pickup", label: "Pickup", hint: "Pickup realtime và phân công" },
   { key: "manage_zones", label: "Zones / Zone Builder", hint: "Xem và sửa vùng giao" },
-  { key: "manage_morning", label: "Morning Dispatch", hint: "Điều phối sáng" },
   { key: "manage_volume", label: "Volume", hint: "Sản lượng delivery / pickup" },
   { key: "manage_imports", label: "Imports", hint: "Nhập dữ liệu" },
   { key: "manage_performance", label: "Performance", hint: "Xem và xử lý hiệu suất" },

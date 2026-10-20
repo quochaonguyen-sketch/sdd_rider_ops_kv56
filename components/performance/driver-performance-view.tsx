@@ -145,16 +145,16 @@ function PageHeader() {
           <BarChart3 size={22} />
         </span>
         <div className="perf-header-copy">
-          <p className="perf-kicker">Rider Operations · KV5/KV6</p>
-          <h1 className="perf-title">Performance Deli / Pick KV5/KV6</h1>
+          <p className="perf-kicker">Rider Operations · KV5</p>
+          <h1 className="perf-title">Performance Deli / Pick KV5</h1>
           <p className="perf-desc">
-            Xem sản lượng rider khu 5 và 6 theo ngày, tuần hoặc tháng — có phân trang server-side.
+            Xem sản lượng rider Khu vực 5 theo ngày, tuần hoặc tháng.
           </p>
         </div>
       </div>
       <div className="perf-scope">
         <span>Ngữ cảnh</span>
-        <strong>Chỉ tính rider KV5/KV6 · Tổng hợp theo chu kỳ đã chọn</strong>
+        <strong>Khu vực 5 · Thủ Đức (cũ), Gò Vấp, Quận 12, Hóc Môn</strong>
       </div>
     </header>
   );
@@ -256,19 +256,15 @@ function PerformanceFilters({
 
         <label className="block" htmlFor="performance-kv">
           <span className="perf-field-label">Khu</span>
-          <Select id="performance-kv" value={filters.kv} onChange={(event) => changeFilter("kv", event.target.value)} aria-label="Lọc theo khu">
-            <option value="all">KV5 + KV6</option>
-            <option value="KV5">KV5</option>
-            <option value="KV6">KV6</option>
-          </Select>
+          <Input id="performance-kv" value="Khu vực 5" readOnly aria-label="Khu vực 5" className="bg-slate-50 text-slate-600" />
         </label>
 
         <label className="block" htmlFor="performance-district">
           <span className="perf-field-label">Quận giao</span>
           <Select id="performance-district" value={filters.district} onChange={(event) => changeFilter("district", event.target.value)} aria-label="Lọc theo quận giao">
-            <option value="all">Tất cả quận</option>
+            <option value="all">Tất cả quận KV5</option>
             {options.districts.map((district) => (
-              <option key={district} value={district}>{district}</option>
+              <option key={district} value={district}>{district === "Thủ Đức" ? "Thủ Đức (cũ)" : district}</option>
             ))}
           </Select>
         </label>
@@ -276,7 +272,7 @@ function PerformanceFilters({
         <label className="block" htmlFor="performance-ward">
           <span className="perf-field-label">Phường</span>
           <Select id="performance-ward" value={filters.ward} onChange={(event) => changeFilter("ward", event.target.value)} aria-label="Lọc theo phường giao">
-            <option value="all">Tất cả phường</option>
+            <option value="all">Tất cả phường KV5</option>
             {options.wards.map((ward) => (
               <option key={ward} value={ward}>{ward}</option>
             ))}
@@ -354,7 +350,7 @@ function PerformanceKpiCards({
       </div>
       <div className="perf-kpi-context" aria-label="Thông tin dữ liệu đang xem">
         <ContextStat label="Dòng dữ liệu" value={formatNumber(summary.groups)} sub={`Trang ${page}/${pageCount} · ${formatNumber(pageSize)} dòng/trang`} />
-        <ContextStat label="Rider có dữ liệu" value={formatNumber(summary.active_riders)} sub="Chỉ tính rider KV5/KV6" />
+        <ContextStat label="Rider có dữ liệu" value={formatNumber(summary.active_riders)} sub="Chỉ tính rider KV5" />
       </div>
     </section>
   );
@@ -474,7 +470,7 @@ function RiderPerformanceTable({
   const filterText = useMemo(() => {
     const parts = [
       periodScopeLabel(filters),
-      filters.kv === "all" ? "KV5/KV6" : filters.kv,
+      "KV5",
       filters.district === "all" ? "Tất cả quận giao" : filters.district,
       filters.ward === "all" ? "Tất cả phường" : filters.ward,
       filters.cot === "all" ? "Tất cả COT" : filters.cot,
@@ -508,7 +504,7 @@ function RiderPerformanceTable({
         ) : null}
 
         <table className="w-full min-w-[1120px] border-separate border-spacing-0 text-left text-sm">
-          <caption className="sr-only">Bảng performance Deli Pick rider KV5 KV6</caption>
+          <caption className="sr-only">Bảng performance Deli Pick rider KV5</caption>
           <thead className="perf-table-thead">
             <tr>
               <SortHeader label="Rider" sortKey="rider" current={filters} onSort={onSort} className="w-[24%]" />
@@ -724,7 +720,7 @@ function ProgressBar({ value }: { value: number | null }) {
 
 function EmptyState({ filters }: { filters: PerformanceFilters }) {
   const scope = [
-    filters.kv === "all" ? "KV5/KV6" : filters.kv,
+    "KV5",
     filters.district === "all" ? "tất cả quận giao" : filters.district,
     filters.ward === "all" ? "tất cả phường" : filters.ward,
     filters.cot === "all" ? "tất cả COT" : filters.cot,

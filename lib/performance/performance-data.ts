@@ -16,7 +16,7 @@ const rate = (done: number, assigned: number) => assigned > 0 ? done / assigned 
 
 export function summarizePerformance(filters: PerformanceFilters, profiles: PerformanceProfile[], records: PerformanceRecord[]): PerformanceResult {
   const byCode = new Map(profiles.filter((profile) => profile.status === "active"
-    && /^(KV5|KV6)$/.test(profile.kv?.trim().toUpperCase() ?? "")
+    && profile.kv?.trim().toUpperCase() === "KV5"
     && (operationalDistrict(profile.delivery_district) || isBackupDistrict(profile.delivery_district)))
     .map((profile) => [codeKey(profile.rider_code), {
       ...profile, kv: profile.kv!.trim().toUpperCase(), delivery_district: riderDeliveryDistrict(profile.delivery_district),
@@ -26,6 +26,8 @@ export function summarizePerformance(filters: PerformanceFilters, profiles: Perf
     return profile && (filters.kv === "all" || filters.kv === profile.kv) ? [{ record, profile }] : [];
   });
   const districtRows = joined.filter(({ profile }) => filters.district === "all" || profile.delivery_district === filters.district);
+  const currentProfiles = [...byCode.values()];
+  const districtProfiles = currentProfiles.filter((profile) => filters.district === "all" || profile.delivery_district === filters.district);
   const groups = new Map<string, PerformanceRow>();
   const query = filters.q.toLocaleLowerCase("vi");
   for (const { record, profile } of districtRows) {
@@ -89,9 +91,9 @@ export function summarizePerformance(filters: PerformanceFilters, profiles: Perf
       on_hold: Math.max(0, ward.assigned - ward.delivered), rate: rate(Math.max(0, ward.assigned - ward.delivered), ward.assigned),
     })).sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1) || b.on_hold - a.on_hold),
     options: {
-      districts: options(joined.map(({ profile }) => profile.delivery_district)),
-      cots: options(joined.map(({ profile }) => profile.cot)),
-      wards: options(districtRows.map(({ profile }) => profile.delivery_ward)),
+      districts: options(currentProfiles.map((profile) => operationalDistrict(profile.delivery_district)?.name ?? null)),
+      cots: options(currentProfiles.map((profile) => profile.cot)),
+      wards: options(districtProfiles.map((profile) => profile.delivery_ward)),
     },
   };
 }

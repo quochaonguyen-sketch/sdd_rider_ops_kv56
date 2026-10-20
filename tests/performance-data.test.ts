@@ -60,3 +60,21 @@ test("rate sorting keeps riders with no assigned orders last in both directions"
     assert.equal(result.rows[0].driver_id, dir === "asc" ? "LOW" : "HIGH");
   }
 });
+
+test("KV6 never contributes rows, totals or location choices even with the legacy all-area filter", () => {
+  const profiles = [profile("FIVE", "Thủ Đức", { delivery_ward: "Linh Xuân" }), profile("SIX", "Gò Vấp", { kv: "KV6", delivery_ward: "Phường chỉ KV6" })];
+  const result = summarizePerformance({ ...filters, kv: "all" }, profiles, [record("FIVE", 10, 5), record("SIX", 100, 99)]);
+  assert.equal(result.summary.active_riders, 1);
+  assert.equal(result.summary.delivery_assigned, 10);
+  assert.deepEqual(result.options.districts, ["Thủ Đức"]);
+  assert.deepEqual(result.options.wards, ["Linh Xuân"]);
+  assert.ok(result.rows.every((row) => row.kv === "KV5"));
+});
+
+test("district and ward choices use current KV5 profiles even on an empty report date", () => {
+  const profiles = [profile("TD", "Thủ Đức", { delivery_ward: "Linh Xuân" }), profile("GV", "Gò Vấp", { delivery_ward: "1" }), profile("BK", "BK", { delivery_ward: null })];
+  const result = summarizePerformance({ ...filters, kv: "KV5", district: "Thủ Đức" }, profiles, []);
+  assert.equal(result.summary.groups, 0);
+  assert.deepEqual(new Set(result.options.districts), new Set(["Thủ Đức", "Gò Vấp"]));
+  assert.deepEqual(result.options.wards, ["Linh Xuân"]);
+});

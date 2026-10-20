@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, ClipboardCheck, Columns2, ListChecks, LogOut, MapPinned, Menu, Moon, NotebookPen, PackageOpen, PackagePlus, PackageSearch, PanelLeftClose, PanelLeftOpen, PencilRuler, Radio, Repeat2, Sun, Truck, Upload, UsersRound, Warehouse, X } from "lucide-react";
+import { Activity, BarChart3, Bike, CalendarDays, CalendarOff, ChevronDown, Columns2, ListChecks, LogOut, MapPinned, Menu, Moon, NotebookPen, PackageOpen, PackagePlus, PackageSearch, PanelLeftClose, PanelLeftOpen, PencilRuler, Radio, Repeat2, Sun, Truck, Upload, UsersRound, Warehouse, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/utils/cn";
 import { AppBrand, AppCopyright } from "@/components/layout/app-brand";
@@ -22,7 +22,6 @@ const navItems = [
   { href: "/performance", label: "Performance", icon: BarChart3 },
   { href: "/attendance", label: "Attendance", icon: CalendarDays },
   { href: "/off-schedule", label: "Off Schedule", icon: CalendarOff },
-  { href: "/morning-delivery", label: "Morning Dispatch", icon: ClipboardCheck },
   { href: "/return-orders", label: "Return Lookup", icon: PackageSearch },
   { href: "/zones", label: "Zones", icon: MapPinned },
   { href: "/zone-builder", label: "Zone Builder", icon: PencilRuler },
@@ -55,7 +54,7 @@ const toolItems = [
   { href: "/zone-builder", label: "Zone Builder", icon: PencilRuler },
 ];
 const memberHiddenItems = new Set(["/zone-builder", "/pickup-management"]);
-const morePaths = ["/notes", "/performance", "/attendance", "/off-schedule", "/morning-delivery", "/return-orders", "/zones", "/zone-builder", "/pickup-management", "/pickup-realtime", "/lmhub-inventory", "/inventory-delivery", "/volume", "/imports", "/settings"];
+const morePaths = ["/notes", "/performance", "/attendance", "/off-schedule", "/return-orders", "/zones", "/zone-builder", "/pickup-management", "/pickup-realtime", "/lmhub-inventory", "/inventory-delivery", "/volume", "/imports", "/settings"];
 type ThemeMode = "light" | "dark";
 const subscribeToFrameContext = () => () => {};
 

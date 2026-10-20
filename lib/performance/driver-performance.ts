@@ -122,7 +122,7 @@ export function parsePerformanceFilters(params: SearchParamsLike): PerformanceFi
     date: parsedDate.success ? parsedDate.data : todayString(),
     period: performancePeriodSchema.catch("day").parse(getParam(params, "period")),
     q: (getParam(params, "q") ?? "").trim().slice(0, 80),
-    kv: performanceKvSchema.catch("all").parse(getParam(params, "kv")),
+    kv: "KV5",
     district: riderDeliveryDistrict((getParam(params, "district") ?? "all").trim().slice(0, 80)) || "all",
     ward: (getParam(params, "ward") ?? "all").trim().slice(0, 80) || "all",
     cot: (getParam(params, "cot") ?? "all").trim().slice(0, 40) || "all",
@@ -167,7 +167,6 @@ async function getDriverPerformanceFromDatabase(filters: PerformanceFilters): Pr
     ? Prisma.sql`p.report_date, p.driver_id`
     : Prisma.sql`p.driver_id`;
   const likeQuery = `%${filters.q}%`;
-  const kvClause = filters.kv === "all" ? Prisma.empty : Prisma.sql`and upper(coalesce(kv, '')) = ${filters.kv}`;
   const districtClause = filters.district === "all" ? Prisma.empty : Prisma.sql`and delivery_district = ${filters.district}`;
   const districtCases = OPERATIONAL_DISTRICTS.map((district) => Prisma.sql`
     when lower(trim(delivery_district)) in (${Prisma.join(operationalDistrictValues(district.name).map((value) => value.toLocaleLowerCase("vi")))}) then ${district.name}
@@ -231,9 +230,8 @@ async function getDriverPerformanceFromDatabase(filters: PerformanceFilters): Pr
         delivery_district,
         delivery_ward
       from current_riders
-      where upper(coalesce(kv, '')) in ('KV5', 'KV6')
+      where upper(trim(coalesce(kv, ''))) = 'KV5'
         and delivery_district is not null
-        ${kvClause}
         ${districtClause}
         ${wardClause}
         ${cotClause}
@@ -298,16 +296,13 @@ async function getDriverPerformanceFromDatabase(filters: PerformanceFilters): Pr
         cot,
         delivery_district
       from current_riders
-      where upper(coalesce(kv, '')) in ('KV5', 'KV6')
+      where upper(trim(coalesce(kv, ''))) = 'KV5'
         and delivery_district is not null
-        ${kvClause}
     )
     select distinct
       nullif(trim(r.delivery_district), '') as delivery_district,
       nullif(trim(r.cot), '') as cot
-    from public.driver_performance_daily p
-    join rider_scope r on r.rider_code = p.driver_id
-    where p.report_date between ${start}::date and ${end}::date
+    from rider_scope r
     order by delivery_district asc nulls last, cot asc nulls last
   `;
 
@@ -318,16 +313,13 @@ async function getDriverPerformanceFromDatabase(filters: PerformanceFilters): Pr
         delivery_district,
         delivery_ward
       from current_riders
-      where upper(coalesce(kv, '')) in ('KV5', 'KV6')
+      where upper(trim(coalesce(kv, ''))) = 'KV5'
         and delivery_district is not null
-        ${kvClause}
         ${districtClause}
     )
     select distinct
       nullif(trim(r.delivery_ward), '') as delivery_ward
-    from public.driver_performance_daily p
-    join rider_scope r on r.rider_code = p.driver_id
-    where p.report_date between ${start}::date and ${end}::date
+    from rider_scope r
     order by delivery_ward asc nulls last
   `;
 
@@ -340,9 +332,8 @@ async function getDriverPerformanceFromDatabase(filters: PerformanceFilters): Pr
         delivery_district,
         delivery_ward
       from current_riders
-      where upper(coalesce(kv, '')) in ('KV5', 'KV6')
+      where upper(trim(coalesce(kv, ''))) = 'KV5'
         and delivery_district is not null
-        ${kvClause}
         ${districtClause}
     )
     select
@@ -403,7 +394,7 @@ async function getDriverPerformanceFromDatabase(filters: PerformanceFilters): Pr
       .filter((row) => row.delivery_assigned > 0)
       .sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1) || b.on_hold - a.on_hold),
     options: {
-      districts: Array.from(new Set(options.map((option) => option.delivery_district).filter(Boolean) as string[])).sort((a, b) =>
+      districts: Array.from(new Set(options.map((option) => option.delivery_district).filter((district) => district !== BACKUP_DISTRICT && Boolean(district)) as string[])).sort((a, b) =>
         a.localeCompare(b, "vi"),
       ),
       cots: Array.from(new Set(options.map((option) => option.cot).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b, "vi")),
@@ -415,6 +406,7 @@ async function getDriverPerformanceFromDatabase(filters: PerformanceFilters): Pr
 }
 
 export const getDriverPerformance = cache(async (filters: PerformanceFilters): Promise<PerformanceResult> => {
+  filters = { ...filters, kv: "KV5" };
   // A service-key deployment can use the Data API without a Postgres pool URL.
   const databaseUrl = process.env.DATABASE_URL;
   const hasDatabaseUrl = databaseUrl && !/^postgres(?:ql)?:\/\/[^@]*@host(?=[:/])/.test(databaseUrl);
@@ -440,7 +432,7 @@ async function getDriverPerformanceFromSupabase(filters: PerformanceFilters): Pr
     profiles.push(...(data ?? []) as PerformanceProfile[]);
     if ((data ?? []).length < 1000) break;
   }
-  const codes = profiles.filter((profile) => /^(KV5|KV6)$/.test(profile.kv?.trim().toUpperCase() ?? "")
+  const codes = profiles.filter((profile) => profile.kv?.trim().toUpperCase() === "KV5"
     && riderDeliveryDistrict(profile.delivery_district)
     && (filters.kv === "all" || profile.kv?.trim().toUpperCase() === filters.kv)).map((profile) => profile.rider_code);
   const { start, end } = periodRange(filters.date, filters.period);
