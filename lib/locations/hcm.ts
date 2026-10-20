@@ -178,7 +178,6 @@ export const hcmDistricts: DistrictDefinition[] = OPERATIONAL_DISTRICTS.map((dis
   wards: district.id === "thu-duc"
     ? [
         ...["Bình Chiểu", "Tam Bình", "Tam Phú", "Linh Đông", "Linh Tây", "Linh Chiểu", "Linh Trung", "Linh Xuân", "Hiệp Bình Chánh", "Hiệp Bình Phước", "Trường Thọ", "Bình Thọ"].map((name) => ({ name })),
-        ...legacyDistricts.filter((item) => item.id === "quan-2" || item.id === "quan-9").flatMap((item) => item.wards),
       ]
     : legacyDistricts.find((item) => item.id === district.id)?.wards ?? [],
 }));

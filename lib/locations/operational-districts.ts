@@ -1,6 +1,6 @@
 // Delivery coverage and KV assignment from the current rider plan.
 export const OPERATIONAL_DISTRICTS = [
-  { id: "thu-duc", code: "TD", name: "Thủ Đức", area: "KV5", aliases: ["Thủ Đức", "Quận Thủ Đức", "TP Thủ Đức", "TP. Thủ Đức", "Thành phố Thủ Đức", "Thu Duc", "Quận 2", "Quận 9", "Q2", "Q9", "District 2", "District 9"] },
+  { id: "thu-duc", code: "TD", name: "Thủ Đức", area: "KV5", aliases: ["Thủ Đức", "Quận Thủ Đức", "TP Thủ Đức", "TP. Thủ Đức", "Thành phố Thủ Đức", "Thu Duc"] },
   { id: "go-vap", code: "GV", name: "Gò Vấp", area: "KV5", aliases: ["Gò Vấp", "Quận Gò Vấp", "Go Vap", "Q Gò Vấp", "QGV"] },
   { id: "quan-12", code: "Q12", name: "Quận 12", area: "KV5", aliases: ["Quận 12", "Quan 12", "Q12", "Q.12", "Q 12", "District 12", "12"] },
   { id: "hoc-mon", code: "HM", name: "Hóc Môn", area: "KV5", aliases: ["Hóc Môn", "Huyện Hóc Môn", "Hoc Mon", "HocMon", "HM"] },

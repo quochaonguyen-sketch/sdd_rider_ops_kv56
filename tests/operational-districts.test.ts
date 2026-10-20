@@ -9,7 +9,7 @@ test("current delivery coverage contains four districts assigned to KV5", () => 
 });
 
 test("district spellings from rider plans and raw snapshots resolve to the same groups", () => {
-  for (const value of ["TP. Thủ Đức", "THÀNH PHỐ THỦ ĐỨC", "Thu Duc", "Quận 2", "Quận 9"]) {
+  for (const value of ["TP. Thủ Đức", "THÀNH PHỐ THỦ ĐỨC", "Thu Duc"]) {
     assert.equal(operationalDistrict(value)?.name, "Thủ Đức");
   }
   assert.equal(operationalDistrict(" QUẬN GÒ VẤP ")?.name, "Gò Vấp");
@@ -18,7 +18,7 @@ test("district spellings from rider plans and raw snapshots resolve to the same 
 });
 
 test("former districts and unknown locations do not enter delivery totals", () => {
-  for (const value of ["Quận Bình Thạnh", "Bình Thạnh", "Quận 3", "Quận 1", "", null]) {
+  for (const value of ["Quận Bình Thạnh", "Bình Thạnh", "Quận 3", "Quận 1", "Quận 2", "Quận 9", "Q2", "Q9", "District 2", "District 9", "", null]) {
     assert.equal(operationalDistrict(value), null);
   }
 });
@@ -41,6 +41,8 @@ test("raw snapshot query values include aliases and exclude former districts", (
   assert.ok(values.includes("Thành phố Thủ Đức"));
   assert.ok(!values.includes("Quận Bình Thạnh"));
   assert.ok(!values.includes("Quận 3"));
+  assert.ok(!values.includes("Quận 2"));
+  assert.ok(!values.includes("Quận 9"));
   assert.ok(operationalDistrictValues("Gò Vấp").every((value) => operationalDistrict(value)?.name === "Gò Vấp"));
   assert.deepEqual(operationalDistrictValues("Quận 3"), []);
 });
@@ -50,6 +52,8 @@ test("rider location filters and map wards share the same four district groups",
   assert.equal(canonicalDistrictShortName("Quận Gò Vấp"), "Gò Vấp");
   assert.equal(canonicalDistrictShortName("Thành phố Thủ Đức"), "Thủ Đức");
   assert.deepEqual(canonicalWardNames("Thủ Đức", "Tam Bình/Tam Phú"), ["Tam Bình", "Tam Phú"]);
-  assert.deepEqual(canonicalWardNames("Quận 2", "Thảo Điền"), ["Thảo Điền"]);
+  assert.deepEqual(canonicalWardNames("Quận 2", "Thảo Điền"), []);
+  assert.deepEqual(canonicalWardNames("Quận 9", "Long Bình"), []);
+  assert.equal(hcmDistricts.find((district) => district.id === "thu-duc")?.wards.length, 12);
   assert.deepEqual(canonicalWardNames("Gò Vấp", "1,5"), ["Phường 1", "Phường 5"]);
 });

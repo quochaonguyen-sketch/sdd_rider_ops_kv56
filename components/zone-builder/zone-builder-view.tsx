@@ -163,9 +163,7 @@ export function ZoneBuilderView() {
           presetDistricts.map((district) => ({
             ...district,
             features: collection.features
-              .filter((feature) => district.id === "thu-duc"
-                ? ["thu-duc", "quan-2", "quan-9"].includes(String(feature.properties?.districtId))
-                : feature.properties?.districtId === district.id)
+              .filter((feature) => feature.properties?.districtId === district.id)
               .map((feature) => {
                 const wardKey = String(feature.properties?.wardKey ?? "");
                 return {

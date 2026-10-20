@@ -95,8 +95,7 @@ function ControlButton({ label, onClick, disabled = false, border = false, stand
 }
 
 function featureZoneId(feature: WardFeature) {
-  const districtId = ["quan-2", "quan-9"].includes(feature.properties.districtId) ? "thu-duc" : feature.properties.districtId;
-  return zoneId(districtId, compactZoneName(feature.properties.wardKey));
+  return zoneId(feature.properties.districtId, compactZoneName(feature.properties.wardKey));
 }
 
 function loadBoundaries() {
