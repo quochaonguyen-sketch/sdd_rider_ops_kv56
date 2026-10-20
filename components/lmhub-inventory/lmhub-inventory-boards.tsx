@@ -235,16 +235,16 @@ export function HeatLegend() {
   );
 }
 
-export function Seg<T extends string>({ value, onChange, options }: { value: T; onChange: (value: T) => void; options: { id: T; label: string }[] }) {
+export function Seg<T extends string>({ value, onChange, options, compact = false }: { value: T; onChange: (value: T) => void; options: { id: T; label: string }[]; compact?: boolean }) {
   return (
-    <div className="flex rounded-lg border border-[var(--color-rule)] bg-[var(--color-paper)] p-1">
+    <div className={cn("flex rounded-lg border border-[var(--color-rule)] bg-[var(--color-paper)]", compact ? "p-0.5" : "p-1")}>
       {options.map((option) => (
         <button
           key={option.id}
           type="button"
           onClick={() => onChange(option.id)}
           className={cn(
-            "rounded-md px-3 py-1.5 text-xs font-semibold",
+            compact ? "rounded px-2 py-1 text-[11px] font-semibold" : "rounded-md px-3 py-1.5 text-xs font-semibold",
             value === option.id ? "bg-[var(--color-graphite)] text-[var(--color-graphite-ink)]" : "text-[var(--color-ink-2)] hover:bg-[var(--color-paper-2)]",
           )}
         >

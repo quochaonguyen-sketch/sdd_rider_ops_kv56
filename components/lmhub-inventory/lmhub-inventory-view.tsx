@@ -187,32 +187,28 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
   const selectFocus = (focus: InventoryFocus) => {
     setSelected(focus);
     setPage(1);
-    if (window.matchMedia("(max-width: 1279px)").matches) {
-      requestAnimationFrame(() => orderPanelRef.current?.scrollIntoView({
+    requestAnimationFrame(() => orderPanelRef.current?.scrollIntoView({
         behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start",
       }));
-    }
   };
 
   return (
-    <div className="dashboard-control mx-auto max-w-[1680px] space-y-5">
-      <header className="dashboard-command-header">
+    <div className="dashboard-control mx-auto max-w-[1680px] space-y-2">
+      <header className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
         <div className="min-w-0">
-          <div className="dashboard-kicker"><span className="dashboard-live-dot" />Điều hành tồn · LMHub</div>
-          <h1>Tồn Delivery</h1>
-          <p>Lọc nhanh theo quận, tìm phường và chọn “Xem đơn” để xử lý tồn. Thủ Đức chỉ tính phạm vi cũ.</p>
+          <h1 className="text-base font-bold text-slate-900">Tồn Delivery</h1>
+          <p className="text-[11px] text-slate-500">Bấm tên phường hoặc số tổng để xem đơn.</p>
         </div>
         <div className="dashboard-command-actions">
-          <div className="min-w-[190px] rounded-xl border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2">
+          <div className="min-w-[150px] px-1">
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]">Cập nhật gần nhất</p>
-            <p className="font-mono text-sm font-bold text-[var(--color-ink)]">{formatDateTime(snapshotAt)}</p>
-            <p className="text-xs text-[var(--color-muted)]">{formatRelative(snapshotAt)}</p>
+            <p className="font-mono text-xs font-semibold text-[var(--color-ink)]">{formatDateTime(snapshotAt)}</p>
           </div>
-          <Button type="button" variant="secondary" onClick={() => void load()} disabled={loading}>
+          <Button type="button" variant="secondary" className="h-7 px-2 text-[11px]" onClick={() => void load()} disabled={loading}>
             <RefreshCcw size={16} className={loading ? "animate-spin" : undefined} /><span>Làm mới</span>
           </Button>
           {canQueue ? (
-            <Button type="button" onClick={() => void queueLmhub()} disabled={queueing || waitingSnapshot}>
+            <Button type="button" className="h-7 px-2 text-[11px]" onClick={() => void queueLmhub()} disabled={queueing || waitingSnapshot}>
               <Download size={16} className={queueing || waitingSnapshot ? "animate-pulse" : undefined} />
               <span>{queueing ? "Đang gửi yêu cầu..." : waitingSnapshot ? "Đang cập nhật dữ liệu" : "Lấy dữ liệu mới"}</span>
             </Button>
@@ -235,19 +231,19 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
         </div>
       ) : null}
 
-      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <StatTile label="Tổng tồn trong phạm vi" value={analytics.visible} hint="Thủ Đức cũ · Gò Vấp · Quận 12 · Hóc Môn" accent="ink" />
         <StatTile label="COT 1" value={analytics.cot1} hint="Tổng đơn thuộc COT 1" accent="blue" />
         <StatTile label="COT 2" value={analytics.cot2} hint="Tổng đơn thuộc COT 2" accent="teal" />
         <StatTile label="Phường cần ưu tiên" value={analytics.hotWards} hint="Từ 36 đơn tồn / phường" accent={analytics.hotWards ? "red" : "green"} />
       </section>
-      <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+      <div className="rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] leading-4 text-blue-900">
         <strong>Thủ Đức (cũ):</strong> chỉ gồm 12 phường, không tính Quận 2 và Quận 9.
         {excludedThuDuc > 0 ? <span> Đã loại {excludedThuDuc.toLocaleString("vi-VN")} đơn có phường ngoài phạm vi khỏi bảng và tổng tồn.</span> : null}
       </div>
-      <nav aria-label="Lọc quận tồn Delivery" className="flex flex-wrap gap-2">
+      <nav aria-label="Lọc quận tồn Delivery" className="flex flex-wrap gap-1">
         {[{ district: "all", label: "Tất cả quận", total: analytics.visible }, ...districtBoards.map((district) => ({ district: district.district, label: deliveryDistrictLabel(district.district), total: visibleTotal(district.totals, cot) }))].map((item) => (
-          <button key={item.district} type="button" aria-pressed={districtFilter === item.district} onClick={() => { setDistrictFilter(item.district); setSelected(null); setPage(1); }} className={districtFilter === item.district ? "flex min-h-11 items-center gap-3 rounded-xl border border-blue-600 bg-blue-600 px-4 text-sm font-semibold text-white" : "flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:border-blue-300 hover:text-blue-700"}>
+          <button key={item.district} type="button" aria-pressed={districtFilter === item.district} onClick={() => { setDistrictFilter(item.district); setSelected(null); setPage(1); }} className={districtFilter === item.district ? "flex min-h-7 items-center gap-2 rounded-md border border-blue-600 bg-blue-600 px-2 text-[11px] font-semibold text-white" : "flex min-h-7 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-600 hover:border-blue-300 hover:text-blue-700"}>
             {item.label}<span className="rounded-md bg-black/5 px-2 py-0.5 text-xs tabular-nums">{item.total.toLocaleString("vi-VN")}</span>
           </button>
         ))}
@@ -256,11 +252,11 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
       <div className="flex flex-wrap items-center gap-2">
         <span className="relative min-w-[240px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" size={16} />
-          <Input value={query} onChange={(e) => { setQuery(e.target.value); setSelected(null); setPage(1); }} placeholder="Tìm quận hoặc phường..." aria-label="Tìm quận hoặc phường tồn Delivery" className="pl-9" />
+          <Input value={query} onChange={(e) => { setQuery(e.target.value); setSelected(null); setPage(1); }} placeholder="Tìm quận hoặc phường..." aria-label="Tìm quận hoặc phường tồn Delivery" className="h-8 pl-9 text-xs" />
         </span>
-        <Seg value={cot} onChange={setCot} options={[{ id: "all", label: "Cả COT" }, { id: "cot1", label: "COT 1" }, { id: "cot2", label: "COT 2" }]} />
-        <Seg value={heat} onChange={setHeat} options={[{ id: "all", label: "Tất cả phường" }, { id: "hot", label: "Chỉ phường đỏ" }]} />
-        <HeatLegend />
+        <Seg compact value={cot} onChange={setCot} options={[{ id: "all", label: "Cả COT" }, { id: "cot1", label: "COT 1" }, { id: "cot2", label: "COT 2" }]} />
+        <Seg compact value={heat} onChange={setHeat} options={[{ id: "all", label: "Tất cả phường" }, { id: "hot", label: "Chỉ phường đỏ" }]} />
+        <details className="relative text-[11px] text-slate-500"><summary className="cursor-pointer py-1">Chú thích màu</summary><div className="absolute right-0 z-20 mt-1 min-w-60 rounded-lg border border-slate-200 bg-white p-2 shadow-sm"><HeatLegend /></div></details>
       </div>
 
       {error ? <div role="alert" className="dashboard-error">{error}</div> : null}
@@ -271,10 +267,10 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
         </div>
       ) : (
         <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-12">
-          <div className={selected ? "xl:col-span-8" : "xl:col-span-12"}>
+          <div className="xl:col-span-12">
             <DeliveryInventoryBoard districts={filtered} cot={cot} selected={selected} onSelect={selectFocus} forceExpanded={!!query || heat === "hot"} />
           </div>
-          {selected ? <aside ref={orderPanelRef} className="scroll-mt-4 xl:sticky xl:top-4 xl:col-span-4">
+          {selected ? <aside ref={orderPanelRef} className="scroll-mt-4 xl:col-span-12">
 
             <OrderPanel
               selected={selected}
@@ -384,13 +380,13 @@ function OrderPanel({
 function StatTile({ label, value, hint, accent }: { label: string; value: number; hint: string; accent: "ink" | "blue" | "teal" | "red" | "green" }) {
   const tone = { ink: "text-[var(--color-ink)]", blue: "text-[var(--color-accent)]", teal: "text-[var(--color-success)]", red: "text-[var(--color-error)]", green: "text-[var(--color-success)]" }[accent];
   return (
-    <article className="rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper)] px-4 py-4">
-      <div className="mb-3 flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">{label}</p>
+    <article className="rounded-lg border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2">
+      <div className="flex items-center justify-between gap-1">
+        <p className="text-[10px] font-semibold text-[var(--color-muted)]">{label}</p>
         {accent === "blue" ? <Truck size={15} className="text-[var(--color-accent)]" /> : accent === "red" ? <MapPin size={15} className="text-[var(--color-error)]" /> : <PackageCheck size={15} className="text-[var(--color-muted)]" />}
       </div>
-      <p className={"font-mono text-3xl font-bold tracking-tight " + tone}>{value.toLocaleString("vi-VN")}</p>
-      <p className="mt-1 text-xs text-[var(--color-muted)]">{hint}</p>
+      <p className={"font-mono text-xl font-bold leading-6 tracking-tight " + tone}>{value.toLocaleString("vi-VN")}</p>
+      <p className="text-[10px] leading-3 text-[var(--color-muted)]">{hint}</p>
     </article>
   );
 }
