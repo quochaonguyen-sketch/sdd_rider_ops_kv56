@@ -17,6 +17,7 @@ const updateMemberSchema = z.object({
   role: roleSchema.optional(),
   permissions: permissionsSchema.optional(),
 });
+const deleteMemberSchema = z.object({ id: z.string().uuid() });
 
 async function getAdminSession() {
   const client = await createClient();
@@ -144,4 +145,32 @@ export async function PATCH(request: Request) {
   }
 
   return NextResponse.json({ success: true, permissions });
+}
+
+export async function DELETE(request: Request) {
+  const session = await getAdminSession();
+  if ("error" in session) return session.error;
+
+  const parsed = deleteMemberSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ success: false, error: "Dữ liệu không hợp lệ" }, { status: 400 });
+  }
+  if (parsed.data.id === session.user.id) {
+    return NextResponse.json({ success: false, error: "Bạn không thể tự xóa quyền truy cập của mình" }, { status: 400 });
+  }
+
+  // Profiles are the Google sign-in allowlist. Keep the Auth account so an
+  // administrator can grant access again without deleting the user's identity.
+  const { data, error } = await session.admin.from("profiles")
+    .delete().eq("id", parsed.data.id).select("id,email").maybeSingle();
+  if (error) {
+    const message = error.code === "23503"
+      ? "Không thể xóa quyền vì thành viên đang có dữ liệu liên kết. Hãy xử lý dữ liệu liên kết trước."
+      : error.message;
+    return NextResponse.json({ success: false, error: message }, { status: 400 });
+  }
+  if (!data) {
+    return NextResponse.json({ success: false, error: "Không tìm thấy thành viên" }, { status: 404 });
+  }
+  return NextResponse.json({ success: true, message: `Đã xóa quyền truy cập của ${data.email ?? "thành viên"}` });
 }

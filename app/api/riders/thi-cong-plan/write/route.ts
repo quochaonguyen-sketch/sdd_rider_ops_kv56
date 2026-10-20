@@ -57,7 +57,7 @@ export async function PUT(request: Request) {
     await session.admin.from("activity_logs").insert({
       entity_type: "rider",
       action: "synced_to_thi_cong_plan",
-      message: `Synced ${result.updated} riders from web to Thi Công Plan`,
+      message: `Synced ${result.updated} riders from web to Plan chia tuyến new`,
       raw_data: { filters: parsed.data, ...result },
     });
     invalidateRidersCache();
@@ -65,7 +65,7 @@ export async function PUT(request: Request) {
     return NextResponse.json({ success: true, ...result });
   } catch (syncError) {
     return NextResponse.json(
-      { success: false, error: syncError instanceof Error ? syncError.message : "Không thể đồng bộ lên Thi Công Plan" },
+      { success: false, error: syncError instanceof Error ? syncError.message : "Không thể đồng bộ lên Plan chia tuyến new" },
       { status: 400 },
     );
   }

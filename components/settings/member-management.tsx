@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, LoaderCircle, ShieldCheck, UserPlus, UsersRound, X } from "lucide-react";
+import { ChevronDown, LoaderCircle, ShieldCheck, Trash2, UserPlus, UsersRound, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -97,6 +97,32 @@ export function MemberManagement() {
     setSuccess(`Đã cập nhật ${member.full_name ?? member.email}.`);
   }
 
+  async function deleteMember(member: Member) {
+    if (member.is_current_user || updatingId) return;
+    if (!window.confirm(`Xóa quyền truy cập của ${member.full_name ?? member.email} (${member.email})? Người này sẽ không còn được phép đăng nhập vào ứng dụng.`)) return;
+    setUpdatingId(member.id);
+    setError(null);
+    setSuccess(null);
+    try {
+      const response = await fetch("/api/admin/members", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: member.id }),
+      });
+      const result = await response.json().catch(() => null) as MembersResponse | null;
+      if (!response.ok || !result?.success) {
+        setError(result?.error ?? "Không thể xóa quyền truy cập");
+        return;
+      }
+      setMembers((current) => current.filter((item) => item.id !== member.id));
+      setSuccess(result.message ?? "Đã xóa quyền truy cập");
+    } catch {
+      setError("Không thể kết nối. Vui lòng thử lại.");
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
@@ -126,7 +152,7 @@ export function MemberManagement() {
           </div>
           <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full min-w-[820px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Thành viên</th><th className="px-4 py-3">Vai trò</th><th className="px-4 py-3">Quyền</th><th className="px-4 py-3">Đăng nhập gần nhất</th></tr></thead>
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Thành viên</th><th className="px-4 py-3">Vai trò</th><th className="px-4 py-3">Quyền</th><th className="px-4 py-3">Đăng nhập gần nhất</th><th className="px-4 py-3">Thao tác</th></tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {members.map((member) => (
                   <tr key={member.id} className="bg-white align-top">
@@ -140,7 +166,7 @@ export function MemberManagement() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <Select aria-label={`Vai trò của ${member.full_name ?? member.email}`} className="h-9 min-w-32" value={member.role} disabled={updatingId === member.id || member.is_current_user} onChange={(event) => void updateMember(member, { role: event.target.value as MemberRole, permissions: defaultPermissionsForRole(event.target.value) })}>
+                      <Select aria-label={`Vai trò của ${member.full_name ?? member.email}`} className="h-9 min-w-32" value={member.role} disabled={updatingId !== null || member.is_current_user} onChange={(event) => void updateMember(member, { role: event.target.value as MemberRole, permissions: defaultPermissionsForRole(event.target.value) })}>
                         <option value="member">Member</option>
                         <option value="viewer">Viewer</option>
                         <option value="leader">Leader</option>
@@ -150,14 +176,19 @@ export function MemberManagement() {
                     <td className="px-4 py-3 min-w-[240px]">
                       <PermissionMultiSelect
                         value={member.permissions}
-                        disabled={updatingId === member.id || member.role === "admin"}
+                        disabled={updatingId !== null || member.role === "admin"}
                         onChange={(permissions) => void updateMember(member, { permissions })}
                       />
                     </td>
                     <td className="px-4 py-3 text-slate-600">{formatDate(member.last_sign_in_at)}</td>
+                    <td className="px-4 py-3">
+                      <Button type="button" variant="destructive" disabled={updatingId !== null || member.is_current_user} title={member.is_current_user ? "Bạn không thể tự xóa quyền truy cập của mình" : `Xóa quyền truy cập của ${member.email}`} onClick={() => void deleteMember(member)}>
+                        <Trash2 size={16} />Xóa quyền truy cập
+                      </Button>
+                    </td>
                   </tr>
                 ))}
-                {!loading && members.length === 0 ? <tr><td colSpan={4} className="h-40 text-center text-slate-500">Chưa có thành viên.</td></tr> : null}
+                {!loading && members.length === 0 ? <tr><td colSpan={5} className="h-40 text-center text-slate-500">Chưa có thành viên.</td></tr> : null}
               </tbody>
             </table>
           </div>

@@ -371,10 +371,10 @@ export function RidersView({
     setPlanSyncing(false);
     if (!response.ok || !result?.success) {
       muteRealtimeUntilRef.current = 0;
-      setError(result?.error ?? "Không thể đồng bộ Thi Công Plan");
+      setError(result?.error ?? "Không thể đồng bộ Plan chia tuyến new");
       return;
     }
-    setSuccess(`Đã lấy ${result.synced_riders ?? 0} rider từ Thi Công Plan về web: thêm ${result.inserted_riders ?? 0}, cập nhật ${result.updated_riders ?? 0}${result.skipped_rows ? `; bỏ qua ${result.skipped_rows} dòng không có ID` : ""}.`);
+    setSuccess(`Đã lấy ${result.synced_riders ?? 0} rider từ Plan chia tuyến new về web: thêm ${result.inserted_riders ?? 0}, cập nhật ${result.updated_riders ?? 0}${result.skipped_rows ? `; bỏ qua ${result.skipped_rows} dòng không có ID` : ""}.`);
     muteBulkRealtime();
     await load();
   }
@@ -398,10 +398,10 @@ export function RidersView({
     setPlanWriteSyncing(false);
     if (!response.ok || !result?.success) {
       muteRealtimeUntilRef.current = 0;
-      setError(result?.error ?? "Không thể đồng bộ lên Thi Công Plan");
+      setError(result?.error ?? "Không thể đồng bộ lên Plan chia tuyến new");
       return;
     }
-    setSuccess(`Đã đẩy ${(result.updated ?? 0) + (result.appended ?? 0)} rider từ web lên Thi Công Plan: cập nhật ${result.updated ?? 0}, thêm mới ${result.appended ?? 0}${result.cleared ? `, xóa ${result.cleared}` : ""}.`);
+    setSuccess(`Đã đẩy ${(result.updated ?? 0) + (result.appended ?? 0)} rider từ web lên Plan chia tuyến new: cập nhật ${result.updated ?? 0}, thêm mới ${result.appended ?? 0}${result.cleared ? `, xóa ${result.cleared}` : ""}.`);
     muteBulkRealtime();
     await load();
   }
@@ -570,12 +570,12 @@ export function RidersView({
                 if (file) void importExcel(file);
               }}
             />
-            <Button type="button" variant="secondary" className="riders-action" disabled={planSyncing} onClick={() => void syncRidersFromPlan()} title="Lấy dữ liệu rider từ tab Thi Công Plan về website">
+            <Button type="button" variant="secondary" className="riders-action" disabled={planSyncing} onClick={() => void syncRidersFromPlan()} title="Lấy dữ liệu rider từ tab Plan chia tuyến new về website">
               <CloudDownload size={16} />
               <span className="hidden sm:inline">{planSyncing ? "Đang đồng bộ..." : "Đồng bộ Plan"}</span>
               <span className="sm:hidden">Plan</span>
             </Button>
-            <Button type="button" variant="secondary" className="riders-action" disabled={planWriteSyncing} onClick={() => void syncRidersToPlan()} title="Đẩy rider từ website lên tab Thi Công Plan">
+            <Button type="button" variant="secondary" className="riders-action" disabled={planWriteSyncing} onClick={() => void syncRidersToPlan()} title="Đẩy rider từ website lên tab Plan chia tuyến new">
               <Upload size={16} />
               <span className="hidden sm:inline">{planWriteSyncing ? "Đang đẩy..." : "Đẩy lên Plan"}</span>
               <span className="sm:hidden">Lên Plan</span>

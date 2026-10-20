@@ -2,7 +2,8 @@ import { createPrivateKey, createSign } from "node:crypto";
 
 export const THI_CONG_PLAN_SPREADSHEET_ID =
   process.env.THI_CONG_PLAN_SPREADSHEET_ID?.trim() || "1nc-jsQGOdUHIGjmIWQf01HUXJGS82XYglj46eXSzp8c";
-export const THI_CONG_PLAN_SHEET_NAME = "Thi Công Plan";
+// The Google Sheets tab includes a trailing space; A1 ranges must match exactly.
+export const THI_CONG_PLAN_SHEET_NAME = "Plan chia tuyến new ";
 
 export type ThiCongPlanRider = {
   kv: string | null;
@@ -128,7 +129,7 @@ function assertExpectedColumns(header: unknown[]) {
   ]);
   const mismatches = Array.from(expected).filter(([index, label]) => normalizeHeader(header[index]) !== label);
   if (mismatches.length > 0) {
-    throw new Error("Cấu trúc cột tab Thi Công Plan đã thay đổi; đã dừng đồng bộ để tránh cập nhật nhầm dữ liệu trên web");
+    throw new Error("Cấu trúc cột tab Plan chia tuyến new đã thay đổi; đã dừng đồng bộ để tránh cập nhật nhầm dữ liệu trên web");
   }
 }
 
@@ -151,7 +152,7 @@ export async function readRidersFromThiCongPlan(signal?: AbortSignal): Promise<T
   );
   const result = await response.json().catch(() => null) as SheetValuesResponse | null;
   if (!response.ok) {
-    throw new Error(result?.error?.message ?? "Google Sheets API từ chối đọc tab Thi Công Plan");
+    throw new Error(result?.error?.message ?? "Google Sheets API từ chối đọc tab Plan chia tuyến new");
   }
 
   const [header = [], ...rows] = result?.values ?? [];
@@ -166,7 +167,7 @@ export async function readRidersFromThiCongPlan(signal?: AbortSignal): Promise<T
       continue;
     }
     if (riders.has(riderCode)) {
-      throw new Error(`ID ${riderCode} bị trùng trên tab Thi Công Plan; hãy xử lý dòng trùng trước khi đồng bộ`);
+      throw new Error(`ID ${riderCode} bị trùng trên tab Plan chia tuyến new; hãy xử lý dòng trùng trước khi đồng bộ`);
     }
 
     riders.set(riderCode, {
@@ -213,9 +214,9 @@ export async function writeRidersToThiCongPlan(
     { headers: { Authorization: `Bearer ${token}` }, cache: "no-store", signal },
   );
   const source = await readResponse.json().catch(() => null) as { values?: unknown[][]; error?: { message?: string } } | null;
-  if (!readResponse.ok) throw new Error(source?.error?.message ?? "Google Sheets API từ chối đọc tab Thi Công Plan");
+  if (!readResponse.ok) throw new Error(source?.error?.message ?? "Google Sheets API từ chối đọc tab Plan chia tuyến new");
   const rows = source?.values ?? [];
-  if (rows.length === 0) throw new Error("Tab Thi Công Plan trống");
+  if (rows.length === 0) throw new Error("Tab Plan chia tuyến new trống");
 
   const [_header = [], ...existingRows] = rows;
   const rowNumbersByKey = new Map<string, number>();
@@ -245,7 +246,7 @@ export async function writeRidersToThiCongPlan(
     if (!rowNumber) {
       const blankRow = blankRowNumbers.pop();
       if (!blankRow) {
-        throw new Error("Tab Thi Công Plan đã hết hàng trống A:L. Cần tạo thêm hàng không khóa trước khi đồng bộ.");
+        throw new Error("Tab Plan chia tuyến new đã hết hàng trống A:L. Cần tạo thêm hàng không khóa trước khi đồng bộ.");
       }
       data.push({
         range: a1Range(`A${blankRow}:L${blankRow}`),

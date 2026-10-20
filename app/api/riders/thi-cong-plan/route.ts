@@ -38,7 +38,7 @@ export async function POST(request: Request) {
   try {
     const source = await readRidersFromThiCongPlan(request.signal);
     if (source.riders.length === 0) {
-      return NextResponse.json({ success: false, error: "Tab Thi Công Plan không có rider hợp lệ để đồng bộ" }, { status: 400 });
+      return NextResponse.json({ success: false, error: "Tab Plan chia tuyến new không có rider hợp lệ để đồng bộ" }, { status: 400 });
     }
 
     const existingCodes = new Set<string>();
@@ -76,14 +76,14 @@ export async function POST(request: Request) {
     await session.admin.from("activity_logs").insert({
       entity_type: "rider",
       action: "synced_from_thi_cong_plan",
-      message: `Synced ${result.synced_riders} riders from Thi Công Plan to web`,
+      message: `Synced ${result.synced_riders} riders from Plan chia tuyến new to web`,
       raw_data: result,
     });
     invalidateRidersCache();
     return NextResponse.json(result);
   } catch (syncError) {
     return NextResponse.json(
-      { success: false, error: syncError instanceof Error ? syncError.message : "Không thể đồng bộ dữ liệu từ Thi Công Plan" },
+      { success: false, error: syncError instanceof Error ? syncError.message : "Không thể đồng bộ dữ liệu từ Plan chia tuyến new" },
       { status: 400 },
     );
   }

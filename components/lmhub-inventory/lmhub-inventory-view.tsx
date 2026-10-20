@@ -20,6 +20,7 @@ import {
   buildAnalytics,
   buildBoard,
   cotBucket,
+  deliveryInventoryRows,
   filterBoard,
   formatDateTime,
   formatRelative,
@@ -72,7 +73,7 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
       from += PAGE_ROWS;
       if (from > 100000) break;
     }
-    setRows(collected);
+    setRows(deliveryInventoryRows(collected));
     setSnapshotAt((latest.data as { snapshot_at: string | null }).snapshot_at ?? null);
     setLoading(false);
   }, []);
