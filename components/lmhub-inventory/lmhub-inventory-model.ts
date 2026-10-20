@@ -1,4 +1,4 @@
-import { operationalDistrict } from "@/lib/locations/operational-districts";
+import { OPERATIONAL_DISTRICTS, legacyThuDucWardName, operationalDistrict } from "../../lib/locations/operational-districts.ts";
 
 export type Area = "KV5" | "KV6";
 export type CotFilter = "all" | "cot1" | "cot2";
@@ -38,9 +38,23 @@ export function deliveryDistrictName(value: string): string | null {
 
 export function deliveryInventoryRows(rows: InventoryRow[]): InventoryRow[] {
   return rows.flatMap((row) => {
-    const district = deliveryDistrictName(row.district);
-    return district ? [{ ...row, district, area: operationalDistrict(district)!.area }] : [];
+    const district = operationalDistrict(row.district);
+    if (!district) return [];
+    const oldWard = district.id === "thu-duc" ? legacyThuDucWardName(row.ward) : null;
+    if (district.id === "thu-duc" && !oldWard) return [];
+    return [{ ...row, district: district.name, area: district.area, ward: oldWard ? `Phường ${oldWard}` : row.ward }];
   });
+}
+
+export function deliveryDistrictLabel(value: string) {
+  return value === "Thủ Đức" ? "Thủ Đức (cũ)" : value;
+}
+
+export function buildDeliveryDistrictBoards(rows: InventoryRow[]): DistrictAgg[] {
+  const scoped = deliveryInventoryRows(rows);
+  const boards = [...buildBoard(scoped, "KV5"), ...buildBoard(scoped, "KV6")];
+  return OPERATIONAL_DISTRICTS.map((district) => boards.find((board) => board.district === district.name)
+    ?? { district: district.name, area: district.area, wards: [], totals: emptyCounts() });
 }
 
 export function focusKey(focus: InventoryFocus) {
@@ -95,12 +109,13 @@ export function visibleBoardTotal(districts: DistrictAgg[], cot: CotFilter) {
 }
 
 export function filterBoard(districts: DistrictAgg[], query: string, cot: CotFilter, heat: HeatFilter): DistrictAgg[] {
-  const q = normalize(query);
+  const q = normalize(query).replace(/[()]/g, "");
+  const districtSearch = (district: string) => `${district} ${deliveryDistrictLabel(district).replace(/[()]/g, "")}`;
   return districts
     .map((district) => {
       const wards = district.wards
         .filter((ward) => heat === "all" || heatLevel(visibleTotal(ward, cot)) === "red")
-        .filter((ward) => !q || normalize(`${ward.district} ${ward.ward}`).includes(q))
+        .filter((ward) => !q || normalize(`${districtSearch(ward.district)} ${ward.ward}`).includes(q))
         .sort((a, b) => {
           const diff = visibleTotal(b, cot) - visibleTotal(a, cot);
           if (diff) return diff;
@@ -109,13 +124,13 @@ export function filterBoard(districts: DistrictAgg[], query: string, cot: CotFil
       return {
         ...district,
         wards,
-        totals: district.wards.reduce((sum, ward) => addCounts(sum, ward), emptyCounts()),
+        totals: wards.reduce((sum, ward) => addCounts(sum, ward), emptyCounts()),
       };
     })
     .filter((district) => {
       if (heat === "hot") return district.wards.length > 0;
       if (!q) return true;
-      return district.wards.length > 0 || normalize(district.district).includes(q);
+      return district.wards.length > 0 || normalize(districtSearch(district.district)).includes(q);
     })
     .sort((a, b) => visibleTotal(b.totals, cot) - visibleTotal(a.totals, cot));
 }

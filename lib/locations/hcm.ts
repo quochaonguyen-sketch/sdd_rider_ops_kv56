@@ -1,4 +1,4 @@
-import { OPERATIONAL_DISTRICTS } from "./operational-districts.ts";
+import { OPERATIONAL_DISTRICTS, THU_DUC_LEGACY_WARDS } from "./operational-districts.ts";
 
 export type WardDefinition = {
   name: string;
@@ -177,7 +177,7 @@ export const hcmDistricts: DistrictDefinition[] = OPERATIONAL_DISTRICTS.map((dis
   aliases: [...district.aliases],
   wards: district.id === "thu-duc"
     ? [
-        ...["Bình Chiểu", "Tam Bình", "Tam Phú", "Linh Đông", "Linh Tây", "Linh Chiểu", "Linh Trung", "Linh Xuân", "Hiệp Bình Chánh", "Hiệp Bình Phước", "Trường Thọ", "Bình Thọ"].map((name) => ({ name })),
+        ...THU_DUC_LEGACY_WARDS.map((name) => ({ name })),
       ]
     : legacyDistricts.find((item) => item.id === district.id)?.wards ?? [],
 }));

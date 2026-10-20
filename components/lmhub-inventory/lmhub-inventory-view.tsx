@@ -8,8 +8,10 @@ import { useSupabaseRealtime } from "@/hooks/use-supabase-realtime";
 import { useReportInitialDataLoading } from "@/components/layout/app-loading-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { BarChart, ChartHead, Donut, RiskStrip, ShareRow } from "@/components/lmhub-inventory/lmhub-inventory-charts";
-import { AreaBoard, HeatLegend, Seg } from "@/components/lmhub-inventory/lmhub-inventory-boards";
+import { BarChart, ChartHead, RiskStrip } from "@/components/lmhub-inventory/lmhub-inventory-charts";
+import { HeatLegend, Seg } from "@/components/lmhub-inventory/lmhub-inventory-boards";
+import { DeliveryInventoryBoard } from "@/components/lmhub-inventory/delivery-inventory-board";
+import { operationalDistrict } from "@/lib/locations/operational-districts";
 import {
   COLUMNS,
   PAGE_ROWS,
@@ -18,17 +20,17 @@ import {
   UNKNOWN_DISTRICT,
   UNKNOWN_WARD,
   buildAnalytics,
-  buildBoard,
+  buildDeliveryDistrictBoards,
   cotBucket,
   deliveryInventoryRows,
+  deliveryDistrictLabel,
   filterBoard,
   formatDateTime,
   formatRelative,
   normalize,
   normalizeRow,
-  pct,
   toTime,
-  visibleBoardTotal,
+  visibleTotal,
   type CotFilter,
   type HeatFilter,
   type InventoryFocus,
@@ -43,6 +45,8 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
   const [query, setQuery] = useState("");
   const [cot, setCot] = useState<CotFilter>("all");
   const [heat, setHeat] = useState<HeatFilter>("all");
+  const [districtFilter, setDistrictFilter] = useState("all");
+  const [excludedThuDuc, setExcludedThuDuc] = useState(0);
   const [selected, setSelected] = useState<InventoryFocus | null>(null);
   const [page, setPage] = useState(1);
   const [queueing, setQueueing] = useState(false);
@@ -73,7 +77,9 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
       from += PAGE_ROWS;
       if (from > 100000) break;
     }
-    setRows(deliveryInventoryRows(collected));
+    const scopedRows = deliveryInventoryRows(collected);
+    setExcludedThuDuc(collected.filter((row) => operationalDistrict(row.district)?.id === "thu-duc").length - scopedRows.filter((row) => row.district === "Thủ Đức").length);
+    setRows(scopedRows);
     setSnapshotAt((latest.data as { snapshot_at: string | null }).snapshot_at ?? null);
     setLoading(false);
   }, []);
@@ -84,6 +90,8 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
     timerRef.current = setTimeout(() => void load(), RELOAD_DEBOUNCE_MS);
   }, [load]);
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+  // Initial async data load also sets the loading indicator before the request.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load(); }, [load]);
   useSupabaseRealtime({ table: "lmhub_inventory_rows", onChange: scheduleLoad, debounceMs: 800 });
 
@@ -95,10 +103,12 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
     return payload;
   }, []);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void refreshQueueStatus(); }, [refreshQueueStatus]);
   useSupabaseRealtime({ table: "lmhub_fetch_jobs", onChange: () => { void refreshQueueStatus(); }, debounceMs: 400 });
 
   const baselineRef = useRef<string | null>(null);
+  const orderPanelRef = useRef<HTMLElement | null>(null);
   const queueLmhub = useCallback(async () => {
     if (queueing) return;
     setQueueing(true);
@@ -149,19 +159,17 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
     }
   }, [waitingSnapshot, snapshotAt]);
 
-  const boards = useMemo(() => {
-    const kvRows = rows.filter((row) => row.area === "KV5" || row.area === "KV6");
-    return { kv5: buildBoard(kvRows, "KV5"), kv6: buildBoard(kvRows, "KV6"), all: kvRows.length, kv5n: kvRows.filter((row) => row.area === "KV5").length, kv6n: kvRows.filter((row) => row.area === "KV6").length };
-  }, [rows]);
+  const districtBoards = useMemo(() => buildDeliveryDistrictBoards(rows), [rows]);
 
-  const filtered = useMemo(() => ({ kv5: filterBoard(boards.kv5, query, cot, heat), kv6: filterBoard(boards.kv6, query, cot, heat) }), [boards, query, cot, heat]);
-  const analytics = useMemo(() => buildAnalytics(boards.kv5, boards.kv6, cot), [boards, cot]);
+  const filtered = useMemo(() => filterBoard(districtBoards.filter((district) => districtFilter === "all" || district.district === districtFilter), query, cot, heat), [districtBoards, districtFilter, query, cot, heat]);
+  const analytics = useMemo(() => buildAnalytics(districtBoards, [], cot), [districtBoards, cot]);
   const selectedOrders = useMemo(() => {
     if (!selected) return [];
     const q = normalize(query);
     return rows
       .filter((row) => {
         if (row.area !== selected.area) return false;
+        if (districtFilter !== "all" && row.district !== districtFilter) return false;
         if ((row.district || UNKNOWN_DISTRICT) !== selected.district) return false;
         if (selected.ward && (row.ward || UNKNOWN_WARD) !== selected.ward) return false;
         if (cot !== "all" && cotBucket(row.cot_group) !== cot) return false;
@@ -169,7 +177,7 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
         return true;
       })
       .sort((a, b) => toTime(b.received_time) - toTime(a.received_time));
-  }, [rows, selected, query, cot]);
+  }, [rows, selected, query, cot, districtFilter]);
 
   const pageCount = Math.max(1, Math.ceil(selectedOrders.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
@@ -179,6 +187,11 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
   const selectFocus = (focus: InventoryFocus) => {
     setSelected(focus);
     setPage(1);
+    if (window.matchMedia("(max-width: 1279px)").matches) {
+      requestAnimationFrame(() => orderPanelRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start",
+      }));
+    }
   };
 
   return (
@@ -186,12 +199,12 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
       <header className="dashboard-command-header">
         <div className="min-w-0">
           <div className="dashboard-kicker"><span className="dashboard-live-dot" />Điều hành tồn · LMHub</div>
-          <h1>Tồn khu vực</h1>
-          <p>KV5 rồi KV6 xếp dọc. Thu/mở quận. Bấm quận hoặc phường để xem danh sách đơn bên phải.</p>
+          <h1>Tồn Delivery</h1>
+          <p>Lọc nhanh theo quận, tìm phường và chọn “Xem đơn” để xử lý tồn. Thủ Đức chỉ tính phạm vi cũ.</p>
         </div>
         <div className="dashboard-command-actions">
           <div className="min-w-[190px] rounded-xl border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]">Snapshot</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]">Cập nhật gần nhất</p>
             <p className="font-mono text-sm font-bold text-[var(--color-ink)]">{formatDateTime(snapshotAt)}</p>
             <p className="text-xs text-[var(--color-muted)]">{formatRelative(snapshotAt)}</p>
           </div>
@@ -201,16 +214,16 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
           {canQueue ? (
             <Button type="button" onClick={() => void queueLmhub()} disabled={queueing || waitingSnapshot}>
               <Download size={16} className={queueing || waitingSnapshot ? "animate-pulse" : undefined} />
-              <span>{queueing ? "Đang đẩy..." : waitingSnapshot ? "Đang chờ worker" : "Fetch data"}</span>
+              <span>{queueing ? "Đang gửi yêu cầu..." : waitingSnapshot ? "Đang cập nhật dữ liệu" : "Lấy dữ liệu mới"}</span>
             </Button>
           ) : null}
         </div>
       </header>
 
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <StatusChip live={!busy} label={busy ? "Worker đang chạy" : "Hàng đợi trống"} />
+        <StatusChip live={!busy} label={busy ? "Đang cập nhật" : "Sẵn sàng"} />
         <span className="rounded-full border border-[var(--color-rule)] bg-[var(--color-paper)] px-2.5 py-1 font-medium text-[var(--color-ink-2)]">
-          {queueMeta ? `${queueMeta.lastStatus || "EMPTY"} · P${queueMeta.pending} R${queueMeta.running}` : "Chưa đọc hàng đợi"}
+          {queueMeta ? `${queueMeta.pending} yêu cầu chờ · ${queueMeta.running} đang xử lý` : "Đang kiểm tra cập nhật"}
         </span>
         <span className="text-[var(--color-muted)]">{formatRelative(snapshotAt)}</span>
       </div>
@@ -223,41 +236,27 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
       ) : null}
 
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <StatTile label="Tổng tồn KV5 + KV6" value={boards.all} hint={`${analytics.districts} quận · ${analytics.wards} phường`} accent="ink" />
-        <StatTile label="Khu vực 5" value={boards.kv5n} hint={`${pct(boards.kv5n, boards.all)} tổng tồn`} accent="blue" />
-        <StatTile label="Khu vực 6" value={boards.kv6n} hint={`${pct(boards.kv6n, boards.all)} tổng tồn`} accent="teal" />
-        <StatTile label="Phường đỏ" value={analytics.hotWards} hint="≥ 36 đơn / phường" accent={analytics.hotWards ? "red" : "green"} />
+        <StatTile label="Tổng tồn trong phạm vi" value={analytics.visible} hint="Thủ Đức cũ · Gò Vấp · Quận 12 · Hóc Môn" accent="ink" />
+        <StatTile label="COT 1" value={analytics.cot1} hint="Tổng đơn thuộc COT 1" accent="blue" />
+        <StatTile label="COT 2" value={analytics.cot2} hint="Tổng đơn thuộc COT 2" accent="teal" />
+        <StatTile label="Phường cần ưu tiên" value={analytics.hotWards} hint="Từ 36 đơn tồn / phường" accent={analytics.hotWards ? "red" : "green"} />
       </section>
-
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <article className="xl:col-span-4 overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
-          <ChartHead title="Cơ cấu khu vực" caption="Tỷ trọng tồn theo KV và COT" />
-          <div className="flex items-center gap-5 px-5 pb-5">
-            <Donut kv5={visibleBoardTotal(boards.kv5, cot)} kv6={visibleBoardTotal(boards.kv6, cot)} />
-            <div className="min-w-0 flex-1 space-y-3">
-              <ShareRow label="KV5" value={visibleBoardTotal(boards.kv5, cot)} total={analytics.visible} tone="var(--color-accent)" />
-              <ShareRow label="KV6" value={visibleBoardTotal(boards.kv6, cot)} total={analytics.visible} tone="var(--color-success)" />
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <MiniMetric label="COT 1" value={analytics.cot1} />
-                <MiniMetric label="COT 2" value={analytics.cot2} />
-              </div>
-            </div>
-          </div>
-        </article>
-        <article className="xl:col-span-8 overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
-          <ChartHead title="Áp lực theo quận" caption="Top quận còn tồn — màu theo mức rủi ro" />
-          <div className="px-5 pb-5"><BarChart rows={analytics.topDistricts} /></div>
-        </article>
-        <article className="xl:col-span-12 overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
-          <ChartHead title="Phổ rủi ro phường" caption="Hết tồn / ít / vừa / cao / đỏ" />
-          <div className="px-5 pb-5"><RiskStrip bins={analytics.heatBins} /></div>
-        </article>
-      </section>
+      <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+        <strong>Thủ Đức (cũ):</strong> chỉ gồm 12 phường, không tính Quận 2 và Quận 9.
+        {excludedThuDuc > 0 ? <span> Đã loại {excludedThuDuc.toLocaleString("vi-VN")} đơn có phường ngoài phạm vi khỏi bảng và tổng tồn.</span> : null}
+      </div>
+      <nav aria-label="Lọc quận tồn Delivery" className="flex flex-wrap gap-2">
+        {[{ district: "all", label: "Tất cả quận", total: analytics.visible }, ...districtBoards.map((district) => ({ district: district.district, label: deliveryDistrictLabel(district.district), total: visibleTotal(district.totals, cot) }))].map((item) => (
+          <button key={item.district} type="button" aria-pressed={districtFilter === item.district} onClick={() => { setDistrictFilter(item.district); setSelected(null); setPage(1); }} className={districtFilter === item.district ? "flex min-h-11 items-center gap-3 rounded-xl border border-blue-600 bg-blue-600 px-4 text-sm font-semibold text-white" : "flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:border-blue-300 hover:text-blue-700"}>
+            {item.label}<span className="rounded-md bg-black/5 px-2 py-0.5 text-xs tabular-nums">{item.total.toLocaleString("vi-VN")}</span>
+          </button>
+        ))}
+      </nav>
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="relative min-w-[240px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" size={16} />
-          <Input value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} placeholder="Tìm quận, phường, mã đơn" className="pl-9" />
+          <Input value={query} onChange={(e) => { setQuery(e.target.value); setSelected(null); setPage(1); }} placeholder="Tìm quận hoặc phường..." aria-label="Tìm quận hoặc phường tồn Delivery" className="pl-9" />
         </span>
         <Seg value={cot} onChange={setCot} options={[{ id: "all", label: "Cả COT" }, { id: "cot1", label: "COT 1" }, { id: "cot2", label: "COT 2" }]} />
         <Seg value={heat} onChange={setHeat} options={[{ id: "all", label: "Tất cả phường" }, { id: "hot", label: "Chỉ phường đỏ" }]} />
@@ -272,11 +271,11 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
         </div>
       ) : (
         <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-12">
-          <div className="space-y-4 xl:col-span-6">
-            <AreaBoard title="Khu vực 5" districts={filtered.kv5} cot={cot} selected={selected} updatedAt={snapshotAt} onSelect={selectFocus} />
-            <AreaBoard title="Khu vực 6" districts={filtered.kv6} cot={cot} selected={selected} updatedAt={snapshotAt} onSelect={selectFocus} />
+          <div className={selected ? "xl:col-span-8" : "xl:col-span-12"}>
+            <DeliveryInventoryBoard districts={filtered} cot={cot} selected={selected} onSelect={selectFocus} forceExpanded={!!query || heat === "hot"} />
           </div>
-          <aside className="xl:sticky xl:top-4 xl:col-span-6">
+          {selected ? <aside ref={orderPanelRef} className="scroll-mt-4 xl:sticky xl:top-4 xl:col-span-4">
+
             <OrderPanel
               selected={selected}
               orders={pageOrders}
@@ -287,9 +286,16 @@ export function LmhubInventoryView({ canQueue = false }: { canQueue?: boolean })
               onNext={() => setPage((value) => Math.min(pageCount, value + 1))}
               onClose={() => setSelected(null)}
             />
-          </aside>
+          </aside> : null}
         </div>
       )}
+      <details className="rounded-2xl border border-slate-200 bg-white">
+        <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-700">Biểu đồ phân tích tồn</summary>
+        <div className="grid gap-4 p-4 lg:grid-cols-2">
+          <article><ChartHead title="Tồn theo quận" caption="Chỉ tính địa bàn trong phạm vi" /><div className="px-5 pb-5"><BarChart rows={analytics.topDistricts.map((district) => ({ ...district, label: deliveryDistrictLabel(district.label) }))} /></div></article>
+          <article><ChartHead title="Mức tồn theo phường" caption="Phân bố mức độ ưu tiên xử lý" /><div className="px-5 pb-5"><RiskStrip bins={analytics.heatBins} /></div></article>
+        </div>
+      </details>
     </div>
   );
 }
@@ -328,7 +334,7 @@ function OrderPanel({
     <section className="overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-paper)]">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-rule)] px-4 py-3">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">{selected.area} · {selected.district}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">{selected.area} · {deliveryDistrictLabel(selected.district)}</p>
           <h2 className="text-base font-bold text-[var(--color-ink)]">{selected.ward ?? "Tất cả phường trong quận"}</h2>
           <p className="text-sm text-[var(--color-muted)]">{total.toLocaleString("vi-VN")} đơn khớp lọc</p>
         </div>
@@ -349,7 +355,7 @@ function OrderPanel({
           </thead>
           <tbody>
             {!orders.length ? (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-[var(--color-muted)]">Không có đơn. Phường/quận này đang hết tồn.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-10 text-center text-[var(--color-muted)]">Không có đơn khớp bộ lọc trong dữ liệu cập nhật gần nhất.</td></tr>
             ) : orders.map((row) => (
               <tr key={row.shipment_id} className="border-t border-[var(--color-rule)]">
                 <td className="px-4 py-3 font-mono text-[13px] font-semibold text-[var(--color-ink)]">{row.shipment_id}</td>
@@ -395,14 +401,5 @@ function StatusChip({ live, label }: { live: boolean; label: string }) {
       <span className={"h-1.5 w-1.5 rounded-full " + (live ? "bg-[var(--color-success)]" : "animate-pulse bg-[var(--color-warning)]")} />
       {label}
     </span>
-  );
-}
-
-function MiniMetric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg bg-[var(--color-paper-2)] px-2.5 py-2">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">{label}</p>
-      <p className="font-mono text-sm font-bold text-[var(--color-ink)]">{value.toLocaleString("vi-VN")}</p>
-    </div>
   );
 }

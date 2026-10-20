@@ -8,6 +8,14 @@ export const OPERATIONAL_DISTRICTS = [
 
 export const OPERATIONAL_DISTRICT_NAMES: string[] = OPERATIONAL_DISTRICTS.map((district) => district.name);
 export const BACKUP_DISTRICT = "BK";
+export const THU_DUC_LEGACY_WARDS = ["Bình Chiểu", "Tam Bình", "Tam Phú", "Linh Đông", "Linh Tây", "Linh Chiểu", "Linh Trung", "Linh Xuân", "Hiệp Bình Chánh", "Hiệp Bình Phước", "Trường Thọ", "Bình Thọ"] as const;
+
+export function legacyThuDucWardName(value: string | null | undefined): string | null {
+  const ward = (value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "d").toLowerCase().trim().replace(/^(?:phuong|ward)\s+|^p[.\s]+/, "");
+  const key = districtKey(ward);
+  return THU_DUC_LEGACY_WARDS.find((name) => districtKey(name) === key) ?? null;
+}
 
 function districtKey(value: string | null | undefined) {
   return (value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
